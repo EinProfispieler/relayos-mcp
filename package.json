@@ -1,0 +1,57 @@
+{
+  "name": "relayos-mcp",
+  "version": "0.1.0",
+  "description": "RelayOS — MCP server for structured, audited Claude ↔ Codex task handoffs.",
+  "license": "MIT",
+  "author": "Randy",
+  "keywords": [
+    "mcp",
+    "claude-code",
+    "codex",
+    "ai-agents",
+    "handoff",
+    "audit",
+    "workflow",
+    "relayos"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/EinProfispieler/relayos-mcp.git"
+  },
+  "homepage": "https://github.com/EinProfispieler/relayos-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/EinProfispieler/relayos-mcp/issues"
+  },
+  "type": "module",
+  "bin": {
+    "relayos-mcp": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.0",
+    "ulid": "^2.4.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
