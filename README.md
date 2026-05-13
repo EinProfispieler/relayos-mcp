@@ -87,9 +87,17 @@ npm run build
 Detailed install snippets, the full tools table, and end-to-end examples are
 below.
 
-## What's in v0.4.1
+## Walkthroughs
 
-Fourteen MCP tools, grouped by purpose:
+Start here if you are new to the project:
+
+- [**docs/QUICK_DEMO.md**](docs/QUICK_DEMO.md) — a 5-step Claude → RelayOS → Codex demo using plain English.
+- [**docs/ROOKIE_MODE.md**](docs/ROOKIE_MODE.md) — the supported chat-only workflow, including the risk gate.
+- [**docs/LAUNCH.md**](docs/LAUNCH.md) — the `relayos launch` CLI helper for printing the exact command to run the target.
+
+## What you get
+
+Fourteen MCP tools, plus a small CLI helper:
 
 - **Creating handoffs.** `create_quick_handoff`,
   `create_handoff_from_template`, `create_handoff` — from one-shot to fully
@@ -102,6 +110,9 @@ Fourteen MCP tools, grouped by purpose:
   handoff.
 - **Diagnostics.** `doctor`, `inspect_config`, `list_templates` —
   health checks, effective config, and template discovery.
+- **CLI helper.** `relayos launch` — prints the launch command for the
+  newest open handoff (or a specific id). Print-only, never spawns.
+  See [`docs/LAUNCH.md`](docs/LAUNCH.md).
 
 Full table with descriptions: see [Tools](#tools) below.
 
@@ -239,7 +250,8 @@ supported interface.
 
 When `auto_spawn=false` (the default), RelayOS validates, writes the envelope,
 appends audit lines, and returns a ready-to-paste `launch_command` — the source
-agent (or you) runs the target itself.
+agent (or you) runs the target itself. You can also recover the same line at
+any time from a terminal with [`relayos launch`](docs/LAUNCH.md).
 
 `validate_handoff` accepts candidate envelopes wrapped as `{ "payload": ... }`
 so MCP clients pass the full candidate through to RelayOS for validation. Legacy
