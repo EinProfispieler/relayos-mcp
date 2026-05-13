@@ -1,5 +1,8 @@
+import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { createAuditWriter } from "../src/audit.js";
 import { runCli } from "../src/cli.js";
@@ -13,6 +16,7 @@ import type { Envelope } from "../src/schema.js";
 import { createHandoff } from "../src/tools/create_handoff.js";
 import { sampleInput, tempLayout } from "./_helpers.js";
 
+const execFileAsync = promisify(execFile);
 const cleanups: Array<() => void> = [];
 let previousHandoffDir: string | undefined;
 
@@ -231,4 +235,29 @@ describe("relayos launch", () => {
     expect(stdout).toBe("");
     expect(stderr).toContain("out of range");
   });
+
+  it.skipIf(!existsSync(join(process.cwd(), "dist", "cli.js")))(
+    "bin wrapper invokes the built CLI without a Node syntax error",
+    async () => {
+      const { layout } = await withLayout();
+      let stdout = "";
+      let stderr = "";
+
+      try {
+        ({ stdout, stderr } = await execFileAsync(
+          join(process.cwd(), "bin", "relayos"),
+          ["launch", "latest"],
+          { env: { ...process.env, HANDOFF_DIR: layout.root } },
+        ));
+      } catch (error) {
+        const failure = error as { stdout?: string; stderr?: string };
+        stdout = failure.stdout ?? "";
+        stderr = failure.stderr ?? "";
+      }
+
+      expect(`${stdout}${stderr}`).not.toContain(
+        "SyntaxError: Invalid or unexpected token",
+      );
+    },
+  );
 });
