@@ -52,11 +52,11 @@ trigger.
 
 ## Rookie Mode
 
-Rookie Mode is the supported workflow for users who do not want to write
-envelopes by hand. You talk to one Claude Code session; Claude calls
-`create_quick_handoff` for you; Codex reads its assignment via
-`read_latest_handoff` when you switch to the Codex terminal. Two drop-in
-files do the wiring: a Claude Code subagent
+Rookie Mode is the supported workflow for users who do not want to think
+about handoff envelopes, template names, or which CLI to invoke when. You
+talk to one Claude Code session; Claude calls `create_quick_handoff` for
+you; Codex reads its assignment via `read_latest_handoff` when you switch
+to the Codex terminal. Two drop-in files do the wiring: a Claude Code subagent
 ([`examples/claude-subagents/relayos-orchestrator.md`](examples/claude-subagents/relayos-orchestrator.md))
 and a Codex `AGENTS.md` snippet
 ([`examples/codex/AGENTS.md`](examples/codex/AGENTS.md)). Full walkthrough:
@@ -132,7 +132,7 @@ thing: how a single task gets handed from one coding agent to another.
 ## Install
 
 ```bash
-git clone <repo> relayos-mcp && cd relayos-mcp
+git clone https://github.com/EinProfispieler/RelayOS.git && cd RelayOS
 npm install
 npm run build           # produces dist/index.js
 ./scripts/install.sh    # prints registration snippets for your MCP clients
