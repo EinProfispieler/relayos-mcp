@@ -94,6 +94,7 @@ Start here if you are new to the project:
 - [**docs/QUICK_DEMO.md**](docs/QUICK_DEMO.md) — a 5-step Claude → RelayOS → Codex demo using plain English.
 - [**docs/ROOKIE_MODE.md**](docs/ROOKIE_MODE.md) — the supported chat-only workflow, including the risk gate.
 - [**docs/LAUNCH.md**](docs/LAUNCH.md) — the `relayos launch` CLI helper for printing the exact command to run the target.
+- [**docs/CHECKPOINTS.md**](docs/CHECKPOINTS.md) — `relayos checkpoint` snapshots HEAD + status + diff + untracked files before risky handoffs.
 
 ## What you get
 
@@ -110,9 +111,11 @@ Fourteen MCP tools, plus a small CLI helper:
   handoff.
 - **Diagnostics.** `doctor`, `inspect_config`, `list_templates` —
   health checks, effective config, and template discovery.
-- **CLI helper.** `relayos launch` — prints the launch command for the
+- **CLI helpers.** `relayos launch` — prints the launch command for the
   newest open handoff (or a specific id). Print-only, never spawns.
-  See [`docs/LAUNCH.md`](docs/LAUNCH.md).
+  See [`docs/LAUNCH.md`](docs/LAUNCH.md). `relayos checkpoint` — captures
+  HEAD + status + diff + untracked files before a risky handoff. See
+  [`docs/CHECKPOINTS.md`](docs/CHECKPOINTS.md).
 
 Full table with descriptions: see [Tools](#tools) below.
 
@@ -206,6 +209,7 @@ Override storage path via the `HANDOFF_DIR` env var (default `~/.claude/handoff/
 | `list_open_handoffs`   | List open handoff summaries (`recorded`+`spawning`) — no full envelope leak. |
 | `inspect_config`       | Show the effective RelayOS config (source, storage dir, templates, warnings). |
 | `doctor`               | Run health checks; never throws on broken state. |
+| `relayos checkpoint` *(CLI)* | Snapshot HEAD + status + diff + untracked files before risky handoffs. See [`docs/CHECKPOINTS.md`](docs/CHECKPOINTS.md). |
 
 ### Diagnostics
 

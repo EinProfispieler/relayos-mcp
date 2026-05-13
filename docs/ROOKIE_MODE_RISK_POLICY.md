@@ -158,3 +158,15 @@ and writes better boundaries into the existing handoff envelope. The
 target agent still reads an on-disk assignment and acts only when the
 user switches to it. No new process is introduced, and no schema,
 storage, or audit format changes are needed.
+
+## Runtime evaluator
+
+The classification above is upstream guidance Claude applies *before*
+calling a handoff tool. A complementary deterministic evaluator runs
+*after* the envelope is on disk, at `relayos launch` / `relayos policy`
+time — see [`docs/POLICY.md`](./POLICY.md). It collapses the four tiers
+to three runtime decisions: `LOW` typically maps to `allow`, `MEDIUM` to
+`allow` or `warn`, `HIGH` to `warn` or `block`, and `BLOCKED` to `block`.
+The evaluator is pure local regex/path matching, does not change the
+envelope, audit, or storage, and is overridable with `--force` for the
+operator who needs the escape hatch.

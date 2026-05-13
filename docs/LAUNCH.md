@@ -9,11 +9,20 @@ relayos launch                  # latest open handoff
 relayos launch latest           # explicit
 relayos launch 1                # most recent open handoff (1-based)
 relayos launch h_01HQ…          # exact handoff id (any status)
+relayos launch --force …        # override a policy block (see POLICY.md)
 ```
 
 `relayos launch` reads from `$HANDOFF_DIR` (default `~/.claude/handoff/`)
 and prints a single line on stdout. Pipe it, copy it, eyeball it — the
 choice is yours.
+
+Before printing, the envelope passes through a deterministic local
+[policy evaluator](./POLICY.md). `allow` is the default (no banner,
+unchanged behavior). `warn` adds a `# RelayOS policy: WARN …` banner on
+stderr but still prints the command on stdout. `block` writes the
+banner to stderr, suppresses the command on stdout, and exits 2 — pass
+`--force` to override. The evaluator is pure regex/path matching on
+existing envelope fields; nothing is written to storage or audit.
 
 ---
 
@@ -97,7 +106,8 @@ behavior as `auto_spawn` and as the source agent's printed
 | `1`       | No open handoffs                             | `relayos launch: no open handoffs found`                       |
 | `1`       | `N` is past the end of the open list         | `relayos launch: handoff selection N is out of range; …`       |
 | `1`       | `h_…` id does not exist                      | `relayos launch: handoff <id> was not found`                   |
-| `1`       | Anything other than `launch` (or too many args) | `usage: relayos launch [latest|N|handoff_id]`                  |
+| `1`       | Unknown subcommand or bad flag combo         | `usage: relayos [launch|policy|checkpoint] [--force] [args...]` |
+| `2`       | Policy evaluator returned `block` (no `--force`) | `# RelayOS policy: BLOCK …` lines on stderr, no stdout       |
 
 The CLI never deletes, mutates, or writes anything. The worst it can do
 is print the wrong command if your `$HANDOFF_DIR` points somewhere
@@ -160,6 +170,8 @@ That keeps the decision to actually run in your shell, not in RelayOS.
 
 ## See also
 
+- [`docs/POLICY.md`](./POLICY.md) — the rule list and severity model used by the launch policy gate.
+- [`docs/CHECKPOINTS.md`](./CHECKPOINTS.md) — snapshot the working tree before kicking off a risky handoff.
 - [`docs/QUICK_DEMO.md`](./QUICK_DEMO.md) — a 5-step Claude → RelayOS → Codex walkthrough that uses `relayos launch`.
 - [`docs/ROOKIE_MODE.md`](./ROOKIE_MODE.md) — the supported chat-only workflow.
 - [`README.md`](../README.md) — install, MCP wiring, envelope schema, and the full tools table.

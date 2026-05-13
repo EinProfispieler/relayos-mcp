@@ -6,6 +6,7 @@ export interface StorageLayout {
   root: string;
   auditPath: string;
   envelopesDir: string;
+  checkpointsDir: string;
 }
 
 export function resolveStorageLayout(env: NodeJS.ProcessEnv = process.env): StorageLayout {
@@ -17,11 +18,13 @@ export function resolveStorageLayout(env: NodeJS.ProcessEnv = process.env): Stor
     root,
     auditPath: join(root, "audit.jsonl"),
     envelopesDir: join(root, "envelopes"),
+    checkpointsDir: join(root, "checkpoints"),
   };
 }
 
 export async function ensureStorage(layout: StorageLayout): Promise<void> {
   await mkdir(layout.envelopesDir, { recursive: true });
+  await mkdir(layout.checkpointsDir, { recursive: true });
 }
 
 export function envelopePath(layout: StorageLayout, id: string): string {
@@ -34,4 +37,20 @@ export function stdoutLogPath(layout: StorageLayout, id: string): string {
 
 export function stderrLogPath(layout: StorageLayout, id: string): string {
   return join(layout.envelopesDir, `${id}.stderr.log`);
+}
+
+export function checkpointMetaPath(layout: StorageLayout, id: string): string {
+  return join(layout.checkpointsDir, `${id}.json`);
+}
+
+export function checkpointDiffPath(layout: StorageLayout, id: string): string {
+  return join(layout.checkpointsDir, `${id}.diff`);
+}
+
+export function checkpointStatusPath(layout: StorageLayout, id: string): string {
+  return join(layout.checkpointsDir, `${id}.status`);
+}
+
+export function checkpointUntrackedPath(layout: StorageLayout, id: string): string {
+  return join(layout.checkpointsDir, `${id}.untracked`);
 }
