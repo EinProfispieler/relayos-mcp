@@ -24,6 +24,19 @@ export const AuditMetadataInput = z
   .strict();
 export type AuditMetadataInput = z.infer<typeof AuditMetadataInput>;
 
+export const ExpectedOutputInput = z
+  .union([
+    z.string().min(1, "expected_output is required"),
+    z.array(z.string().min(1, "expected_output entries are required")).min(1),
+  ])
+  .transform((v) => (Array.isArray(v) ? v : [v]));
+export type ExpectedOutputInput = z.infer<typeof ExpectedOutputInput>;
+
+export const ExpectedOutputEnvelope = z
+  .union([z.string(), z.array(z.string())])
+  .transform((v) => (Array.isArray(v) ? v : [v]));
+export type ExpectedOutputEnvelope = z.infer<typeof ExpectedOutputEnvelope>;
+
 export const HandoffInput = z
   .object({
     source_agent: AgentName,
@@ -36,7 +49,7 @@ export const HandoffInput = z
     allowed_files: z.array(z.string()).default([]),
     forbidden_files: z.array(z.string()).default([]),
     constraints: z.array(z.string()).default([]),
-    expected_output: z.string().min(1, "expected_output is required"),
+    expected_output: ExpectedOutputInput,
     working_dir: z.string().optional(),
     auto_spawn: z.boolean().default(false),
     audit_metadata: AuditMetadataInput.optional(),
@@ -102,7 +115,7 @@ export const Envelope = z
     allowed_files: z.array(z.string()),
     forbidden_files: z.array(z.string()),
     constraints: z.array(z.string()),
-    expected_output: z.string(),
+    expected_output: ExpectedOutputEnvelope,
     working_dir: z.string().optional(),
     auto_spawn: z.boolean(),
     launch_command: z.string(),

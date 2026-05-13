@@ -3,7 +3,7 @@ import { HandoffInput, type Effort, type ExecutionMode } from "../src/schema.js"
 import { renderCodexTarget } from "../src/render/codex.js";
 import { renderClaudeTarget } from "../src/render/claude.js";
 import { buildPromptPrefix, toRenderable } from "../src/render/shared.js";
-import { sampleInput } from "./_helpers.js";
+import { sampleInput, sampleInputArray } from "./_helpers.js";
 
 const EFFORTS: Effort[] = ["max", "xhigh", "high", "medium", "low"];
 const MODES: ExecutionMode[] = ["read_only", "plan", "patch", "test", "review"];
@@ -109,5 +109,23 @@ describe("buildPromptPrefix", () => {
     const env = { ...HandoffInput.parse(sampleInput()), id: "h_TEST" };
     const prefix = buildPromptPrefix(toRenderable(env as never));
     expect(prefix).toMatch(/\[HANDOFF h_TEST/);
+  });
+
+  it("renders multiple expected outputs as bullets", () => {
+    const input = HandoffInput.parse(sampleInputArray());
+    const prefix = buildPromptPrefix(toRenderable(input));
+    expect(prefix).toMatch(/Expected output:\n  - A unified diff\.\n  - A one-paragraph summary\./);
+  });
+
+  it("keeps single expected output rendering stable for string and array input", () => {
+    const expected = "A unified diff plus a short summary.";
+    const fromString = buildPromptPrefix(
+      toRenderable(HandoffInput.parse(sampleInput({ expected_output: expected }))),
+    );
+    const fromArray = buildPromptPrefix(
+      toRenderable(HandoffInput.parse(sampleInput({ expected_output: [expected] }))),
+    );
+    expect(fromArray).toBe(fromString);
+    expect(fromString).toMatch(/Expected output:\nA unified diff plus a short summary\.\n\n---/);
   });
 });

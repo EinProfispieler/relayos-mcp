@@ -105,7 +105,7 @@ Override storage path via the `HANDOFF_DIR` env var (default `~/.claude/handoff/
   allowed_files:    string[],   // globs; [] = no restriction
   forbidden_files:  string[],
   constraints:      string[],
-  expected_output:  string,
+  expected_output:  string | string[],
   working_dir?:     string,
   auto_spawn?:      boolean,    // default false
   audit_metadata?: { parent_handoff_id?, source_session_id?, tags? }
@@ -115,6 +115,11 @@ Override storage path via the `HANDOFF_DIR` env var (default `~/.claude/handoff/
 When `auto_spawn=false` (the default), RelayOS validates, writes the envelope,
 appends audit lines, and returns a ready-to-paste `launch_command` — the source
 agent (or you) runs the target itself.
+
+`validate_handoff` accepts candidate envelopes wrapped as `{ "payload": ... }`
+so MCP clients pass the full candidate through to RelayOS for validation. Legacy
+direct input is still accepted for v0.1.x compatibility, but new callers should
+use the wrapped form.
 
 When `auto_spawn=true`:
 
@@ -170,7 +175,7 @@ All examples use `create_handoff`. Each shows the JSON payload + the resulting
   "allowed_files": ["src/api/util/**/*.ts", "tests/api/util/**"],
   "forbidden_files": [".env*", "secrets/**"],
   "constraints": ["No new dependencies", "Keep public exports stable"],
-  "expected_output": "A unified diff plus a one-paragraph summary."
+  "expected_output": ["A unified diff.", "A one-paragraph summary."]
 }
 ```
 

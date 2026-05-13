@@ -12,10 +12,13 @@ export interface RenderableHandoff {
   allowed_files: string[];
   forbidden_files: string[];
   constraints: string[];
-  expected_output: string;
+  expected_output: string[];
 }
 
 export function toRenderable(env: Envelope | HandoffInput): RenderableHandoff {
+  const expectedOutput = Array.isArray(env.expected_output)
+    ? env.expected_output
+    : [env.expected_output];
   return {
     id: "id" in env ? env.id : undefined,
     source_agent: env.source_agent,
@@ -28,7 +31,7 @@ export function toRenderable(env: Envelope | HandoffInput): RenderableHandoff {
     allowed_files: env.allowed_files,
     forbidden_files: env.forbidden_files,
     constraints: env.constraints,
-    expected_output: env.expected_output,
+    expected_output: expectedOutput,
   };
 }
 
@@ -67,7 +70,11 @@ export function buildPromptPrefix(h: RenderableHandoff): string {
   }
 
   lines.push("Expected output:");
-  lines.push(h.expected_output);
+  if (h.expected_output.length === 1) {
+    lines.push(h.expected_output[0]!);
+  } else {
+    for (const item of h.expected_output) lines.push(`  - ${item}`);
+  }
   lines.push("");
   lines.push("---");
   lines.push("Task description:");

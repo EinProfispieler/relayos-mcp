@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { HandoffInput } from "../src/schema.js";
-import { sampleInput } from "./_helpers.js";
+import { Envelope, HandoffInput } from "../src/schema.js";
+import { sampleInput, sampleInputArray } from "./_helpers.js";
 
 describe("HandoffInput schema", () => {
   it("accepts a complete valid input and applies defaults", () => {
@@ -9,6 +9,9 @@ describe("HandoffInput schema", () => {
     expect(parsed.target_agent).toBe("codex");
     expect(parsed.auto_spawn).toBe(false);
     expect(parsed.allowed_files).toEqual(["src/api/util/**/*.ts", "tests/api/util/**"]);
+    expect(parsed.expected_output).toEqual([
+      "A unified diff and a one-paragraph summary of the change.",
+    ]);
   });
 
   it("accepts empty constraints / allowed_files / forbidden_files", () => {
@@ -51,5 +54,54 @@ describe("HandoffInput schema", () => {
       const r = HandoffInput.safeParse(sampleInput({ [k]: "" }));
       expect(r.success, `expected ${k}: "" to be rejected`).toBe(false);
     }
+  });
+
+  it("accepts expected_output as a non-empty string array", () => {
+    const parsed = HandoffInput.parse(sampleInputArray());
+    expect(parsed.expected_output).toEqual([
+      "A unified diff.",
+      "A one-paragraph summary.",
+    ]);
+  });
+
+  it("rejects empty expected_output arrays and empty array entries", () => {
+    expect(HandoffInput.safeParse(sampleInput({ expected_output: [] })).success).toBe(false);
+    expect(
+      HandoffInput.safeParse(sampleInput({ expected_output: ["A diff", ""] })).success,
+    ).toBe(false);
+  });
+
+  it("loads legacy envelopes with expected_output as a string", () => {
+    const input = HandoffInput.parse(sampleInput());
+    const parsed = Envelope.parse({
+      id: "h_LEGACY",
+      created_at: "2026-05-13T00:00:00.000Z",
+      updated_at: "2026-05-13T00:00:00.000Z",
+      status: "recorded",
+      source_agent: input.source_agent,
+      target_agent: input.target_agent,
+      model: input.model,
+      effort: input.effort,
+      execution_mode: input.execution_mode,
+      task_title: input.task_title,
+      task_description: input.task_description,
+      allowed_files: input.allowed_files,
+      forbidden_files: input.forbidden_files,
+      constraints: input.constraints,
+      expected_output: "Legacy single expected output.",
+      auto_spawn: input.auto_spawn,
+      launch_command: "codex exec '<prompt>'",
+      audit_metadata: {
+        tags: [],
+        event_count: 0,
+        last_event_ts: "2026-05-13T00:00:00.000Z",
+        cli_detection: {
+          target_binary: "codex",
+          found: false,
+        },
+        enforcement_notes: [],
+      },
+    });
+    expect(parsed.expected_output).toEqual(["Legacy single expected output."]);
   });
 });

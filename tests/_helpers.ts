@@ -30,3 +30,10 @@ export function sampleInput(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+export function sampleInputArray(overrides: Record<string, unknown> = {}) {
+  return sampleInput({
+    expected_output: ["A unified diff.", "A one-paragraph summary."],
+    ...overrides,
+  });
+}

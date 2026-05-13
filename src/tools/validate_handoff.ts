@@ -10,8 +10,20 @@ export interface ValidateError {
   issues: Array<{ path: string; message: string }>;
 }
 
+export function unwrapPayload(rawInput: unknown): unknown {
+  if (
+    rawInput &&
+    typeof rawInput === "object" &&
+    "payload" in rawInput &&
+    (rawInput as { payload?: unknown }).payload !== undefined
+  ) {
+    return (rawInput as { payload: unknown }).payload;
+  }
+  return rawInput;
+}
+
 export function validateHandoff(rawInput: unknown): ValidateOk | ValidateError {
-  const result = HandoffInput.safeParse(rawInput);
+  const result = HandoffInput.safeParse(unwrapPayload(rawInput));
   if (result.success) {
     return { ok: true, normalized: result.data };
   }

@@ -5,3 +5,4 @@ dist/
 coverage/
 .vitest-cache/
 .claude/
+docs/plans/

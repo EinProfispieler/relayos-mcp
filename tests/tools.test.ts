@@ -10,7 +10,7 @@ import { writeAuditLog } from "../src/tools/write_audit_log.js";
 import { listHandoffs } from "../src/tools/list_handoffs.js";
 import { readHandoff } from "../src/tools/read_handoff.js";
 import { createAuditWriter } from "../src/audit.js";
-import { sampleInput, tempLayout } from "./_helpers.js";
+import { sampleInput, sampleInputArray, tempLayout } from "./_helpers.js";
 
 describe("tools end-to-end", () => {
   const cleanups: Array<() => void> = [];
@@ -19,17 +19,36 @@ describe("tools end-to-end", () => {
   });
 
   it("validate_handoff returns ok on valid input", () => {
-    const r = validateHandoff(sampleInput());
+    const r = validateHandoff({ payload: sampleInput() });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.normalized.task_title).toContain("template literals");
   });
 
   it("validate_handoff returns issues on invalid input", () => {
-    const r = validateHandoff(sampleInput({ effort: "ludicrous" }));
+    const r = validateHandoff({ payload: sampleInput({ effort: "ludicrous" }) });
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.issues.some((i) => i.path === "effort")).toBe(true);
     }
+  });
+
+  it("validate_handoff keeps legacy direct input compatibility", () => {
+    const r = validateHandoff(sampleInput());
+    expect(r.ok).toBe(true);
+  });
+
+  it("validate_handoff reports strict-schema issues inside payload", () => {
+    const r = validateHandoff({ payload: sampleInput({ extra_field: true }) });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.issues.some((i) => i.path === "" && /Unrecognized key/.test(i.message))).toBe(true);
+    }
+  });
+
+  it("validate_handoff accepts expected_output as an array", () => {
+    const r = validateHandoff({ payload: sampleInputArray() });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.normalized.expected_output).toEqual(["A unified diff.", "A one-paragraph summary."]);
   });
 
   it("create_handoff (record-only) writes envelope + audit", async () => {
@@ -49,6 +68,21 @@ describe("tools end-to-end", () => {
     const kinds = new Set(events.map((e) => e.event));
     expect(kinds.has("created")).toBe(true);
     expect(kinds.has("validated")).toBe(true);
+  });
+
+  it("create_handoff writes and reads expected_output arrays", async () => {
+    const { layout, cleanup } = await tempLayout();
+    cleanups.push(cleanup);
+    const audit = createAuditWriter(layout);
+    const create = await createHandoff(sampleInputArray(), { layout, audit });
+    const read = await readHandoff(
+      { handoff_id: create.handoff_id },
+      { layout, audit },
+    );
+    expect(read.envelope.expected_output).toEqual([
+      "A unified diff.",
+      "A one-paragraph summary.",
+    ]);
   });
 
   it("create_handoff hard-fails on missing target binary when auto_spawn=true", async () => {

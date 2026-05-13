@@ -31,7 +31,10 @@ const HandoffInputShape = {
   allowed_files: z.array(z.string()).default([]),
   forbidden_files: z.array(z.string()).default([]),
   constraints: z.array(z.string()).default([]),
-  expected_output: z.string().min(1),
+  expected_output: z.union([
+    z.string().min(1),
+    z.array(z.string().min(1)).min(1),
+  ]),
   working_dir: z.string().optional(),
   auto_spawn: z.boolean().default(false),
   audit_metadata: AuditMetadataInput.optional(),
@@ -56,7 +59,7 @@ export async function buildServer() {
   const audit = createAuditWriter(layout);
 
   const server = new McpServer(
-    { name: "relayos-mcp", version: "0.1.0" },
+    { name: "relayos-mcp", version: "0.1.1" },
     { capabilities: { tools: {} } },
   );
 
@@ -82,7 +85,7 @@ export async function buildServer() {
       description:
         "Pure schema validation for a handoff input. No side effects. Returns ok+normalized or ok=false+issues. " +
         "Accepts any input shape so callers can dry-run validation without triggering a hard MCP error.",
-      inputSchema: z.unknown(),
+      inputSchema: { payload: z.unknown() },
     },
     async (args) => {
       const result = validateHandoff(args);
