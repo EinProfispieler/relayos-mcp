@@ -101,6 +101,20 @@ Override storage path via the `HANDOFF_DIR` env var (default `~/.claude/handoff/
 | `list_handoffs`        | List envelopes (newest first), filter by source/target/status.|
 | `read_handoff`         | Return one envelope + all its audit events.                   |
 | `read_latest_handoff`  | Return the most recent open handoff (filter by `assigned_to`).|
+| `list_open_handoffs`   | List open handoff summaries (`recorded`+`spawning`) — no full envelope leak. |
+| `inspect_config`       | Show the effective RelayOS config (source, storage dir, templates, warnings). |
+| `doctor`               | Run nine read-only health checks; never throws on broken state. |
+
+### Diagnostics
+
+If something doesn't look right — an envelope isn't appearing, the wrong
+template is winning, the server seems to be using a config you didn't
+write — call `doctor` for a one-shot health report and `inspect_config`
+to see the resolved config (including any project templates that shadow
+built-ins). Both tools are read-only and degrade gracefully on broken
+state: malformed `config.json` is reported as a structured error rather
+than crashing the call. `list_open_handoffs` returns lightweight
+summaries (no full envelopes) when you just want to see what's queued.
 
 ### Optional: slash-command shortcuts
 
