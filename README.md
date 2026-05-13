@@ -92,6 +92,7 @@ Override storage path via the `HANDOFF_DIR` env var (default `~/.claude/handoff/
 | `write_audit_log`      | Append a custom audit event to an existing handoff.           |
 | `list_handoffs`        | List envelopes (newest first), filter by source/target/status.|
 | `read_handoff`         | Return one envelope + all its audit events.                   |
+| `read_latest_handoff`  | Return the most recent open handoff (filter by `assigned_to`).|
 
 ### Optional: slash-command shortcuts
 
@@ -394,6 +395,73 @@ Matching audit events:
 {"ts":"…","handoff_id":"h_01HQ…","event":"spawn_started", …}
 {"ts":"…","handoff_id":"h_01HQ…","event":"spawn_completed", …}
 ```
+
+### E. End-to-end: Claude asks Codex to do X
+
+The friction-free path for "ask Codex to fix X" requests. Three messages,
+no envelope id ever pasted by the user.
+
+**1. User → Claude (in the Claude Code session):**
+
+> Ask Codex to refactor the format helpers in `src/api/util/format.ts` to
+> template literals.
+
+**2. Claude → MCP** (`create_handoff_from_template`):
+
+```json
+{
+  "template": "codex-patch",
+  "task": "Refactor src/api/util/format.ts to use template literals. Behavior must be identical; update unit tests if assertions need updating.",
+  "overrides": {
+    "allowed_files": ["src/api/util/**/*.ts", "tests/api/util/**"]
+  }
+}
+```
+
+Response (abridged):
+
+```json
+{
+  "handoff_id": "h_01HQ…",
+  "envelope_path": "/Users/you/.claude/handoff/envelopes/h_01HQ….json",
+  "launch_command": "codex exec --model gpt-5-codex …",
+  "status": "recorded"
+}
+```
+
+`auto_spawn` is off (the template default), so nothing has been launched —
+the envelope is just on disk.
+
+**3. Codex → MCP** (`read_latest_handoff`), in the Codex CLI session:
+
+```json
+{ "assigned_to": "codex" }
+```
+
+Response (abridged):
+
+```json
+{
+  "envelope": {
+    "id": "h_01HQ…",
+    "target_agent": "codex",
+    "execution_mode": "patch",
+    "task_title": "Refactor format helpers to template literals",
+    "task_description": "Refactor src/api/util/format.ts …",
+    "allowed_files": ["src/api/util/**/*.ts", "tests/api/util/**"],
+    "expected_output": ["A unified diff.", "A one-paragraph summary."],
+    "status": "recorded"
+  },
+  "events": [
+    { "event": "created", … },
+    { "event": "validated", … }
+  ]
+}
+```
+
+Codex now has its full assignment — task, scope, expected output —
+without the user pasting a handoff id. If `envelope` is `null`, Codex
+knows nothing is queued and can poll again later.
 
 ---
 

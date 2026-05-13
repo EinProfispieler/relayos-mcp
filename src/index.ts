@@ -21,6 +21,7 @@ import {
 import { writeAuditLog } from "./tools/write_audit_log.js";
 import { listHandoffs } from "./tools/list_handoffs.js";
 import { readHandoff } from "./tools/read_handoff.js";
+import { readLatestHandoff } from "./tools/read_latest_handoff.js";
 
 const HandoffInputShape = {
   source_agent: AgentName,
@@ -61,7 +62,7 @@ export async function buildServer() {
   const audit = createAuditWriter(layout);
 
   const server = new McpServer(
-    { name: "relayos-mcp", version: "0.2.0" },
+    { name: "relayos-mcp", version: "0.2.1" },
     { capabilities: { tools: {} } },
   );
 
@@ -70,7 +71,10 @@ export async function buildServer() {
     {
       title: "Create handoff",
       description:
-        "Validate and record a structured handoff envelope between Claude Code and Codex CLI. " +
+        "Low-level: build a handoff envelope by hand with full control of every field " +
+        "(target agent, model, effort, execution_mode, file scope, expected output, etc.). " +
+        "Prefer create_handoff_from_template for typical \"ask Codex/Claude to do X\" requests; " +
+        "use this only when no template fits or you need fields no template exposes. " +
         "Writes the envelope to disk + audit log; if auto_spawn=true, also invokes the target CLI.",
       inputSchema: HandoffInputShape,
     },
@@ -85,8 +89,10 @@ export async function buildServer() {
     {
       title: "Validate handoff",
       description:
-        "Pure schema validation for a handoff input. No side effects. Returns ok+normalized or ok=false+issues. " +
-        "Accepts any input shape so callers can dry-run validation without triggering a hard MCP error.",
+        "Dry-run schema validation for a candidate handoff envelope. No side effects — nothing is written. " +
+        "Use when iterating on a handoff payload before committing it via create_handoff. " +
+        "Wrap the candidate as { \"payload\": ... }. " +
+        "Returns ok+normalized data or ok=false+issue list.",
       inputSchema: { payload: z.unknown() },
     },
     async (args) => {
@@ -100,8 +106,11 @@ export async function buildServer() {
     {
       title: "List handoff templates",
       description:
-        "List available handoff templates (built-in + project config). " +
-        "Used by callers to discover template names before calling create_handoff_from_template.",
+        "Discover available handoff templates before composing a handoff. " +
+        "Use when the user asks \"what can I get Codex/Claude to do?\" or before calling " +
+        "create_handoff_from_template if the template name isn't obvious. " +
+        "Returns built-in + project-config templates with their target agent, model, effort, " +
+        "and execution_mode defaults. Optional target_agent filter.",
       inputSchema: {
         target_agent: AgentName.optional(),
       },
@@ -117,9 +126,14 @@ export async function buildServer() {
     {
       title: "Create handoff from template",
       description:
-        "Create a structured handoff envelope from a named template plus a short natural-language task. " +
-        "Server fills model, effort, execution_mode, allowed/forbidden files, constraints, and expected_output. " +
-        "Call list_templates first if you do not know the template name.",
+        "Preferred way to delegate work to Codex or Claude. " +
+        "Use when the user says things like \"ask Codex to fix X\", \"have Codex write a patch for Y\", " +
+        "\"get Codex to review Z\", or \"have Claude plan the migration\". " +
+        "Pass a short natural-language task plus a template name " +
+        "(codex-patch, codex-review, codex-test, codex-plan, claude-review, claude-plan); " +
+        "the server fills model, effort, execution_mode, allowed/forbidden files, constraints, and expected_output. " +
+        "Call list_templates first if you don't know the template name. " +
+        "Fall back to create_handoff only when no template fits or you need full envelope control.",
       inputSchema: {
         template: z.string().min(1),
         task: z.string().min(1),
@@ -232,6 +246,24 @@ export async function buildServer() {
     },
     async (args) => {
       const result = await readHandoff(args, { layout, audit });
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "read_latest_handoff",
+    {
+      title: "Read latest open handoff",
+      description:
+        "Discover the most recent open handoff assigned to a target agent — the normal way " +
+        "Codex finds out what it was asked to do. Pass assigned_to: \"codex\" (or \"claude\") " +
+        "to filter; omit to inspect any open handoff. \"Open\" means status is recorded or " +
+        "spawning (not yet completed or failed). Returns { envelope, events }, or " +
+        "{ envelope: null, events: [] } when nothing matches — safe to poll.",
+      inputSchema: { assigned_to: AgentName.optional() },
+    },
+    async (args) => {
+      const result = await readLatestHandoff(args, { layout, audit });
       return jsonResult(result);
     },
   );

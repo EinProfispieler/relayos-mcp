@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.2.1
+
+- Added MCP tool `read_latest_handoff` — return the most recent open handoff
+  (status `recorded` or `spawning`), optionally filtered by `assigned_to`.
+  Returns `{ envelope: null, events: [] }` when nothing matches, so callers
+  can poll safely without try/catch. Designed for Codex (or Claude) to
+  discover "what was I just asked to do?" without needing the handoff id.
+- Rewrote MCP tool descriptions for `list_templates`,
+  `create_handoff_from_template`, `create_handoff`, and `validate_handoff`
+  to make selection from natural-language requests more reliable. Each
+  description now leads with the kind of user phrasing that should trigger
+  it, then what the tool does, then when to prefer an alternative.
+- No changes to envelope wire format, JSONL audit format, on-disk storage
+  layout, or `create_handoff` behavior.
+
 ## v0.2.0
 
 - Added MCP tool `list_templates` — list available handoff templates
