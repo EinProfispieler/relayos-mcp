@@ -72,7 +72,7 @@ That's the whole setup. There is no daemon to start.
 
 If something doesn't seem wired up right — Codex isn't seeing the
 handoff, the wrong template seems to be picked, the storage path looks
-wrong — ask Claude to call `doctor`. It runs nine checks
+wrong — ask Claude to call `doctor`. It runs health checks
 (config loadable, storage writable, templates loaded, version
 consistency, etc.) and reports what's broken without crashing on bad
 state.

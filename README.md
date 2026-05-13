@@ -171,6 +171,9 @@ Override storage path via the `HANDOFF_DIR` env var (default `~/.claude/handoff/
 > added tools (e.g. `doctor`, `inspect_config`, `list_open_handoffs`
 > from v0.4.0) will not appear in the host's tool list even though
 > `dist/index.js` exposes them.
+> The same applies after local template or runtime source changes:
+> rebuild with `npm run build`, then restart Claude/MCP so it runs the
+> refreshed `dist/` code.
 
 ---
 
@@ -191,7 +194,7 @@ Override storage path via the `HANDOFF_DIR` env var (default `~/.claude/handoff/
 | `read_latest_handoff`  | Return the most recent open handoff (filter by `assigned_to`).|
 | `list_open_handoffs`   | List open handoff summaries (`recorded`+`spawning`) — no full envelope leak. |
 | `inspect_config`       | Show the effective RelayOS config (source, storage dir, templates, warnings). |
-| `doctor`               | Run nine health checks; never throws on broken state. |
+| `doctor`               | Run health checks; never throws on broken state. |
 
 ### Diagnostics
 

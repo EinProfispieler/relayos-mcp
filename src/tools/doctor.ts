@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { existsSync, readFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { mkdir, writeFile, unlink } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,6 +44,13 @@ const EXPECTED_BUILTIN_NAMES = [
   "claude-plan",
 ];
 
+const BUILTIN_CODEX_TEMPLATE_NAMES = [
+  "codex-patch",
+  "codex-review",
+  "codex-test",
+  "codex-plan",
+];
+
 function worst(statuses: CheckStatus[]): "pass" | "warn" | "fail" {
   if (statuses.includes("fail")) return "fail";
   if (statuses.some((s) => s === "warn" || s === "n/a")) return "warn";
@@ -66,6 +74,11 @@ function findPackageJson(): string | null {
   return null;
 }
 
+function projectRoot(): string | null {
+  const pkg = findPackageJson();
+  return pkg ? dirname(pkg) : null;
+}
+
 function readPackageVersion(): string | null {
   const path = findPackageJson();
   if (!path) return null;
@@ -78,11 +91,99 @@ function readPackageVersion(): string | null {
   }
 }
 
+export interface CodexCliProbe {
+  onPath: boolean;
+  version?: string;
+  error?: string;
+}
+
+async function probeCodexCli(command = "codex", env?: NodeJS.ProcessEnv): Promise<CodexCliProbe> {
+  return new Promise((resolveProbe) => {
+    execFile(command, ["--version"], { env, timeout: 2_000 }, (error, stdout, stderr) => {
+      if (!error) {
+        resolveProbe({ onPath: true, version: stdout.trim() || stderr.trim() || "unknown" });
+        return;
+      }
+
+      const code = (error as NodeJS.ErrnoException).code;
+      resolveProbe({
+        onPath: code !== "ENOENT",
+        error: error.message,
+      });
+    });
+  });
+}
+
+function collectBuiltinCodexModels(): Record<string, string> {
+  return Object.fromEntries(
+    BUILTIN_CODEX_TEMPLATE_NAMES.map((name) => [
+      name,
+      BUILTIN_TEMPLATES[name]?.model ?? "missing",
+    ]),
+  );
+}
+
+function latestMtimeMs(path: string): number | null {
+  if (!existsSync(path)) return null;
+  const stat = statSync(path);
+  if (!stat.isDirectory()) return stat.mtimeMs;
+
+  let latest: number | null = null;
+  for (const entry of readdirSync(path)) {
+    const childLatest = latestMtimeMs(join(path, entry));
+    if (childLatest !== null) latest = latest === null ? childLatest : Math.max(latest, childLatest);
+  }
+  return latest;
+}
+
+function runtimeStalenessCheck(root: string): DoctorCheck {
+  const distDir = join(root, "dist");
+  if (!existsSync(distDir)) {
+    return {
+      name: "runtime_dist_fresh",
+      status: "pass",
+      message: "dist/ is not present; runtime staleness check skipped.",
+      detail: { skipped: true, reason: "dist_missing" },
+    };
+  }
+
+  const srcFiles = [
+    join(root, "src", "templates", "builtin.ts"),
+    join(root, "src", "tools", "doctor.ts"),
+    join(root, "src", "index.ts"),
+  ].filter((path) => existsSync(path));
+  const distMtime = latestMtimeMs(distDir);
+  const staleSources = srcFiles.filter((path) => {
+    const srcMtime = latestMtimeMs(path);
+    return distMtime !== null && srcMtime !== null && srcMtime > distMtime;
+  });
+
+  if (distMtime !== null && staleSources.length === 0) {
+    return {
+      name: "runtime_dist_fresh",
+      status: "pass",
+      message: "dist/ appears up to date with relevant src/ files.",
+    };
+  }
+
+  return {
+    name: "runtime_dist_fresh",
+    status: "warn",
+    message:
+      "dist/ appears older than relevant src/ files; run `npm run build` and restart Claude/MCP.",
+    detail: {
+      stale_sources: staleSources.map((path) => path.slice(root.length + 1)),
+    },
+  };
+}
+
 export interface DoctorDeps {
   layout: StorageLayout;
   audit: AuditWriter;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  codexProbe?: () => Promise<CodexCliProbe>;
+  runtimeRoot?: string;
 }
 
 export async function doctor(
@@ -191,7 +292,69 @@ export async function doctor(
     });
   }
 
-  // 6. project_templates_valid
+  // 6. builtin_codex_template_models
+  const codexTemplateModels = collectBuiltinCodexModels();
+  checks.push({
+    name: "builtin_codex_template_models",
+    status: "pass",
+    message: "Built-in Codex template default models reported.",
+    detail: { templates: codexTemplateModels },
+  });
+
+  // 7. builtin_codex_model_compatibility
+  const legacyCodexTemplates = Object.entries(codexTemplateModels)
+    .filter(([, model]) => model === "gpt-5-codex")
+    .map(([name]) => name);
+  if (legacyCodexTemplates.length > 0) {
+    checks.push({
+      name: "builtin_codex_model_compatibility",
+      status: "warn",
+      message: `Built-in Codex template(s) still default to gpt-5-codex: ${legacyCodexTemplates.join(", ")}.`,
+      detail: { templates: legacyCodexTemplates },
+    });
+  } else {
+    checks.push({
+      name: "builtin_codex_model_compatibility",
+      status: "pass",
+      message: "Built-in Codex templates do not default to gpt-5-codex.",
+    });
+  }
+
+  // 8. codex_cli_available
+  const codexProbe = deps.codexProbe ?? (() => probeCodexCli("codex", deps.env));
+  const codexCli = await codexProbe();
+  if (codexCli.onPath && codexCli.version) {
+    checks.push({
+      name: "codex_cli_available",
+      status: "pass",
+      message: `Codex CLI is available (${codexCli.version}).`,
+      detail: { on_path: true, version: codexCli.version },
+    });
+  } else {
+    checks.push({
+      name: "codex_cli_available",
+      status: "warn",
+      message: codexCli.onPath
+        ? "Codex CLI is on PATH, but `codex --version` did not complete."
+        : "Codex CLI was not found on PATH.",
+      detail: { on_path: codexCli.onPath, error: codexCli.error },
+    });
+  }
+
+  // 9. runtime_dist_fresh
+  const root = deps.runtimeRoot ?? projectRoot();
+  if (root) {
+    checks.push(runtimeStalenessCheck(root));
+  } else {
+    checks.push({
+      name: "runtime_dist_fresh",
+      status: "pass",
+      message: "Project root not found; runtime staleness check skipped.",
+      detail: { skipped: true, reason: "project_root_missing" },
+    });
+  }
+
+  // 10. project_templates_valid
   if (configLoaded) {
     checks.push({
       name: "project_templates_valid",
@@ -207,7 +370,7 @@ export async function doctor(
     });
   }
 
-  // 7. list_handoffs_ok
+  // 11. list_handoffs_ok
   try {
     const r = await listHandoffs({}, { layout: deps.layout });
     if (Array.isArray(r)) {
@@ -232,7 +395,7 @@ export async function doctor(
     });
   }
 
-  // 8. read_latest_handoff_shape_ok
+  // 12. read_latest_handoff_shape_ok
   try {
     const r = await readLatestHandoff(
       { assigned_to: "codex" },
@@ -266,7 +429,7 @@ export async function doctor(
     });
   }
 
-  // 9. version_consistency
+  // 13. version_consistency
   const pkgVersion = input.package_version ?? readPackageVersion();
   if (pkgVersion === null) {
     checks.push({
