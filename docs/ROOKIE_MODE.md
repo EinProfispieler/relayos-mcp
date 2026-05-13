@@ -181,6 +181,12 @@ The review handoff is an envelope on disk just like any other; Claude
 (in this session, or a separate one) can pick it up via
 `read_latest_handoff` with `assigned_to: "claude"`.
 
+Review-mode handoffs should use the compact decision report specified by
+the built-in `codex-review` and `claude-review` templates: start with
+`OVERALL` and `ACTION`, include only blockers or the top warnings, and
+avoid line-by-line PASS findings unless they explain a warning or
+failure.
+
 ---
 
 ## Limits — and when to graduate out of Rookie Mode
