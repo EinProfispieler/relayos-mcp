@@ -84,12 +84,23 @@ Override storage path via the `HANDOFF_DIR` env var (default `~/.claude/handoff/
 | Tool                   | Purpose                                                       |
 |------------------------|---------------------------------------------------------------|
 | `create_handoff`       | Validate + record an envelope; optionally spawn the target.   |
+| `list_templates`               | List built-in + project handoff templates.                    |
+| `create_handoff_from_template` | Create a handoff from a named template + short task string.   |
 | `validate_handoff`     | Pure schema check, no side effects.                           |
 | `render_claude_prompt` | Render the prompt + `claude -p` argv for an envelope.         |
 | `render_codex_prompt`  | Render the prompt + `codex exec` argv for an envelope.        |
 | `write_audit_log`      | Append a custom audit event to an existing handoff.           |
 | `list_handoffs`        | List envelopes (newest first), filter by source/target/status.|
 | `read_handoff`         | Return one envelope + all its audit events.                   |
+
+### Optional: slash-command shortcuts
+
+Slash commands are not bundled or required. If you want a one-keystroke
+wrapper around `create_handoff_from_template`, drop a Markdown file in
+`~/.claude/commands/` that instructs Claude to call the tool with a
+fixed template name. There is no install step in this repo for slash
+commands — `list_templates` + `create_handoff_from_template` is the
+supported interface.
 
 ### The handoff envelope
 
@@ -153,6 +164,121 @@ v1 is **best-effort native flags + always advisory prompt**:
 - When a constraint has no native enforcement (e.g. per-file allowlists, Claude's
   effort), `advisory_only_enforcement` is logged with the specific note.
 - RelayOS does **not** build a filesystem sandbox in v1.
+
+## Templates and project config
+
+Most callers should not write a full handoff envelope by hand. Instead,
+use the template tools: pick a named template and pass the user's task
+as plain text. RelayOS fills `model`, `effort`, `execution_mode`,
+`allowed_files`, `forbidden_files`, `constraints`, and `expected_output`
+from the template, layered with optional project config and call-time
+overrides.
+
+> **Core uses static, reliability-first defaults.** Each built-in
+> template carries a fixed `model` and `effort` chosen to bias toward a
+> good result rather than the lowest cost. No built-in defaults to
+> `max` or `xhigh`. RelayOS Core never auto-selects `max`. Cost-aware
+> model + effort routing, budgets, historical success/failure
+> statistics, automatic downgrade for simple tasks, and automatic
+> escalation after failed attempts are **future Pro features and are
+> not in this repository.** Use `overrides.model` and `overrides.effort`
+> when you want to deviate from a template's defaults.
+
+### Built-in templates
+
+| Name            | target | execution_mode | model             | effort   |
+|-----------------|--------|----------------|-------------------|----------|
+| `codex-patch`   | codex  | `patch`        | `gpt-5-codex`     | `high`   |
+| `codex-review`  | codex  | `review`       | `gpt-5-codex`     | `medium` |
+| `codex-test`    | codex  | `test`         | `gpt-5-codex`     | `medium` |
+| `codex-plan`    | codex  | `plan`         | `gpt-5-codex`     | `high`   |
+| `claude-review` | claude | `review`       | `claude-opus-4-7` | `medium` |
+| `claude-plan`   | claude | `plan`         | `claude-opus-4-7` | `high`   |
+
+`codex-patch` is the default for code-patch handoffs. There is no
+built-in `claude-patch` template; define one in project config if you
+need it.
+
+`xhigh` is a valid effort *override*, but no built-in template defaults
+to `xhigh`. `max` is a valid override at the RelayOS layer — Core
+passes it through to the target CLI — but Core itself never selects
+`max` automatically. If you want max, you ask for max.
+
+### Project config — `.relayos/config.json` (optional)
+
+Place a JSON file at `.relayos/config.json` in your project root (or
+anywhere up the directory tree from cwd). RelayOS finds it
+automatically. Override with `RELAYOS_CONFIG=/abs/path/to/file.json`.
+
+```json
+{
+  "version": 1,
+  "defaults": {
+    "forbidden_files": [".env*", "secrets/**", "**/node_modules/**", "**/dist/**"],
+    "constraints": ["No new dependencies without approval."]
+  },
+  "templates": {
+    "codex-patch": {
+      "allowed_files": ["src/**", "tests/**"],
+      "effort": "high"
+    },
+    "internal-migration": {
+      "target_agent": "codex",
+      "model": "gpt-5-codex",
+      "effort": "high",
+      "execution_mode": "patch",
+      "expected_output": [
+        "A unified diff scoped to migrations/**.",
+        "A rollback note."
+      ]
+    }
+  }
+}
+```
+
+Merge order (lowest precedence first):
+
+1. Built-in template
+2. Project `defaults` (extends list-shaped fields like `forbidden_files`)
+3. Project per-template overrides (`templates.<name>`)
+4. Call-time `overrides` in `create_handoff_from_template`
+
+### Tool: `list_templates`
+
+```json
+{ "target_agent": "codex" }
+```
+
+Returns all available templates, each tagged `source: "builtin" | "project"`.
+Optional `target_agent` filter.
+
+### Tool: `create_handoff_from_template`
+
+```json
+{
+  "template": "codex-patch",
+  "task": "Fix validate_handoff so MCP clients can wrap the candidate in { payload } without losing fields. Add a regression test.",
+  "overrides": {
+    "allowed_files": ["src/tools/validate_handoff.ts", "tests/tools.test.ts"]
+  }
+}
+```
+
+Returns the same shape as `create_handoff`: `handoff_id`, `envelope_path`,
+`launch_command`, and (when `auto_spawn: true`) spawn results. The
+envelope's `audit_metadata.tags` includes `template:<name>` so you can
+trace which template each handoff came from.
+
+`task_title` is derived from the first line of `task` (truncated to 80
+characters, trailing punctuation stripped) unless you pass an explicit
+`task_title`.
+
+### When to call `create_handoff` directly
+
+Use `create_handoff` (the low-level API) when you need full control of
+every envelope field — no template, no project config interference. The
+two APIs produce identical envelope files; templates are purely an
+ergonomics layer.
 
 ---
 
@@ -284,6 +410,8 @@ don't waste effort on them and users know what to expect later.
 - Claude ↔ Codex structured handoff
 - MCP server (stdio, registered in both clients from one binary)
 - Validated handoff envelopes (Zod schema)
+- Template-based handoff creation (`list_templates`, `create_handoff_from_template`)
+- Six built-in templates + optional `.relayos/config.json` project overrides
 - `model` / `effort` / `execution_mode` fields
 - `allowed_files` / `forbidden_files` scope (prompt-level + native flags where supported)
 - JSONL append-only audit log
@@ -293,7 +421,6 @@ don't waste effort on them and users know what to expect later.
 
 ### Future Pro / Team (NOT in this repo)
 
-- Handoff templates (reusable parameterized envelopes)
 - Project-level policies (e.g. "this repo's `patch` handoffs always require model X and effort ≥ high")
 - Richer history search / queryable storage backend
 - Cost & model-usage statistics across handoffs

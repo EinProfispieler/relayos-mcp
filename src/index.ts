@@ -12,6 +12,8 @@ import { resolveStorageLayout, ensureStorage } from "./storage.js";
 import { createAuditWriter } from "./audit.js";
 import { createHandoff } from "./tools/create_handoff.js";
 import { validateHandoff } from "./tools/validate_handoff.js";
+import { listTemplates } from "./tools/list_templates.js";
+import { createHandoffFromTemplate } from "./tools/create_handoff_from_template.js";
 import {
   renderClaudePrompt,
   renderCodexPrompt,
@@ -59,7 +61,7 @@ export async function buildServer() {
   const audit = createAuditWriter(layout);
 
   const server = new McpServer(
-    { name: "relayos-mcp", version: "0.1.1" },
+    { name: "relayos-mcp", version: "0.2.0" },
     { capabilities: { tools: {} } },
   );
 
@@ -89,6 +91,61 @@ export async function buildServer() {
     },
     async (args) => {
       const result = validateHandoff(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "list_templates",
+    {
+      title: "List handoff templates",
+      description:
+        "List available handoff templates (built-in + project config). " +
+        "Used by callers to discover template names before calling create_handoff_from_template.",
+      inputSchema: {
+        target_agent: AgentName.optional(),
+      },
+    },
+    async (args) => {
+      const result = listTemplates(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "create_handoff_from_template",
+    {
+      title: "Create handoff from template",
+      description:
+        "Create a structured handoff envelope from a named template plus a short natural-language task. " +
+        "Server fills model, effort, execution_mode, allowed/forbidden files, constraints, and expected_output. " +
+        "Call list_templates first if you do not know the template name.",
+      inputSchema: {
+        template: z.string().min(1),
+        task: z.string().min(1),
+        task_title: z.string().min(1).optional(),
+        overrides: z
+          .object({
+            target_agent: AgentName.optional(),
+            model: z.string().min(1).optional(),
+            effort: Effort.optional(),
+            execution_mode: ExecutionMode.optional(),
+            allowed_files: z.array(z.string()).optional(),
+            forbidden_files: z.array(z.string()).optional(),
+            constraints: z.array(z.string()).optional(),
+            expected_output: z
+              .union([z.string().min(1), z.array(z.string().min(1)).min(1)])
+              .optional(),
+            working_dir: z.string().optional(),
+          })
+          .strict()
+          .optional(),
+        auto_spawn: z.boolean().default(false),
+        audit_metadata: AuditMetadataInput.optional(),
+      },
+    },
+    async (args) => {
+      const result = await createHandoffFromTemplate(args, { layout, audit });
       return jsonResult(result);
     },
   );

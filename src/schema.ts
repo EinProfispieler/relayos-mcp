@@ -147,3 +147,68 @@ export const AuditEvent = z
   })
   .strict();
 export type AuditEvent = z.infer<typeof AuditEvent>;
+
+// ---------- v0.2.0 templates ----------
+
+export const TemplateOverrides = z
+  .object({
+    target_agent: AgentName.optional(),
+    model: z.string().min(1).optional(),
+    effort: Effort.optional(),
+    execution_mode: ExecutionMode.optional(),
+    allowed_files: z.array(z.string()).optional(),
+    forbidden_files: z.array(z.string()).optional(),
+    constraints: z.array(z.string()).optional(),
+    expected_output: z
+      .union([z.string().min(1), z.array(z.string().min(1)).min(1)])
+      .optional(),
+    working_dir: z.string().optional(),
+  })
+  .strict();
+export type TemplateOverrides = z.infer<typeof TemplateOverrides>;
+
+export const Template = z
+  .object({
+    name: z.string().min(1),
+    description: z.string().min(1),
+    target_agent: AgentName,
+    model: z.string().min(1),
+    effort: Effort,
+    execution_mode: ExecutionMode,
+    allowed_files: z.array(z.string()),
+    forbidden_files: z.array(z.string()),
+    constraints: z.array(z.string()),
+    expected_output: z.array(z.string().min(1)).min(1),
+  })
+  .strict();
+export type Template = z.infer<typeof Template>;
+
+export const RelayConfigDefaults = z
+  .object({
+    source_agent: AgentName.optional(),
+    forbidden_files: z.array(z.string()).optional(),
+    constraints: z.array(z.string()).optional(),
+  })
+  .strict();
+export type RelayConfigDefaults = z.infer<typeof RelayConfigDefaults>;
+
+export const RelayConfig = z
+  .object({
+    version: z.literal(1).optional(),
+    defaults: RelayConfigDefaults.optional(),
+    templates: z.record(z.string(), TemplateOverrides).default({}),
+  })
+  .strict();
+export type RelayConfig = z.infer<typeof RelayConfig>;
+
+export const CreateFromTemplateInput = z
+  .object({
+    template: z.string().min(1),
+    task: z.string().min(1, "task is required"),
+    task_title: z.string().min(1).optional(),
+    overrides: TemplateOverrides.optional(),
+    auto_spawn: z.boolean().default(false),
+    audit_metadata: AuditMetadataInput.optional(),
+  })
+  .strict();
+export type CreateFromTemplateInput = z.infer<typeof CreateFromTemplateInput>;
