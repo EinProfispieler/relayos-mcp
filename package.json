@@ -16,11 +16,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/EinProfispieler/relayos-mcp.git"
+    "url": "https://github.com/EinProfispieler/relayos.git"
   },
-  "homepage": "https://github.com/EinProfispieler/relayos-mcp#readme",
+  "homepage": "https://github.com/EinProfispieler/relayos#readme",
   "bugs": {
-    "url": "https://github.com/EinProfispieler/relayos-mcp/issues"
+    "url": "https://github.com/EinProfispieler/relayos/issues"
   },
   "type": "module",
   "bin": {

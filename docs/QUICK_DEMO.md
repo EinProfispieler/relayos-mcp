@@ -37,8 +37,8 @@ create_quick_handoff {
 
 RelayOS resolves this to the built-in `codex-patch` template, validates
 the envelope, writes it to `~/.claude/handoff/envelopes/h_…json`, and
-appends `handoff_recorded` to `audit.jsonl`. The response includes the
-new `handoff_id` and a ready-to-paste `launch_command`.
+appends `created` + `validated` events to `audit.jsonl`. The response
+includes the new `handoff_id` and a ready-to-paste `launch_command`.
 
 Claude prints something like:
 
@@ -93,9 +93,15 @@ tail -n 5 ~/.claude/handoff/audit.jsonl | jq -c '{ts, event, handoff_id}'
 You'll see something like:
 
 ```jsonc
-{"ts":"…","event":"handoff_recorded","handoff_id":"h_01HQ…"}
+{"ts":"…","event":"created","handoff_id":"h_01HQ…"}
+{"ts":"…","event":"validated","handoff_id":"h_01HQ…"}
 {"ts":"…","event":"rendered_codex_prompt","handoff_id":"h_01HQ…"}
 ```
+
+The full set of audit event kinds is defined in `src/schema.ts` as
+`AuditEventKind`: `created`, `validated`, `rendered_claude_prompt`,
+`rendered_codex_prompt`, `spawn_started`, `spawn_completed`,
+`spawn_failed`, `advisory_only_enforcement`, `custom`.
 
 For a richer view, ask Claude in any session: *"Read handoff
 `h_01HQ…`"* — Claude calls `read_handoff` and gets the envelope plus

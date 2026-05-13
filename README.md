@@ -65,8 +65,8 @@ and a Codex `AGENTS.md` snippet
 ## Quick start
 
 ```bash
-git clone https://github.com/EinProfispieler/relayos-mcp.git
-cd relayos-mcp
+git clone https://github.com/EinProfispieler/relayos.git
+cd relayos
 npm install
 npm run build
 ./scripts/install.sh   # prints MCP snippets to paste into your clients
@@ -143,7 +143,7 @@ thing: how a single task gets handed from one coding agent to another.
 ## Install
 
 ```bash
-git clone https://github.com/EinProfispieler/RelayOS.git && cd RelayOS
+git clone https://github.com/EinProfispieler/relayos.git && cd relayos
 npm install
 npm run build           # produces dist/index.js
 ./scripts/install.sh    # prints registration snippets for your MCP clients
