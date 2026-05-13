@@ -165,6 +165,39 @@ any of these is true:
 
 ---
 
+## Troubleshooting
+
+A few snags surface often enough that they're worth calling out — all
+of them are environmental, not RelayOS bugs.
+
+- **You upgraded RelayOS but the new tools don't appear.** MCP clients
+  cache the tool list at session start. After `git pull && npm run build`
+  to a newer version, restart Claude Code (and Codex) so the host
+  re-introspects the server. Until you restart, calls to tools added in
+  the new version will fail with "tool not found" even though
+  `dist/index.js` exposes them.
+
+- **Other MCP servers are erroring and the dogfood feels broken.**
+  Failures in unrelated MCP servers (Codex MCP integrations, third-party
+  tool servers) can spam the host's MCP error pane and make it unclear
+  whether RelayOS is the problem. When isolating a RelayOS issue,
+  temporarily disable unrelated MCP servers in `~/.claude.json` /
+  `~/.codex/config.toml` and try again.
+
+- **`cli_detection.found: false` in a `create_*_handoff` response.**
+  This is informational, not an error. RelayOS looked for the target's
+  CLI binary (e.g. `codex`) in `PATH` at handoff creation time and did
+  not find it. The envelope is still recorded and the `launch_command`
+  is still printed; you (or the target agent in its own session) can
+  run it manually. `auto_spawn: true` is the only path that actually
+  needs the binary at creation time.
+
+If something still looks wrong, ask Claude to call `doctor` for a
+nine-check health report and `inspect_config` for the resolved config —
+both are read-only and degrade gracefully.
+
+---
+
 ## Files in this guide
 
 - `docs/ROOKIE_MODE.md` — this file.
