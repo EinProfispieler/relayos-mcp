@@ -86,6 +86,7 @@ Override storage path via the `HANDOFF_DIR` env var (default `~/.claude/handoff/
 | `create_handoff`       | Validate + record an envelope; optionally spawn the target.   |
 | `list_templates`               | List built-in + project handoff templates.                    |
 | `create_handoff_from_template` | Create a handoff from a named template + short task string.   |
+| `create_quick_handoff`         | One-shot: pick a template from `target_agent` + `mode`.       |
 | `validate_handoff`     | Pure schema check, no side effects.                           |
 | `render_claude_prompt` | Render the prompt + `claude -p` argv for an envelope.         |
 | `render_codex_prompt`  | Render the prompt + `codex exec` argv for an envelope.        |
@@ -463,6 +464,41 @@ Codex now has its full assignment — task, scope, expected output —
 without the user pasting a handoff id. If `envelope` is `null`, Codex
 knows nothing is queued and can poll again later.
 
+### F. One-shot quick handoff
+
+Skip the template name. Pass `target_agent` + `task` and the server picks
+a built-in template based on `target_agent` and (optional) `mode`.
+
+```json
+{
+  "target_agent": "codex",
+  "task": "Refactor src/api/util/format.ts to use template literals.",
+  "allowed_files": ["src/api/util/**/*.ts", "tests/api/util/**"]
+}
+```
+
+That's equivalent to `create_handoff_from_template` with
+`template: "codex-patch"` (codex defaults to `patch`). Override `mode`
+when you want a different built-in:
+
+```json
+{ "target_agent": "codex", "task": "Run unit tests under tests/api/util.", "mode": "test" }
+{ "target_agent": "claude", "task": "Review the auth-middleware rewrite.", "mode": "review" }
+{ "target_agent": "claude", "task": "Plan the auth-middleware rewrite." }
+```
+
+Mapping (modes: `patch`, `review`, `test`, `plan`):
+
+| target / mode | patch         | review         | test         | plan         |
+|---------------|---------------|----------------|--------------|--------------|
+| `codex`       | `codex-patch` | `codex-review` | `codex-test` | `codex-plan` |
+| `claude`      | _(error)_     | `claude-review`| _(error)_    | `claude-plan`|
+
+Defaults: `codex` → `patch`, `claude` → `plan`. Unmapped combinations
+(`claude` + `patch`, `claude` + `test`) throw `quick_handoff_no_template`
+— use `create_handoff_from_template` with a project template, or
+`create_handoff` for full envelope control.
+
 ---
 
 ## Open Source vs Future Paid Features
@@ -478,7 +514,7 @@ don't waste effort on them and users know what to expect later.
 - Claude ↔ Codex structured handoff
 - MCP server (stdio, registered in both clients from one binary)
 - Validated handoff envelopes (Zod schema)
-- Template-based handoff creation (`list_templates`, `create_handoff_from_template`)
+- Template-based handoff creation (`list_templates`, `create_handoff_from_template`, `create_quick_handoff`)
 - Six built-in templates + optional `.relayos/config.json` project overrides
 - `model` / `effort` / `execution_mode` fields
 - `allowed_files` / `forbidden_files` scope (prompt-level + native flags where supported)

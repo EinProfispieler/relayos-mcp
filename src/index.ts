@@ -15,6 +15,10 @@ import { validateHandoff } from "./tools/validate_handoff.js";
 import { listTemplates } from "./tools/list_templates.js";
 import { createHandoffFromTemplate } from "./tools/create_handoff_from_template.js";
 import {
+  createQuickHandoff,
+  QuickMode,
+} from "./tools/create_quick_handoff.js";
+import {
   renderClaudePrompt,
   renderCodexPrompt,
 } from "./tools/render_prompts.js";
@@ -62,7 +66,7 @@ export async function buildServer() {
   const audit = createAuditWriter(layout);
 
   const server = new McpServer(
-    { name: "relayos-mcp", version: "0.2.1" },
+    { name: "relayos-mcp", version: "0.3.0" },
     { capabilities: { tools: {} } },
   );
 
@@ -160,6 +164,38 @@ export async function buildServer() {
     },
     async (args) => {
       const result = await createHandoffFromTemplate(args, { layout, audit });
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "create_quick_handoff",
+    {
+      title: "Create quick handoff",
+      description:
+        "One-shot delegation: pass target_agent + a sentence, get a recorded handoff. " +
+        "Use when the user says 'just ask Codex to fix X' or 'have Claude review Y' and " +
+        "you don't want to think about template names. " +
+        "Maps (target_agent, mode) to a built-in template (codex defaults to patch, " +
+        "claude defaults to plan; modes: patch, review, test, plan). " +
+        "Optional allowed_files / forbidden_files / constraints flow through as overrides. " +
+        "Throws quick_handoff_no_template for unmapped combinations like " +
+        "claude+patch — fall back to create_handoff_from_template (project template) " +
+        "or create_handoff (full envelope) in that case.",
+      inputSchema: {
+        target_agent: AgentName,
+        task: z.string().min(1),
+        mode: QuickMode.optional(),
+        allowed_files: z.array(z.string()).optional(),
+        forbidden_files: z.array(z.string()).optional(),
+        constraints: z.array(z.string()).optional(),
+        task_title: z.string().min(1).optional(),
+        auto_spawn: z.boolean().default(false),
+        audit_metadata: AuditMetadataInput.optional(),
+      },
+    },
+    async (args) => {
+      const result = await createQuickHandoff(args, { layout, audit });
       return jsonResult(result);
     },
   );

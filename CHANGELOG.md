@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.3.0
+
+- Added MCP tool `create_quick_handoff` — one-shot handoff creation from a
+  sentence. Pass `target_agent` + `task` (plus optional `mode`,
+  `allowed_files`, `forbidden_files`, `constraints`) and the server picks a
+  built-in template for you. Defaults: `codex` → `patch`, `claude` → `plan`.
+  Modes: `patch`, `review`, `test`, `plan`. Unmapped combinations
+  (`claude+patch`, `claude+test`) throw a clear `quick_handoff_no_template`
+  error pointing the caller at `create_handoff_from_template` (project
+  template) or `create_handoff` (full envelope).
+- Implementation is a thin wrapper over `create_handoff_from_template` —
+  no new envelope fields, no new audit events, no new template logic.
+  Tags inherited from the chosen template (e.g. `template:codex-patch`)
+  flow through unchanged.
+- No changes to envelope wire format, JSONL audit format, on-disk storage
+  layout, `create_handoff` behavior, or built-in templates.
+
 ## v0.2.1
 
 - Added MCP tool `read_latest_handoff` — return the most recent open handoff
