@@ -1,35 +1,116 @@
 # RelayOS
 
-**A structured, auditable handoff control layer between Claude Code and Codex CLI.**
+> **A local-first MCP control layer for structured handoffs between AI coding agents.**
 
-RelayOS is **not** a chat bridge, a session-level coordinator, or a multi-agent
-chat room. It controls one thing: how a single task gets handed from one coding
-agent to another, with explicit fields for **model, effort, execution mode, file
-scope, permission boundary, and audit output**.
+RelayOS is an MCP server that runs on your machine. It turns "ask Codex to
+refactor this" or "have Claude review that" into a recorded, validated
+handoff — instead of a copy-pasted prompt you hope the other agent reads
+correctly. It registers in both Claude Code and Codex CLI over stdio, so the
+source agent files the handoff and the target agent picks it up through the
+same tool, in the same format, with the same audit trail every time.
 
-Each handoff is a validated envelope:
+**The problem.** When you switch between Claude Code and Codex CLI today, the
+handoff is a chat-window paste. Model choice gets dropped. Reasoning effort is
+guessed. File scope is implied. Expected output is fuzzy. Nothing is logged.
+If something goes wrong, you cannot tell which agent did what, with which
+model, or under what constraints.
 
-- **model** — pick the right model per handoff (`gpt-5-codex`, `claude-opus-4-7`, …)
-- **effort** — `max` / `xhigh` / `high` / `medium` / `low`
-- **execution mode** — `read_only` / `plan` / `patch` / `test` / `review`
-- **file scope** — `allowed_files`, `forbidden_files` (always injected into the
-  target prompt; recorded in the audit log; native CLI flags applied where the
-  target supports them)
-- **constraints** — free-form rules the target must honor
-- **expected output** — what the source agent wants back
-- **audit metadata** — every envelope is written to disk; every event is appended
-  to a JSONL audit log
+**Structured handoff.** RelayOS replaces the paste with a validated envelope:
+`model`, `effort`, `execution_mode`, `allowed_files`, `forbidden_files`,
+`constraints`, `expected_output`. The envelope is written to disk under
+`$HANDOFF_DIR` (default `~/.claude/handoff/`), every event is appended to an
+append-only audit log, and the target agent reads its own assignment via MCP.
+No chat-window paste, no lost fields. Local-first: nothing leaves your
+machine, no cloud, no account, no telemetry.
 
 Record-only by default. `auto_spawn` is opt-in per call and never default.
 
-> **New here?** See [**Rookie Mode**](docs/ROOKIE_MODE.md) — talk to one
-> Claude session and let RelayOS coordinate Codex (and optional Claude
-> review) for you. Includes a drop-in Claude Code subagent
-> ([`examples/claude-subagents/relayos-orchestrator.md`](examples/claude-subagents/relayos-orchestrator.md))
-> and a Codex-side `AGENTS.md`
-> ([`examples/codex/AGENTS.md`](examples/codex/AGENTS.md)).
+## How it fits together
+
+```
+   ┌────────────┐
+   │    You     │  "Ask Codex to refactor format.ts"
+   └─────┬──────┘
+         ▼
+   ┌────────────┐     MCP      ┌──────────────────────────────┐
+   │  Claude    │  ─────────▶  │  RelayOS                     │
+   │  Code      │ create_      │   envelope on disk           │
+   │  session   │  handoff     │   + audit.jsonl event        │
+   └────────────┘              └──────────────┬───────────────┘
+                                              │  on disk
+                                              ▼
+   ┌────────────┐     MCP      ┌──────────────────────────────┐
+   │  Codex     │  ─────────▶  │  read_latest_handoff         │
+   │  CLI       │ read_latest_ │   returns the envelope with  │
+   │  session   │  handoff     │   full task + scope + output │
+   └────────────┘              └──────────────────────────────┘
+```
+
+You stay in one chat. Claude files the handoff. Codex reads it the next time
+you switch terminals. Nothing runs automatically — switching windows is the
+trigger.
+
+## Rookie Mode
+
+Rookie Mode is the supported workflow for users who do not want to write
+envelopes by hand. You talk to one Claude Code session; Claude calls
+`create_quick_handoff` for you; Codex reads its assignment via
+`read_latest_handoff` when you switch to the Codex terminal. Two drop-in
+files do the wiring: a Claude Code subagent
+([`examples/claude-subagents/relayos-orchestrator.md`](examples/claude-subagents/relayos-orchestrator.md))
+and a Codex `AGENTS.md` snippet
+([`examples/codex/AGENTS.md`](examples/codex/AGENTS.md)). Full walkthrough:
+[**docs/ROOKIE_MODE.md**](docs/ROOKIE_MODE.md).
+
+## Quick start
+
+```bash
+git clone https://github.com/EinProfispieler/relayos-mcp.git
+cd relayos-mcp
+npm install
+npm run build
+./scripts/install.sh   # prints MCP snippets to paste into your clients
+```
+
+1. Paste the printed `relayos` block into `~/.claude.json` (under
+   `mcpServers`) and into `~/.codex/config.toml`. Restart both CLIs so they
+   re-read the tool list.
+2. Drop the two Rookie Mode files in:
+   `examples/claude-subagents/relayos-orchestrator.md` →
+   `~/.claude/agents/`; `examples/codex/AGENTS.md` → your project root (or
+   merge into an existing `AGENTS.md`).
+3. In a Claude Code session, say:
+   *"Ask Codex to refactor `src/api/util/format.ts` to template literals."*
+   Claude files the handoff. Open a Codex terminal in the same project and
+   start `codex` — it reads the assignment and goes.
+
+Detailed install snippets, the full tools table, and end-to-end examples are
+below.
+
+## What's in v0.4.1
+
+Fourteen MCP tools, grouped by purpose:
+
+- **Creating handoffs.** `create_quick_handoff`,
+  `create_handoff_from_template`, `create_handoff` — from one-shot to fully
+  manual.
+- **Reading handoffs.** `read_latest_handoff`, `read_handoff`,
+  `list_open_handoffs`, `list_handoffs` — what is queued, what is done.
+- **Rendering & validation.** `validate_handoff`, `render_claude_prompt`,
+  `render_codex_prompt` — dry-run envelopes and inspect rendered prompts.
+- **Audit.** `write_audit_log` — append a custom event to an existing
+  handoff.
+- **Diagnostics.** `doctor`, `inspect_config`, `list_templates` — read-only
+  health checks, effective config, and template discovery.
+
+Full table with descriptions: see [Tools](#tools) below.
 
 ## Scope (v1)
+
+RelayOS v1 is intentionally narrow. The OSS core covers the Claude Code ↔
+Codex CLI handoff and nothing else. RelayOS is **not** a chat bridge, a
+session-level coordinator, or a multi-agent chat room — it controls one
+thing: how a single task gets handed from one coding agent to another.
 
 **In scope**
 
