@@ -13,6 +13,11 @@ This is documentation — not a runtime feature. There is no orchestrator
 process, no background agent, no UI. Everything described here uses MCP
 tools that already ship in this repo.
 
+Rookie Mode now includes a prompt-boundary risk gate. Before creating a
+handoff, Claude should classify the request using
+[Rookie Mode Risk Policy](./ROOKIE_MODE_RISK_POLICY.md), then choose the
+safest existing template and scope constraints for that risk level.
+
 ---
 
 ## Mental model
@@ -89,6 +94,49 @@ You stay in Claude. Claude does the rest.
 Claude prints the `handoff_id` and the `launch_command` after each
 `create_quick_handoff`. You don't have to remember either — the next
 section explains why.
+
+---
+
+## Risk gate before handoff
+
+Before Claude creates a Rookie Mode handoff, it should classify the task
+and route it conservatively:
+
+- `risk_level`: `LOW` | `MEDIUM` | `HIGH` | `BLOCKED`
+- `execution_mode`: `review-only` | `docs-only` | `test-only` |
+  `patch` | `defer`
+- `recommended_template`
+- `recommended_model`
+- `recommended_effort`
+- why this routing is safe
+- files or areas that must not be touched
+
+These fields guide template choice and handoff boundaries; they are not
+new envelope fields. Claude should include the relevant parts in the
+handoff task, `allowed_files`, `forbidden_files`, and `constraints`.
+
+Use the existing templates as the safe routing surface:
+
+| Risk / intent                      | Execution guidance | Template                                  |
+|------------------------------------|--------------------|-------------------------------------------|
+| Narrow docs-only change            | `docs-only`        | `codex-patch` with docs-only constraints  |
+| Focused test run                   | `test-only`        | `codex-test`                              |
+| Read-only inspection               | `review-only`      | `codex-review`                            |
+| Bounded implementation             | `patch`            | `codex-patch`                             |
+| Unclear medium/high-risk work      | `review-only` or plan first | `codex-review` or `codex-plan`    |
+| Unsafe or out-of-scope request     | `defer`            | no handoff                                |
+
+`BLOCKED` tasks do not get a handoff. Examples include secrets access,
+requests to bypass auditability, destructive work without explicit
+approval, or work that would add a runner, UI, cloud service, account
+system, pricing/licensing, automatic release flow, or schema-breaking
+storage/envelope/audit change when those are out of scope.
+
+For `HIGH` risk tasks, Claude should default to `codex-review` or
+`codex-plan`; it should only queue `codex-patch` when the user has
+provided explicit scope, protected areas, and verification expectations.
+Rookie Mode should never auto-select `xhigh` or `max`; those remain
+explicit lower-level overrides.
 
 ---
 
