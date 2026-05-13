@@ -116,7 +116,7 @@ Three outcomes:
 
 You can poll: re-run `read_latest_handoff` whenever you want to check
 for new work. There is no push, no notification, no background loop —
-that is intentional for v0.3.x.
+that is intentional.
 
 ---
 
