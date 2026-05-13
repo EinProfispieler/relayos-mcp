@@ -1,3 +1,12 @@
 #!/usr/bin/env sh
-DIR=$(cd "$(dirname "$0")" && pwd)
+# Resolve symlinks in $0 so npm link and similar setups work.
+SCRIPT="$0"
+while [ -h "$SCRIPT" ]; do
+  LINK=$(readlink "$SCRIPT")
+  case "$LINK" in
+    /*) SCRIPT="$LINK" ;;
+    *) SCRIPT="$(dirname "$SCRIPT")/$LINK" ;;
+  esac
+done
+DIR=$(cd "$(dirname "$SCRIPT")" && pwd)
 exec node "$DIR/../dist/cli.js" "$@"
