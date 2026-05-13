@@ -67,7 +67,7 @@ That's the whole setup. There is no daemon to start.
 
 If something doesn't seem wired up right — Codex isn't seeing the
 handoff, the wrong template seems to be picked, the storage path looks
-wrong — ask Claude to call `doctor`. It runs nine read-only checks
+wrong — ask Claude to call `doctor`. It runs nine checks
 (config loadable, storage writable, templates loaded, version
 consistency, etc.) and reports what's broken without crashing on bad
 state.
@@ -194,7 +194,7 @@ of them are environmental, not RelayOS bugs.
 
 If something still looks wrong, ask Claude to call `doctor` for a
 nine-check health report and `inspect_config` for the resolved config —
-both are read-only and degrade gracefully.
+`inspect_config` is read-only, and both degrade gracefully.
 
 ---
 
