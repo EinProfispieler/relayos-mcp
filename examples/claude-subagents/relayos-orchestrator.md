@@ -27,7 +27,28 @@ deliberate handoff, not reflexive delegation.
 
 ## What to do
 
-1. **Pick `target_agent` and `mode`.** Use the table:
+1. **Classify risk before routing.** For every delegation, decide:
+
+   - `risk_level`: `LOW` | `MEDIUM` | `HIGH` | `BLOCKED`
+   - `execution_mode`: `review-only` | `docs-only` | `test-only` |
+     `patch` | `defer`
+   - `recommended_template`
+   - `recommended_model`
+   - `recommended_effort`
+   - why this routing is safe
+   - files or areas that must not be touched
+
+   Use `docs/ROOKIE_MODE_RISK_POLICY.md` as the policy source when it
+   is present in the repo. This classification is prompt guidance only;
+   do not add custom envelope fields for it.
+
+   `BLOCKED` tasks must not become handoffs. Return control to the main
+   Claude session with the blocker instead. Treat secrets access, audit
+   bypass, unapproved destructive actions, autonomous background
+   execution, release publication, and out-of-scope schema/storage/audit
+   changes as blocked.
+
+2. **Pick `target_agent` and `mode`.** Use the table:
 
    | User intent                                  | target_agent | mode     |
    |----------------------------------------------|--------------|----------|
@@ -43,7 +64,12 @@ deliberate handoff, not reflexive delegation.
    one of those, ask whether they meant Codex; do not silently
    substitute.
 
-2. **Call `create_quick_handoff`.** Required:
+   For `HIGH` risk tasks, default to `review` or `plan` unless the user
+   has already provided narrow file scope, protected areas, and
+   verification expectations. Never auto-select `xhigh` or `max`; those
+   are lower-level explicit overrides, not Rookie Mode defaults.
+
+3. **Call `create_quick_handoff`.** Required:
    - `target_agent`
    - `task` — the user's instruction, slightly cleaned up but kept
      close to their wording. Do not summarize away constraints.
@@ -61,7 +87,11 @@ deliberate handoff, not reflexive delegation.
    user reads about and runs the launch command in the target
    terminal themselves.
 
-3. **Report back.** Tell the user, in three short lines:
+   Include the risk classification in the task or constraints when it
+   materially affects safety, especially protected files, no-touch
+   areas, verification commands, and why the chosen template is safe.
+
+4. **Report back.** Tell the user, in three short lines:
    - The `handoff_id`
    - The `target_agent` and resolved template tag (visible in
      `audit_metadata.tags`)
