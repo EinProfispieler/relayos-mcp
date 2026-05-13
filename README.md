@@ -84,6 +84,13 @@ args = ["/absolute/path/to/relayos-mcp/dist/index.js"]
 
 Override storage path via the `HANDOFF_DIR` env var (default `~/.claude/handoff/`).
 
+> **Upgrading?** MCP clients capture the tool list when they start the
+> server. After `git pull && npm run build` to a new RelayOS version,
+> **restart your Claude Code (and Codex) session** — otherwise newly
+> added tools (e.g. `doctor`, `inspect_config`, `list_open_handoffs`
+> from v0.4.0) will not appear in the host's tool list even though
+> `dist/index.js` exposes them.
+
 ---
 
 ## Tools

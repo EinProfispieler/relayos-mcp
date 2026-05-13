@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.4.1
+
+- **Documentation and tool-description tightening only.** No code,
+  schema, storage, envelope, audit, or `create_handoff` behavior
+  changes.
+- Tightened MCP tool descriptions for `doctor`, `inspect_config`,
+  `list_open_handoffs`, `list_handoffs`, and
+  `create_handoff_from_template` so the first sentence makes the
+  selection boundary against neighboring tools obvious to the host LLM.
+  Surfaced from a v0.4.0 dogfood: Codex flagged that
+  `list_handoffs` vs `list_open_handoffs`, `doctor` vs `inspect_config`,
+  and `create_handoff_from_template` vs `create_quick_handoff` were
+  easy to confuse.
+- Added a Troubleshooting section to `docs/ROOKIE_MODE.md` covering:
+  the MCP-host tool-list cache (restart Claude Code after upgrading),
+  unrelated failing MCP servers polluting the error pane, and
+  `cli_detection.found: false` being informational rather than an
+  error.
+- Added an "Upgrading?" callout to the README install section pointing
+  at the same restart-after-upgrade requirement, called out so v0.4.0's
+  new tools (`doctor`, `inspect_config`, `list_open_handoffs`) actually
+  appear after a build.
+
 ## v0.4.0
 
 - Added MCP tool `inspect_config` — read-only diagnostic that returns the

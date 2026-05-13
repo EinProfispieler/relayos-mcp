@@ -134,14 +134,13 @@ export async function buildServer() {
     {
       title: "Create handoff from template",
       description:
-        "Preferred way to delegate work to Codex or Claude. " +
-        "Use when the user says things like \"ask Codex to fix X\", \"have Codex write a patch for Y\", " +
-        "\"get Codex to review Z\", or \"have Claude plan the migration\". " +
-        "Pass a short natural-language task plus a template name " +
-        "(codex-patch, codex-review, codex-test, codex-plan, claude-review, claude-plan); " +
+        "Delegate work using a named template plus a short task — pick this when you know the " +
+        "template name or need to pass `overrides` (allowed_files, effort, expected_output, etc.). " +
+        "Templates: codex-patch, codex-review, codex-test, codex-plan, claude-review, claude-plan; " +
         "the server fills model, effort, execution_mode, allowed/forbidden files, constraints, and expected_output. " +
-        "Call list_templates first if you don't know the template name. " +
-        "Fall back to create_handoff only when no template fits or you need full envelope control.",
+        "For one-shot \"just ask Codex to fix X\" delegation without thinking about template names, " +
+        "prefer `create_quick_handoff`. Call `list_templates` first if the template name isn't obvious. " +
+        "Fall back to `create_handoff` only when no template fits or you need full envelope control.",
       inputSchema: {
         template: z.string().min(1),
         task: z.string().min(1),
@@ -263,7 +262,10 @@ export async function buildServer() {
     {
       title: "List handoffs",
       description:
-        "List handoff envelopes (newest first), optionally filtered by source/target/status. Default limit 20.",
+        "Browse handoff history. Returns full envelopes (newest first) and supports filtering by " +
+        "source/target/status — including `completed` and `failed`. Default limit 20. " +
+        "For just what is currently queued (status `recorded` or `spawning`) prefer " +
+        "`list_open_handoffs`, which returns lightweight summaries instead of full envelopes.",
       inputSchema: {
         limit: z.number().int().min(1).max(200).optional(),
         source_agent: AgentName.optional(),
@@ -313,12 +315,14 @@ export async function buildServer() {
     {
       title: "Inspect RelayOS effective config",
       description:
-        "Read-only diagnostic. Returns the effective RelayOS configuration: where the config came from " +
-        "(explicit env, upward search, or default), the resolved storage directory, the set of built-in " +
-        "and project templates (with any project templates that shadow built-ins flagged), and the " +
-        "parsed config object. On malformed/invalid config returns a structured `{ status: \"error\", " +
-        "error: { type, message, path? } }` result instead of throwing — safe to call when something " +
-        "is broken.",
+        "Show what RelayOS is actually using for config — call when the wrong template, storage path, " +
+        "or shadowed built-in seems to be in effect. Read-only. Returns where the config came from " +
+        "(`explicit-env` / `upward-search` / `default`), the resolved storage directory, built-in vs " +
+        "project templates (with any project templates shadowing built-ins flagged), and the parsed " +
+        "config object. For a broader health check across templates, storage, and version " +
+        "consistency, run `doctor` instead. On malformed/invalid config returns a structured " +
+        "`{ status: \"error\", error: { type, message, path? } }` result instead of throwing — safe " +
+        "to call when something is broken.",
       inputSchema: {},
     },
     async () => {
@@ -332,11 +336,12 @@ export async function buildServer() {
     {
       title: "RelayOS doctor",
       description:
-        "Read-only health check. Runs nine diagnostic checks (config loadable, storage path/listable/" +
-        "writable, built-in templates, project templates, list_handoffs, read_latest_handoff shape, " +
-        "package/server version consistency) and returns `{ status: \"pass\"|\"warn\"|\"fail\", " +
-        "server_version, checks: [...] }`. Overall status is the worst of any individual check. The " +
-        "tool never throws on broken state — failures are reported as `fail` checks with detail.",
+        "Run when RelayOS seems broken or before a release: a one-shot read-only health check across " +
+        "config, storage, templates, list_handoffs, read_latest_handoff shape, and package/server " +
+        "version consistency. Returns `{ status: \"pass\"|\"warn\"|\"fail\", server_version, " +
+        "checks: [...] }`; overall status is the worst of any individual check. For just the " +
+        "effective config (not a health check) call `inspect_config` instead. Never throws on " +
+        "broken state — failures are reported as `fail` checks with `detail`.",
       inputSchema: {
         package_version: z.string().min(1).optional(),
       },
@@ -352,11 +357,13 @@ export async function buildServer() {
     {
       title: "List open handoffs",
       description:
-        "Read-only diagnostic. Returns lightweight summaries of open handoffs (status `recorded` or " +
-        "`spawning`) — never the full envelope. Each summary contains `id`, `title`, `assigned_to`, " +
-        "`status`, `created_at`, `tags`, and `path`. Optional `assigned_to` filters by target agent " +
-        "(string — accepts `\"codex\"`, `\"claude\"`, or any other agent name). Optional `limit` " +
-        "(1–200, default 20).",
+        "What is queued right now. Returns lightweight summaries of open handoffs (status " +
+        "`recorded` or `spawning`) — never the full envelope, so it is safe to call without " +
+        "spilling task descriptions into context. Each summary: `id`, `title`, `assigned_to`, " +
+        "`status`, `created_at`, `tags`, `path`. For full envelopes, history (including " +
+        "`completed`/`failed`), or filtering by source agent, use `list_handoffs` instead. " +
+        "Optional `assigned_to` filters by target agent (string — accepts `\"codex\"`, " +
+        "`\"claude\"`, or any other agent name). Optional `limit` (1–200, default 20).",
       inputSchema: {
         assigned_to: z.string().min(1).optional(),
         limit: z.number().int().min(1).max(200).optional(),
