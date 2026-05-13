@@ -31,7 +31,7 @@ describe("create_quick_handoff", () => {
     );
     expect(read.envelope.target_agent).toBe("codex");
     expect(read.envelope.execution_mode).toBe("patch");
-    expect(read.envelope.model).toBe("gpt-5-codex");
+    expect(read.envelope.model).toBe("gpt-5.5");
     expect(read.envelope.audit_metadata.tags).toContain(
       "template:codex-patch",
     );

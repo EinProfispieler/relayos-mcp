@@ -17,7 +17,7 @@ export function sampleInput(overrides: Record<string, unknown> = {}) {
   return {
     source_agent: "claude",
     target_agent: "codex",
-    model: "gpt-5-codex",
+    model: "gpt-5.5",
     effort: "high",
     execution_mode: "patch",
     task_title: "Replace string concat with template literals in api/util",

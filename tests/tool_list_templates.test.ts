@@ -27,7 +27,7 @@ describe("list_templates tool", () => {
           templates: {
             "internal-migration": {
               target_agent: "codex",
-              model: "gpt-5-codex",
+              model: "gpt-5.5",
               effort: "high",
               execution_mode: "patch",
               expected_output: ["A scoped diff."],

@@ -299,16 +299,20 @@ overrides.
 
 | Name            | target | execution_mode | model             | effort   |
 |-----------------|--------|----------------|-------------------|----------|
-| `codex-patch`   | codex  | `patch`        | `gpt-5-codex`     | `high`   |
-| `codex-review`  | codex  | `review`       | `gpt-5-codex`     | `medium` |
-| `codex-test`    | codex  | `test`         | `gpt-5-codex`     | `medium` |
-| `codex-plan`    | codex  | `plan`         | `gpt-5-codex`     | `high`   |
+| `codex-patch`   | codex  | `patch`        | `gpt-5.5`         | `high`   |
+| `codex-review`  | codex  | `review`       | `gpt-5.5`         | `medium` |
+| `codex-test`    | codex  | `test`         | `gpt-5.5`         | `medium` |
+| `codex-plan`    | codex  | `plan`         | `gpt-5.5`         | `high`   |
 | `claude-review` | claude | `review`       | `claude-opus-4-7` | `medium` |
 | `claude-plan`   | claude | `plan`         | `claude-opus-4-7` | `high`   |
 
 `codex-patch` is the default for code-patch handoffs. There is no
 built-in `claude-patch` template; define one in project config if you
 need it.
+
+Template `model` values are recommendations. Override them when your
+Codex CLI authentication mode or account does not have access to the
+recommended model.
 
 `xhigh` is a valid effort *override*, but no built-in template defaults
 to `xhigh`. `max` is a valid override at the RelayOS layer — Core
@@ -335,7 +339,7 @@ automatically. Override with `RELAYOS_CONFIG=/abs/path/to/file.json`.
     },
     "internal-migration": {
       "target_agent": "codex",
-      "model": "gpt-5-codex",
+      "model": "gpt-5.5",
       "effort": "high",
       "execution_mode": "patch",
       "expected_output": [
@@ -404,7 +408,7 @@ All examples use `create_handoff`. Each shows the JSON payload + the resulting
 {
   "source_agent": "claude",
   "target_agent": "codex",
-  "model": "gpt-5-codex",
+  "model": "gpt-5.5",
   "effort": "high",
   "execution_mode": "patch",
   "task_title": "Refactor format helpers to template literals",
@@ -419,7 +423,7 @@ All examples use `create_handoff`. Each shows the JSON payload + the resulting
 Rendered `launch_command`:
 
 ```
-codex exec --model gpt-5-codex -c model_reasoning_effort=high --sandbox workspace-write --skip-git-repo-check '<prefixed prompt with HANDOFF header, scope, constraints, task>'
+codex exec --model gpt-5.5 -c model_reasoning_effort=high --sandbox workspace-write --skip-git-repo-check '<prefixed prompt with HANDOFF header, scope, constraints, task>'
 ```
 
 ### B. Codex → Claude review (record-only)
@@ -459,7 +463,7 @@ event. **No subprocess runs.** The source agent (or you) executes the
 {
   "source_agent": "claude",
   "target_agent": "codex",
-  "model": "gpt-5-codex",
+  "model": "gpt-5.5",
   "effort": "medium",
   "execution_mode": "test",
   "task_title": "Run the unit tests under tests/api/util",
@@ -534,7 +538,7 @@ Response (abridged):
 {
   "handoff_id": "h_01HQ…",
   "envelope_path": "/Users/you/.claude/handoff/envelopes/h_01HQ….json",
-  "launch_command": "codex exec --model gpt-5-codex …",
+  "launch_command": "codex exec --model gpt-5.5 …",
   "status": "recorded"
 }
 ```

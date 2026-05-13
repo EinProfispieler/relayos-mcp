@@ -11,7 +11,7 @@ describe("Template schema", () => {
       name: "codex-patch",
       description: "Codex code-patch handoff",
       target_agent: "codex",
-      model: "gpt-5-codex",
+      model: "gpt-5.5",
       effort: "high",
       execution_mode: "patch",
       allowed_files: [],

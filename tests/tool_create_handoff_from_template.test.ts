@@ -34,7 +34,7 @@ describe("create_handoff_from_template", () => {
     const read = await readHandoff({ handoff_id: r.handoff_id }, { layout, audit });
     expect(read.envelope.target_agent).toBe("codex");
     expect(read.envelope.execution_mode).toBe("patch");
-    expect(read.envelope.model).toBe("gpt-5-codex");
+    expect(read.envelope.model).toBe("gpt-5.5");
     expect(read.envelope.effort).toBe("high");
     expect(read.envelope.allowed_files).toEqual(["src/tools/validate_handoff.ts"]);
     expect(read.envelope.expected_output).toEqual([

@@ -56,7 +56,7 @@ describe("resolveTemplate", () => {
       templates: {
         "internal-migration": {
           target_agent: "codex",
-          model: "gpt-5-codex",
+          model: "gpt-5.5",
           effort: "high",
           execution_mode: "patch",
           expected_output: ["A scoped diff.", "A rollback note."],
@@ -119,7 +119,7 @@ describe("listAllTemplates", () => {
       templates: {
         "internal-migration": {
           target_agent: "codex",
-          model: "gpt-5-codex",
+          model: "gpt-5.5",
           effort: "high",
           execution_mode: "patch",
           expected_output: ["A diff."],
