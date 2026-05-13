@@ -7,7 +7,23 @@ export const BUILTIN_DEFAULTS = {
 };
 
 const REVIEW_OUTPUT = [
-  "A bulleted list of findings, each with severity (info/warn/error) and file:line.",
+  [
+    "Use this exact compact report format:",
+    "OVERALL: PASS | WARN | FAIL",
+    "ACTION: Ship as-is | Fix required | Stop | Continue",
+    "BLOCKERS:",
+    "- None, or blocking issues only",
+    "WARNINGS:",
+    "- None, or max 3 bullets",
+    "VERIFIED:",
+    "- command/result pairs only",
+    "FILES CHECKED:",
+    "- max 8 paths",
+    "",
+    "PASS reports stay under 20 lines. FAIL reports include only blockers and the minimum evidence needed.",
+    "Do NOT include long prose. Do NOT list line-by-line PASS findings unless they explain a warning or failure.",
+    "Evidence in BLOCKERS / WARNINGS uses file:line or short command-output excerpts only.",
+  ].join("\n"),
 ];
 
 const PLAN_OUTPUT = [
