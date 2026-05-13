@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.4.0
+
+- Added MCP tool `inspect_config` — read-only diagnostic that returns the
+  effective RelayOS configuration: `config_source`
+  (`explicit-env` / `upward-search` / `default`), `config_path`,
+  `storage_dir`, the set of built-in/project/shadowed templates, the parsed
+  config object, and any warnings. On malformed or invalid config it
+  returns a structured `{ status: "error", error: { type, message, path? } }`
+  result instead of throwing — safe to call when something is broken.
+- Added MCP tool `doctor` — read-only health check that runs nine
+  diagnostic checks (config loadable, storage path/listable/writable,
+  built-in templates, project templates, `list_handoffs`,
+  `read_latest_handoff` shape, package/server version consistency) and
+  returns `{ status: "pass" | "warn" | "fail", server_version, checks }`.
+  Overall status is the worst of any individual check. Never throws on
+  broken state — failures are reported as `fail` checks with `detail`.
+- Added MCP tool `list_open_handoffs` — read-only diagnostic that returns
+  lightweight summaries of open handoffs (status `recorded` or
+  `spawning`) with `id`, `title`, `assigned_to`, `status`, `created_at`,
+  `tags`, and `path`. Never returns full envelopes. Optional
+  `assigned_to: string` (accepts `"codex"`, `"claude"`, or any other
+  agent name — not enum-restricted, so future agents like `cursor`
+  won't require a breaking change). Optional `limit` (1–200, default 20).
+- Added `src/version.ts` as the single source of truth for the server
+  version. The McpServer constructor now imports `SERVER_VERSION` from
+  there instead of hard-coding a literal — fixes the v0.3.0/v0.3.1
+  drift between `package.json` and the registered MCP server version.
+  The `version_consistency` doctor check verifies the two stay aligned.
+- No changes to envelope wire format, JSONL audit format, on-disk
+  storage layout, or `create_handoff` behavior.
+
 ## v0.3.1
 
 - **Documentation only.** No code, schema, or behavior changes.

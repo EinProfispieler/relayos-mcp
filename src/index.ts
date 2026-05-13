@@ -26,6 +26,10 @@ import { writeAuditLog } from "./tools/write_audit_log.js";
 import { listHandoffs } from "./tools/list_handoffs.js";
 import { readHandoff } from "./tools/read_handoff.js";
 import { readLatestHandoff } from "./tools/read_latest_handoff.js";
+import { inspectConfig } from "./tools/inspect_config.js";
+import { doctor } from "./tools/doctor.js";
+import { listOpenHandoffs } from "./tools/list_open_handoffs.js";
+import { SERVER_VERSION } from "./version.js";
 
 const HandoffInputShape = {
   source_agent: AgentName,
@@ -66,7 +70,7 @@ export async function buildServer() {
   const audit = createAuditWriter(layout);
 
   const server = new McpServer(
-    { name: "relayos-mcp", version: "0.3.0" },
+    { name: "relayos-mcp", version: SERVER_VERSION },
     { capabilities: { tools: {} } },
   );
 
@@ -300,6 +304,66 @@ export async function buildServer() {
     },
     async (args) => {
       const result = await readLatestHandoff(args, { layout, audit });
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "inspect_config",
+    {
+      title: "Inspect RelayOS effective config",
+      description:
+        "Read-only diagnostic. Returns the effective RelayOS configuration: where the config came from " +
+        "(explicit env, upward search, or default), the resolved storage directory, the set of built-in " +
+        "and project templates (with any project templates that shadow built-ins flagged), and the " +
+        "parsed config object. On malformed/invalid config returns a structured `{ status: \"error\", " +
+        "error: { type, message, path? } }` result instead of throwing — safe to call when something " +
+        "is broken.",
+      inputSchema: {},
+    },
+    async () => {
+      const result = inspectConfig({});
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "doctor",
+    {
+      title: "RelayOS doctor",
+      description:
+        "Read-only health check. Runs nine diagnostic checks (config loadable, storage path/listable/" +
+        "writable, built-in templates, project templates, list_handoffs, read_latest_handoff shape, " +
+        "package/server version consistency) and returns `{ status: \"pass\"|\"warn\"|\"fail\", " +
+        "server_version, checks: [...] }`. Overall status is the worst of any individual check. The " +
+        "tool never throws on broken state — failures are reported as `fail` checks with detail.",
+      inputSchema: {
+        package_version: z.string().min(1).optional(),
+      },
+    },
+    async (args) => {
+      const result = await doctor(args, { layout, audit });
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "list_open_handoffs",
+    {
+      title: "List open handoffs",
+      description:
+        "Read-only diagnostic. Returns lightweight summaries of open handoffs (status `recorded` or " +
+        "`spawning`) — never the full envelope. Each summary contains `id`, `title`, `assigned_to`, " +
+        "`status`, `created_at`, `tags`, and `path`. Optional `assigned_to` filters by target agent " +
+        "(string — accepts `\"codex\"`, `\"claude\"`, or any other agent name). Optional `limit` " +
+        "(1–200, default 20).",
+      inputSchema: {
+        assigned_to: z.string().min(1).optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+      },
+    },
+    async (args) => {
+      const result = await listOpenHandoffs(args, { layout });
       return jsonResult(result);
     },
   );
