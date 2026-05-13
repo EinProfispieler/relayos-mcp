@@ -22,6 +22,13 @@ Each handoff is a validated envelope:
 
 Record-only by default. `auto_spawn` is opt-in per call and never default.
 
+> **New here?** See [**Rookie Mode**](docs/ROOKIE_MODE.md) — talk to one
+> Claude session and let RelayOS coordinate Codex (and optional Claude
+> review) for you. Includes a drop-in Claude Code subagent
+> ([`examples/claude-subagents/relayos-orchestrator.md`](examples/claude-subagents/relayos-orchestrator.md))
+> and a Codex-side `AGENTS.md`
+> ([`examples/codex/AGENTS.md`](examples/codex/AGENTS.md)).
+
 ## Scope (v1)
 
 **In scope**

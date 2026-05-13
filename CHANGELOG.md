@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.3.1
+
+- **Documentation only.** No code, schema, or behavior changes.
+- Added `docs/ROOKIE_MODE.md` — workflow guide describing how to drive
+  RelayOS from a single primary Claude session, with Codex picking up
+  its own assignments via `read_latest_handoff`.
+- Added `examples/claude-subagents/relayos-orchestrator.md` — drop-in
+  [Claude Code subagent](https://docs.claude.com/en/docs/claude-code/sub-agents)
+  that translates "ask Codex to ..." style requests into
+  `create_quick_handoff` calls, record-only by default.
+- Added `examples/codex/AGENTS.md` — drop-in Codex-side instruction
+  file that has Codex call `read_latest_handoff` at session start and
+  treat the returned envelope as binding (allowed_files,
+  forbidden_files, constraints, expected_output).
+- Added a Rookie Mode entry-point note near the top of the README.
+- No runtime orchestration, no background runner, no UI/TUI, no
+  doctor/inspect_config tools shipped in this release. All examples
+  use MCP tools that already existed in v0.3.0.
+
 ## v0.3.0
 
 - Added MCP tool `create_quick_handoff` — one-shot handoff creation from a
