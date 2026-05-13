@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { doctor } from "../src/tools/doctor.js";
 import { createAuditWriter } from "../src/audit.js";
@@ -55,6 +55,22 @@ describe("doctor", () => {
       package_version: "9.9.9",
       server_version: SERVER_VERSION,
     });
+    expect(r.status).toBe("warn");
+  });
+
+  it("warns instead of throwing when the storage directory is missing", async () => {
+    const { layout, cleanup } = await tempLayout();
+    cleanups.push(cleanup);
+    rmSync(layout.root, { recursive: true, force: true });
+    const audit = createAuditWriter(layout);
+    const r = await doctor(
+      { package_version: SERVER_VERSION },
+      { layout, audit, cwd: layout.root, env: { HANDOFF_DIR: layout.root } },
+    );
+    const spa = r.checks.find((c) => c.name === "storage_path_available")!;
+    expect(spa.status).toBe("warn");
+    const sw = r.checks.find((c) => c.name === "storage_writable")!;
+    expect(sw.status).toBe("pass");
     expect(r.status).toBe("warn");
   });
 
