@@ -318,6 +318,7 @@ prompt boundary.
 Future roadmap/design notes (not current shipped runtime features):
 
 - [ROADMAP.md](./ROADMAP.md)
+- [HANDOFF_RUN_CONTRACT.md](./HANDOFF_RUN_CONTRACT.md) — future run completion/result evidence contract (not current runner/daemon support)
 - [ROOKIE_MODE_FUTURE.md](./ROOKIE_MODE_FUTURE.md)
 - [CURATED_MEMORY.md](./CURATED_MEMORY.md)
 - [SCOPED_ROOKIE_RUNTIME.md](./SCOPED_ROOKIE_RUNTIME.md)

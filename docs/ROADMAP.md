@@ -110,6 +110,10 @@ Each scoped run should declare at minimum:
 
 This keeps runtime behavior bounded and reviewable, rather than autonomous/unlimited.
 
+For future run completion-state/result evidence contract details (not current runner support), see:
+
+- [HANDOFF_RUN_CONTRACT.md](./HANDOFF_RUN_CONTRACT.md)
+
 ## 5) Multi-Client Design
 
 RelayOS should not duplicate Claude/Codex app functionality.

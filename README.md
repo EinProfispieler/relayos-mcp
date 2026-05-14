@@ -274,6 +274,7 @@ Future roadmap/design direction (not current runtime support):
 - [**docs/ROADMAP.md**](docs/ROADMAP.md) — product direction across Core/Pro/Business/Enterprise
 - [**docs/CURATED_MEMORY.md**](docs/CURATED_MEMORY.md) — curated continuity and context-pack design
 - [**docs/SCOPED_ROOKIE_RUNTIME.md**](docs/SCOPED_ROOKIE_RUNTIME.md) — bounded, human-supervised runtime concept
+- [**docs/HANDOFF_RUN_CONTRACT.md**](docs/HANDOFF_RUN_CONTRACT.md) — future completion-detection/result-evidence contract (not current runner support)
 - [**docs/ROOKIE_MODE_FUTURE.md**](docs/ROOKIE_MODE_FUTURE.md) — future Rookie Mode/routing direction
 - [**docs/OVERSEER_HIERARCHY.md**](docs/OVERSEER_HIERARCHY.md) — future multi-level overseer concept
 - [**docs/PROVIDER_ROUTING_PLAN.md**](docs/PROVIDER_ROUTING_PLAN.md) — provider routing direction

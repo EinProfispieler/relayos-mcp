@@ -109,3 +109,9 @@ Future tier direction alignment:
 ## Summary
 
 Scoped Rookie Mode direction should preserve operator control, explicit boundaries, and auditable outcomes. The runtime is envisioned as bounded workflow orchestration, not autonomous unlimited agency.
+
+## Related Future Contract
+
+For future completion detection and structured result evidence (without implying current runner/daemon support), see:
+
+- [HANDOFF_RUN_CONTRACT.md](./HANDOFF_RUN_CONTRACT.md)
