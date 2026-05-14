@@ -22,12 +22,17 @@ import {
 } from "./git.js";
 import { listEnvelopes } from "./envelope.js";
 import {
+  appendBranchProgress,
   appendNote,
   hasOverseerState,
+  initContextFiles,
+  readActiveBrief,
+  readBranchProgress,
   readLatestNotes,
   readNextAction,
   readOverseerTextFile,
   resolveOverseerLayout,
+  writeActiveBrief,
   writeNextAction,
 } from "./overseer.js";
 import { evaluatePolicy, formatBannerLines } from "./policy.js";
@@ -558,20 +563,31 @@ async function runOverseerBrief(args: string[], io: CliIO): Promise<number> {
   const MISSING = "(missing — file not found in .relayos/overseer/)";
   const sep = OVERSEER_SEP;
 
-  const [projectBrief, currentState, releasePolicy, forbiddenActions, productDirection, nextAction, commitInfo] =
-    await Promise.all([
-      readOverseerTextFile(layout, "project_brief.md"),
-      readOverseerTextFile(layout, "current.md"),
-      readOverseerTextFile(layout, "release_policy.md"),
-      readOverseerTextFile(layout, "forbidden_actions.md"),
-      readOverseerTextFile(layout, "product_direction.md"),
-      readNextAction(layout),
-      isGitRepo(cwd).then(async (isRepo) => {
-        if (!isRepo) return null;
-        const [head, branch] = await Promise.all([gitHead(cwd), gitBranch(cwd)]);
-        return head ? `${head.slice(0, 7)} @ ${branch ?? "(detached)"}` : null;
-      }),
-    ]);
+  const [
+    projectBrief,
+    currentState,
+    releasePolicy,
+    forbiddenActions,
+    productDirection,
+    nextAction,
+    activeBranch,
+    branchProgress,
+    commitInfo,
+  ] = await Promise.all([
+    readOverseerTextFile(layout, "project_brief.md"),
+    readOverseerTextFile(layout, "current.md"),
+    readOverseerTextFile(layout, "release_policy.md"),
+    readOverseerTextFile(layout, "forbidden_actions.md"),
+    readOverseerTextFile(layout, "product_direction.md"),
+    readNextAction(layout),
+    readActiveBrief(layout),
+    readBranchProgress(layout),
+    isGitRepo(cwd).then(async (isRepo) => {
+      if (!isRepo) return null;
+      const [head, branch] = await Promise.all([gitHead(cwd), gitBranch(cwd)]);
+      return head ? `${head.slice(0, 7)} @ ${branch ?? "(detached)"}` : null;
+    }),
+  ]);
 
   function section(title: string, content: string | null): string {
     return [title, sep, content ?? MISSING].join("\n");
@@ -594,6 +610,26 @@ async function runOverseerBrief(args: string[], io: CliIO): Promise<number> {
     "NEXT ACTION",
     sep,
     nextAction ? `  ${nextAction}` : "  (not set)",
+  ];
+
+  if (activeBranch !== null) {
+    parts.push(
+      "",
+      "ACTIVE BRANCH",
+      sep,
+      `  ${activeBranch}`,
+    );
+    if (branchProgress !== null) {
+      parts.push(
+        "",
+        "BRANCH PROGRESS",
+        sep,
+        ...branchProgress.split("\n").map((l) => `  ${l}`),
+      );
+    }
+  }
+
+  parts.push(
     "",
     "LATEST COMMIT",
     sep,
@@ -605,9 +641,53 @@ async function runOverseerBrief(args: string[], io: CliIO): Promise<number> {
     "  handoff envelopes, transcripts, or private scratch to git.",
     "  Handoff storage defaults to ~/.claude/handoff/ (outside repo).",
     "  .relayos/overseer/ is gitignored in the project repo.",
-  ];
+  );
 
   io.stdout.write(`${parts.join("\n")}\n`);
+  return 0;
+}
+
+async function runOverseerInitContext(_args: string[], io: CliIO): Promise<number> {
+  const layout = resolveOverseerLayout(process.cwd());
+  const created = await initContextFiles(layout);
+  if (created.length === 0) {
+    io.stdout.write("overseer context already complete — no files created\n");
+  } else {
+    for (const f of created) {
+      io.stdout.write(`created: .relayos/overseer/${f}\n`);
+    }
+  }
+  return 0;
+}
+
+async function runOverseerBranch(args: string[], io: CliIO): Promise<number> {
+  if (args.length === 0) {
+    io.stderr.write("usage: relayos overseer branch <name>\n");
+    return 1;
+  }
+  const name = args.join(" ");
+  const layout = resolveOverseerLayout(process.cwd());
+  await writeActiveBrief(layout, name);
+  io.stdout.write(`active branch set: ${name}\n`);
+  return 0;
+}
+
+async function runOverseerProgress(args: string[], io: CliIO): Promise<number> {
+  const layout = resolveOverseerLayout(process.cwd());
+  if (args.length === 0) {
+    const progress = await readBranchProgress(layout);
+    if (progress) {
+      io.stdout.write(`${progress}\n`);
+    } else {
+      io.stdout.write(
+        "(no branch progress recorded — use `relayos overseer progress <text>` to add an entry)\n",
+      );
+    }
+    return 0;
+  }
+  const text = args.join(" ");
+  await appendBranchProgress(layout, text);
+  io.stdout.write(`progress recorded: ${text}\n`);
   return 0;
 }
 
@@ -617,7 +697,12 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "note") return runOverseerNote(rest, io);
   if (sub === "next") return runOverseerNext(rest, io);
   if (sub === "brief") return runOverseerBrief(rest, io);
-  io.stderr.write("usage: relayos overseer <status|note|next|brief> [args...]\n");
+  if (sub === "init-context") return runOverseerInitContext(rest, io);
+  if (sub === "branch") return runOverseerBranch(rest, io);
+  if (sub === "progress") return runOverseerProgress(rest, io);
+  io.stderr.write(
+    "usage: relayos overseer <status|note|next|brief|init-context|branch|progress> [args...]\n",
+  );
   return 1;
 }
 

@@ -162,6 +162,12 @@ relayos report
 relayos overseer status
 relayos overseer next "review PR #42"
 relayos overseer note "blocked: CI failing on auth tests"
+
+# Structured context (branch + progress)
+relayos overseer init-context
+relayos overseer branch "add auth middleware"
+relayos overseer progress "tests passing, moving to review"
+relayos overseer brief
 ```
 
 ## Rookie Mode
@@ -218,7 +224,7 @@ Available from any terminal after `npm link` (or via `./bin/relayos`).
 | `relayos checkpoint <create\|list\|show>` | Snapshot HEAD + status + diff before risky handoffs. See [docs/CHECKPOINTS.md](docs/CHECKPOINTS.md). |
 | `relayos diff-risk` | Classify the current working tree before `git commit`. See [docs/DIFF_RISK.md](docs/DIFF_RISK.md). |
 | `relayos report` | Print a compact evidence snapshot: handoff, checkpoint, diff-risk, git status. |
-| `relayos overseer <status\|note\|next>` | Local coordination workspace: notes and next-action store. See [docs/OVERSEER.md](docs/OVERSEER.md). |
+| `relayos overseer <status\|note\|next\|brief\|init-context\|branch\|progress>` | Local coordination workspace: notes, next-action, branch/progress context. See [docs/OVERSEER.md](docs/OVERSEER.md). |
 
 ### Diagnostics
 

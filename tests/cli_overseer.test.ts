@@ -230,4 +230,155 @@ describe("relayos overseer brief", () => {
     expect(code).toBe(1);
     expect(cap.stderr).toContain("usage: relayos overseer brief");
   });
+
+  it("includes ACTIVE BRANCH section when branch is set", async () => {
+    chdir(tempDir());
+    await runCli(["overseer", "branch", "my-feature"], captureIO().io);
+
+    const cap = captureIO();
+    const code = await runCli(["overseer", "brief"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("ACTIVE BRANCH");
+    expect(cap.stdout).toContain("my-feature");
+  });
+
+  it("includes BRANCH PROGRESS section when progress entries exist", async () => {
+    chdir(tempDir());
+    await runCli(["overseer", "branch", "my-feature"], captureIO().io);
+    await runCli(["overseer", "progress", "first entry"], captureIO().io);
+
+    const cap = captureIO();
+    await runCli(["overseer", "brief"], cap.io);
+
+    expect(cap.stdout).toContain("BRANCH PROGRESS");
+    expect(cap.stdout).toContain("first entry");
+  });
+
+  it("omits ACTIVE BRANCH section when no branch is set", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    await runCli(["overseer", "brief"], cap.io);
+
+    expect(cap.stdout).not.toContain("ACTIVE BRANCH");
+  });
+});
+
+describe("relayos overseer init-context", () => {
+  it("creates all stub files and reports each one", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "init-context"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("created: .relayos/overseer/project_brief.md");
+    expect(cap.stdout).toContain("created: .relayos/overseer/current.md");
+    expect(cap.stdout).toContain("created: .relayos/overseer/branches/active/brief.md");
+    expect(cap.stdout).toContain("created: .relayos/overseer/planned/enterprise_server.md");
+  });
+
+  it("does not overwrite existing files", async () => {
+    chdir(tempDir());
+    await runCli(["overseer", "init-context"], captureIO().io);
+    await runCli(["overseer", "next", "preserve me"], captureIO().io);
+
+    const cap = captureIO();
+    await runCli(["overseer", "init-context"], cap.io);
+
+    expect(cap.stdout).toContain("already complete");
+    // next_action.md is not a context init file — unrelated; just verify no crash
+  });
+
+  it("reports already complete when run twice", async () => {
+    chdir(tempDir());
+    await runCli(["overseer", "init-context"], captureIO().io);
+
+    const cap = captureIO();
+    const code = await runCli(["overseer", "init-context"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("already complete");
+  });
+});
+
+describe("relayos overseer branch", () => {
+  it("sets the active branch name and confirms", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "branch", "my-task"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("active branch set: my-task");
+  });
+
+  it("overwrites previous branch name", async () => {
+    chdir(tempDir());
+    await runCli(["overseer", "branch", "old-task"], captureIO().io);
+
+    const cap = captureIO();
+    await runCli(["overseer", "branch", "new-task"], cap.io);
+
+    expect(cap.stdout).toContain("new-task");
+  });
+
+  it("exits 1 with usage when no name is given", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "branch"], cap.io);
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("usage: relayos overseer branch <name>");
+  });
+});
+
+describe("relayos overseer progress", () => {
+  it("records a progress entry and confirms", async () => {
+    chdir(tempDir());
+    await runCli(["overseer", "branch", "my-task"], captureIO().io);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "progress", "tests passing"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("progress recorded: tests passing");
+  });
+
+  it("prints current progress without args", async () => {
+    chdir(tempDir());
+    await runCli(["overseer", "branch", "my-task"], captureIO().io);
+    await runCli(["overseer", "progress", "step one done"], captureIO().io);
+
+    const cap = captureIO();
+    const code = await runCli(["overseer", "progress"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("step one done");
+  });
+
+  it("appends multiple entries in order", async () => {
+    chdir(tempDir());
+    await runCli(["overseer", "branch", "my-task"], captureIO().io);
+    await runCli(["overseer", "progress", "entry one"], captureIO().io);
+    await runCli(["overseer", "progress", "entry two"], captureIO().io);
+
+    const cap = captureIO();
+    await runCli(["overseer", "progress"], cap.io);
+
+    const out = cap.stdout;
+    expect(out.indexOf("entry one")).toBeLessThan(out.indexOf("entry two"));
+  });
+
+  it("prints no-data message when no progress has been recorded", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "progress"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("no branch progress recorded");
+  });
 });

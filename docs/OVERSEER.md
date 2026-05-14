@@ -9,6 +9,9 @@ relayos overseer status
 relayos overseer note <text...>
 relayos overseer next [text...]
 relayos overseer brief
+relayos overseer init-context
+relayos overseer branch <name>
+relayos overseer progress [text...]
 ```
 
 ### `overseer status`
@@ -101,14 +104,80 @@ LOCAL DATA SAFETY
 
 Context files that do not exist are shown as `(missing — file not found in .relayos/overseer/)`. Exits 0 even when all files are absent. Takes no arguments — exits 1 with usage if any are given.
 
+### `overseer init-context`
+
+Creates missing context stub files under `.relayos/overseer/`. Skips any file that already exists — safe to run multiple times.
+
+Files created (if absent):
+
+```
+.relayos/overseer/
+├── project_brief.md
+├── current.md
+├── release_policy.md
+├── forbidden_actions.md
+├── product_direction.md
+├── branches/active/brief.md
+├── branches/active/progress.md
+├── planned/enterprise_server.md
+└── planned/web_panel.md
+```
+
+```
+$ relayos overseer init-context
+created: .relayos/overseer/project_brief.md
+created: .relayos/overseer/current.md
+...
+```
+
+If all files exist: `overseer context already complete — no files created`. Exits 0.
+
+### `overseer branch <name>`
+
+Sets the active branch/task name by writing to `.relayos/overseer/branches/active/brief.md`. Overwrites any previous value.
+
+```
+$ relayos overseer branch "add auth middleware"
+active branch set: add auth middleware
+```
+
+Exits 1 with usage if no name is given.
+
+### `overseer progress [text...]`
+
+**With arguments:** appends a timestamped entry to `.relayos/overseer/branches/active/progress.md`.
+
+```
+$ relayos overseer progress tests passing, moving to review
+progress recorded: tests passing, moving to review
+```
+
+**Without arguments:** reads and prints all progress entries, or reports that none exist.
+
+```
+$ relayos overseer progress
+[2026-05-14T10:00:00.000Z] tests passing, moving to review
+```
+
+Exits 0 in both cases. The branch does not need to be set before recording progress.
+
 ## Storage
 
 | Path | Purpose |
 |---|---|
 | `.relayos/overseer/timeline.jsonl` | Append-only notes log. Each line is `{"ts":"<ISO>","text":"<text>"}`. |
 | `.relayos/overseer/next_action.md` | Current next action (plain text, overwritten on each `next` call). |
+| `.relayos/overseer/project_brief.md` | Project purpose and direction (human-edited). |
+| `.relayos/overseer/current.md` | Latest commit anchor, test baseline, completed features. |
+| `.relayos/overseer/release_policy.md` | Release rules (tag, publish, etc.). |
+| `.relayos/overseer/forbidden_actions.md` | Actions that must not be taken without explicit instruction. |
+| `.relayos/overseer/product_direction.md` | Guiding principles and roadmap status. |
+| `.relayos/overseer/branches/active/brief.md` | Active branch/task name (overwritten on each `branch` call). |
+| `.relayos/overseer/branches/active/progress.md` | Timestamped progress log for the active branch (append-only). |
+| `.relayos/overseer/planned/enterprise_server.md` | Stub for planned enterprise server feature. |
+| `.relayos/overseer/planned/web_panel.md` | Stub for planned web panel feature. |
 
-Both paths are under `.relayos/overseer/` in the project root. This directory is gitignored — runtime state never gets committed accidentally.
+All paths are under `.relayos/overseer/` in the project root. This directory is gitignored — runtime state never gets committed accidentally.
 
 ## Gitignore
 
