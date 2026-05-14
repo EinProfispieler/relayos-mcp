@@ -28,6 +28,7 @@ import { readHandoff } from "./tools/read_handoff.js";
 import { readLatestHandoff } from "./tools/read_latest_handoff.js";
 import { readOverseerHandshake } from "./tools/read_overseer_handshake.js";
 import { readOverseerBootstrapPrompt } from "./tools/read_overseer_bootstrap_prompt.js";
+import { readOverseerContextPack } from "./tools/read_overseer_context_pack.js";
 import { readOverseerRecent } from "./tools/read_overseer_recent.js";
 import { writeOverseerNote } from "./tools/write_overseer_note.js";
 import { inspectConfig } from "./tools/inspect_config.js";
@@ -342,6 +343,24 @@ export async function buildServer() {
     },
     async (args) => {
       const result = await readOverseerBootstrapPrompt(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "read_overseer_context_pack",
+    {
+      title: "Read overseer context pack",
+      description:
+        "Read-only curated overseer context pack for MCP clients. Returns compact project summary, current state, " +
+        "next action, bounded recent notes, boundaries, evidence links, and a recommended safe startup prompt. " +
+        "No files are created or modified.",
+      inputSchema: {
+        limit: z.number().int().min(1).max(20).optional(),
+      },
+    },
+    async (args) => {
+      const result = await readOverseerContextPack(args);
       return jsonResult(result);
     },
   );

@@ -127,7 +127,7 @@ Restart both CLIs after registering so they pick up the tool list.
 
 ### 3. MCP tools (inside an AI agent session)
 
-Once registered, 18 MCP tools are available from within any MCP-capable agent session (Claude Code, Codex CLI, or others). Common ones:
+Once registered, 19 MCP tools are available from within any MCP-capable agent session (Claude Code, Codex CLI, or others). Common ones:
 
 - `list_templates` — discover built-in and project templates
 - `create_quick_handoff` — one-shot handoff from a task description
@@ -145,6 +145,7 @@ Current overseer MCP surface for this flow:
 
 - `read_overseer_bootstrap_prompt` (optional ready-to-use startup prompt helper)
 - `read_overseer_handshake` (canonical bootstrap)
+- `read_overseer_context_pack` (optional curated continuity pack)
 - `write_overseer_note` (optional local progress note append)
 - `read_overseer_recent` (optional read-only compact session readback)
 
@@ -153,6 +154,8 @@ Current overseer MCP surface for this flow:
   missing files, and required file paths.
 - Optionally call `read_overseer_bootstrap_prompt` to retrieve a
   read-only startup prompt + recommended first calls for MCP clients.
+- Optionally call `read_overseer_context_pack` for a compact curated
+  state package (project/current/next notes + boundaries + evidence links).
 - If `ok` or `context_complete` is `false`, report `missing` to the user
   and ask whether to proceed before acting.
 - Treat `must_read`, `next_action_source`, `forbidden_actions`, and
@@ -278,6 +281,7 @@ Available inside any MCP-capable agent session once the server is registered.
 | `read_latest_handoff` | Return the most recent open handoff (filter by `assigned_to`). |
 | `read_overseer_bootstrap_prompt` | Return a read-only overseer startup prompt + recommended first calls. |
 | `read_overseer_handshake` | Return a read-only overseer session handshake snapshot for MCP clients. |
+| `read_overseer_context_pack` | Return a curated read-only overseer context pack for cross-client continuity. |
 | `read_overseer_recent` | Return a compact read-only overseer session/state + recent-notes snapshot. |
 | `write_overseer_note` | Append a local overseer timeline note for progress tracking. |
 | `list_open_handoffs` | List open handoff summaries — no full envelope leak. |

@@ -54,6 +54,7 @@ Current overseer MCP surface for this bootstrap flow:
 
 - `read_overseer_bootstrap_prompt` (optional ready-to-use startup prompt helper)
 - `read_overseer_handshake` (canonical bootstrap)
+- `read_overseer_context_pack` (optional curated continuity pack)
 - `write_overseer_note` (optional local progress note append)
 - `read_overseer_recent` (optional read-only compact session readback)
 
@@ -62,6 +63,8 @@ Current overseer MCP surface for this bootstrap flow:
   files, and required paths.
 - Optionally call `read_overseer_bootstrap_prompt` to retrieve a
   read-only startup prompt and recommended first calls.
+- Optionally call `read_overseer_context_pack` for a compact read-only
+  continuity pack (project/current/next notes + boundaries + evidence links).
 - If `ok` or `context_complete` is false, report missing files and ask
   the user whether to proceed.
 - Treat `must_read`, `next_action_source`, `forbidden_actions`, and
