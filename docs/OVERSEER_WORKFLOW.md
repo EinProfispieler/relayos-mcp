@@ -132,7 +132,60 @@ Do not bundle multiple task changes into one commit. If a task is blocked or inc
 
 ---
 
-## 6. Future direction
+## 6. Source repo vs. runtime workspace
+
+### The rule
+
+**`/Users/randy/GID` (the RelayOS source repo) is a development worktree. Keep it clean.**
+
+The source repo is for building, testing, committing, and releasing RelayOS itself. It is not an operational base for running the Overseer against other projects. Mixing production runtime state into the source tree creates three problems:
+
+1. Runtime files accumulate and risk accidental commits despite gitignore.
+2. Git history for the tool itself becomes polluted with operational noise.
+3. Development worktrees used during parallel/sub-run work become entangled with live operational state.
+
+### What belongs in the source repo
+
+| Belongs | Does not belong |
+|---|---|
+| `src/`, `tests/`, `docs/`, `dist/` | Operational coordination notes for non-RelayOS projects |
+| `.relayos/overseer/` (gitignored, dev-time only) | Production overseer runtime logs |
+| Handoff envelopes created during RelayOS development | Sub-run outputs from other projects |
+| Checkpoints taken before RelayOS source patches | Scratch files, generated reports, agent transcripts |
+| Public docs and test fixtures | Anything not promotable to public docs or tests |
+
+### What belongs in a runtime workspace
+
+A **runtime workspace** is a separate directory — outside the source repo — where the Overseer operates against a target project. It holds:
+
+- Coordination state (notes, next action, branch context)
+- Handoff envelopes created for the target project
+- Checkpoint snapshots before target-project launches
+- Sub-run outputs, agent transcripts, and generated reports
+- Operational logs and audit evidence for the target project
+- Scratch files and working notes
+
+Nothing in a runtime workspace should be committed to the RelayOS source repo unless it is explicitly promoted into a public doc, test fixture, or example.
+
+### Development worktrees vs. runtime execution directories
+
+When parallel mode is active, each write task against the **source repo** gets its own branch/worktree under the source tree (e.g., `.claude/worktrees/`). This is branch isolation for development — it is not the same as a runtime workspace.
+
+A runtime workspace is a **separate top-level directory** used when operating RelayOS as a tool against a different project. The two must not be confused:
+
+| Context | Location | Purpose |
+|---|---|---|
+| Source development | `/Users/randy/GID` | Build, test, commit, release RelayOS |
+| Parallel dev task | `/Users/randy/GID/.claude/worktrees/<branch>` | Isolated source change during parallel mode |
+| Runtime operation | e.g. `~/relayos-runtime/` or target project root | Run Overseer against another project |
+
+### Current behavior
+
+There is no `RELAYOS_RUNTIME_HOME` environment variable or configured workspace path today. When using RelayOS against another project, run commands from that project's directory — RelayOS reads `.relayos/` relative to the current working directory and writes handoffs to `~/.claude/handoff/` (outside any repo). This keeps runtime state out of the source tree by default.
+
+---
+
+## 7. Future direction
 
 The following commands and behaviors are **planned, not yet shipped**. They are documented here so the design intent is clear and future sessions can anticipate the direction.
 
@@ -153,6 +206,7 @@ relayos queue run --parallel      # process independent tasks in parallel worktr
 - **Model-role matrix.** Per-project configuration mapping `(role, risk_level, file_scope)` to preferred model and effort cap. See [`docs/MODEL_STRATEGY.md`](MODEL_STRATEGY.md) for the current design sketch.
 - **Periodic model suitability evaluation.** A built-in reminder or command that prompts re-evaluation of model assignments when a configurable interval has passed or when a new model version is detected.
 - **relayos overseer start.** A startup command that verifies `.relayos/overseer/` context files are present, prints a brief, checks for open handoffs, and sets the initial next action — replacing the manual checklist at the top of a session.
+- **`RELAYOS_RUNTIME_HOME` environment variable.** A configurable path that tells RelayOS where to store runtime workspace state (coordination notes, sub-run outputs, operational logs) when operating against a target project. When set, `.relayos/overseer/` within `RELAYOS_RUNTIME_HOME` would be the active coordination workspace instead of a directory relative to the current project. This keeps runtime state cleanly separated from the source repo. Not implemented yet — `RELAYOS_RUNTIME_HOME` is currently unused; all paths are resolved relative to the current working directory.
 
 None of these change the current storage format, envelope schema, or audit log format. They are additive.
 
