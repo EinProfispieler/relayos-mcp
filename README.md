@@ -2,6 +2,10 @@
 
 A RhythmLag project.
 
+<p align="center">
+  <img src="docs/assets/relayos-social-preview.png" width="720" alt="RelayOS by RhythmLag" />
+</p>
+
 > A local-first control layer for AI-assisted development.
 
 RelayOS coordinates Claude Code and Codex CLI handoffs, enforces policy gates before agent launches, and stores evidence locally so the human stays in control. Nothing leaves your machine. No cloud, no accounts, no auto-execute.
