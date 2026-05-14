@@ -11,13 +11,16 @@ import {
   LaunchResolutionError,
   resolveHandoff,
 } from "./launch.js";
-import { evaluateDiffRisk, formatDiffRisk } from "./diff_risk.js";
+import { evaluateDiffRisk, formatDiffRisk, type DiffRiskDecision } from "./diff_risk.js";
 import {
+  gitBranch,
   gitDiff,
+  gitHead,
   gitListUntracked,
   gitStatusShort,
   isGitRepo,
 } from "./git.js";
+import { listEnvelopes } from "./envelope.js";
 import { evaluatePolicy, formatBannerLines } from "./policy.js";
 import type { Envelope } from "./schema.js";
 import { ensureStorage, resolveStorageLayout } from "./storage.js";
@@ -28,7 +31,7 @@ interface CliIO {
 }
 
 function usage(): string {
-  return "usage: relayos [launch|policy|checkpoint|diff-risk] [--force] [args...]\n";
+  return "usage: relayos [launch|policy|checkpoint|diff-risk|report] [--force] [args...]\n";
 }
 
 function checkpointUsage(): string {
@@ -326,6 +329,147 @@ async function runDiffRisk(args: string[], io: CliIO): Promise<number> {
   return 0;
 }
 
+function formatReportHandoff(envelope: import("./schema.js").Envelope | null, err: string | null): string {
+  const lines: string[] = ["LATEST HANDOFF"];
+  if (err) {
+    lines.push(`  (${err})`);
+  } else if (!envelope) {
+    lines.push("  (no handoffs found)");
+  } else {
+    const title =
+      envelope.task_title.length > 60
+        ? `${envelope.task_title.slice(0, 57)}…`
+        : envelope.task_title;
+    lines.push(`  id:     ${envelope.id}`);
+    lines.push(`  title:  ${title}`);
+    lines.push(`  target: ${envelope.target_agent} (${envelope.execution_mode})   status: ${envelope.status}`);
+  }
+  return lines.join("\n");
+}
+
+function formatReportCheckpoint(checkpoint: Checkpoint | null): string {
+  const lines: string[] = ["LATEST CHECKPOINT"];
+  if (!checkpoint) {
+    lines.push("  (no checkpoints found)");
+  } else {
+    const head = checkpoint.git.head ? checkpoint.git.head.slice(0, 7) : "-";
+    const branch = checkpoint.git.branch ?? "(detached)";
+    const dirty = checkpoint.git.dirty ? "yes" : "no";
+    lines.push(`  id:     ${checkpoint.id}`);
+    lines.push(
+      `  branch: ${branch} @ ${head}   dirty: ${dirty}   diff: ${checkpoint.counts.diff_bytes.toLocaleString()} bytes`,
+    );
+    lines.push(`  taken:  ${checkpoint.created_at}`);
+    if (checkpoint.message) lines.push(`  note:   ${checkpoint.message}`);
+  }
+  return lines.join("\n");
+}
+
+function formatReportDiffRisk(decision: DiffRiskDecision): string {
+  const lines: string[] = ["DIFF-RISK"];
+  lines.push(`  DECISION: ${decision.decision.toUpperCase()}`);
+  for (const f of decision.findings) {
+    lines.push(`  - ${f.code}: ${f.message}`);
+  }
+  lines.push(`  SUMMARY: ${decision.summary}`);
+  return lines.join("\n");
+}
+
+function formatReportGit(git: {
+  isRepo: boolean;
+  branch: string | null;
+  head: string | null;
+  statusLines: string[];
+}): string {
+  const lines: string[] = ["GIT STATUS"];
+  if (!git.isRepo) {
+    lines.push("  (not inside a git working tree)");
+  } else {
+    const branch = git.branch ?? "(detached)";
+    const head = git.head ? git.head.slice(0, 7) : "-";
+    lines.push(`  branch: ${branch}   head: ${head}`);
+    if (git.statusLines.length === 0) {
+      lines.push("  (clean)");
+    } else {
+      for (const l of git.statusLines) {
+        lines.push(`  ${l}`);
+      }
+    }
+  }
+  return lines.join("\n");
+}
+
+async function runReport(args: string[], io: CliIO): Promise<number> {
+  if (args.length > 0) {
+    io.stderr.write("usage: relayos report\n");
+    return 1;
+  }
+
+  const cwd = process.cwd();
+  const layout = resolveStorageLayout();
+
+  const [envelopeResult, checkpointResult, isRepo] = await Promise.all([
+    (async () => {
+      try {
+        const all = await listEnvelopes(layout);
+        all.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+        return { envelope: all[0] ?? null, error: null };
+      } catch (err) {
+        return {
+          envelope: null,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    })(),
+    (async () => {
+      try {
+        const all = await listCheckpoints(layout);
+        return all[0] ?? null;
+      } catch {
+        return null;
+      }
+    })(),
+    isGitRepo(cwd),
+  ]);
+
+  let gitInfo: { isRepo: boolean; branch: string | null; head: string | null; statusLines: string[] };
+  let diffRisk: DiffRiskDecision;
+
+  if (isRepo) {
+    const [branch, head, statusRaw, diff, untracked] = await Promise.all([
+      gitBranch(cwd),
+      gitHead(cwd),
+      gitStatusShort(cwd),
+      gitDiff(cwd),
+      gitListUntracked(cwd),
+    ]);
+    const statusLines = statusRaw
+      .split("\n")
+      .map((l) => l.replace(/\r$/, ""))
+      .filter((l) => l.length > 0);
+    gitInfo = { isRepo: true, branch, head, statusLines };
+    diffRisk = evaluateDiffRisk({ statusLines, diffText: diff.text, untracked });
+  } else {
+    gitInfo = { isRepo: false, branch: null, head: null, statusLines: [] };
+    diffRisk = evaluateDiffRisk({ statusLines: [], diffText: "", untracked: [] });
+  }
+
+  const sep = "─".repeat(44);
+  const sections = [
+    `RELAYOS REPORT  ${new Date().toISOString()}`,
+    sep,
+    formatReportHandoff(envelopeResult.envelope, envelopeResult.error),
+    "",
+    formatReportCheckpoint(checkpointResult),
+    "",
+    formatReportDiffRisk(diffRisk),
+    "",
+    formatReportGit(gitInfo),
+  ];
+  io.stdout.write(`${sections.join("\n")}\n`);
+  return 0;
+}
+
 export async function runCli(
   argv = process.argv.slice(2),
   io: CliIO = { stdout: process.stdout, stderr: process.stderr },
@@ -341,6 +485,7 @@ export async function runCli(
   if (command === "policy") return runPolicy(rest, io);
   if (command === "checkpoint") return runCheckpoint(rest, io);
   if (command === "diff-risk") return runDiffRisk(rest, io);
+  if (command === "report") return runReport(rest, io);
 
   io.stderr.write(usage());
   return 1;
