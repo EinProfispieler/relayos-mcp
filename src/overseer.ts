@@ -6,6 +6,7 @@ import { join } from "node:path";
 export interface OverseerLayout {
   dir: string;
   timelinePath: string;
+  decisionsPath: string;
   nextActionPath: string;
 }
 
@@ -14,6 +15,7 @@ export function resolveOverseerLayout(cwd: string): OverseerLayout {
   return {
     dir,
     timelinePath: join(dir, "timeline.jsonl"),
+    decisionsPath: join(dir, "decisions.jsonl"),
     nextActionPath: join(dir, "next_action.md"),
   };
 }
@@ -23,6 +25,11 @@ export async function ensureOverseerDir(layout: OverseerLayout): Promise<void> {
 }
 
 export interface OverseerNote {
+  ts: string;
+  text: string;
+}
+
+export interface OverseerDecision {
   ts: string;
   text: string;
 }
@@ -49,6 +56,30 @@ export async function readLatestNotes(
     }
   }
   return notes.slice(-limit);
+}
+
+export async function appendDecision(layout: OverseerLayout, text: string): Promise<void> {
+  await ensureOverseerDir(layout);
+  const entry: OverseerDecision = { ts: new Date().toISOString(), text };
+  await appendFile(layout.decisionsPath, `${JSON.stringify(entry)}\n`, "utf8");
+}
+
+export async function readLatestDecisions(
+  layout: OverseerLayout,
+  limit = 8,
+): Promise<OverseerDecision[]> {
+  if (!existsSync(layout.decisionsPath)) return [];
+  const raw = await readFile(layout.decisionsPath, "utf8");
+  const decisions: OverseerDecision[] = [];
+  for (const line of raw.split("\n")) {
+    if (line.trim().length === 0) continue;
+    try {
+      decisions.push(JSON.parse(line) as OverseerDecision);
+    } catch {
+      // skip malformed lines
+    }
+  }
+  return decisions.slice(-limit);
 }
 
 export async function writeNextAction(layout: OverseerLayout, text: string): Promise<void> {

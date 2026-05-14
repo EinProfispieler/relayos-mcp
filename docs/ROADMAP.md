@@ -16,6 +16,12 @@ Current MCP session loop already available:
 - `read_overseer_recent`
 - `write_overseer_note`
 
+Current CLI curated-memory loop also available:
+
+- `relayos overseer context-pack`
+- `relayos overseer decision add <text>`
+- `relayos overseer decisions [--json] [--limit <1-20>]`
+
 Codex and Claude can connect through RelayOS MCP and share local overseer state through these local interfaces.
 
 Core remains:
@@ -39,8 +45,6 @@ RelayOS should prefer curated continuity artifacts:
 
 Future possible commands/tools (directional, not current support):
 
-- `context-pack`
-- decision record workflows
 - memory search
 - session summarizer
 

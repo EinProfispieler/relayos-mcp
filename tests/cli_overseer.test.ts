@@ -621,6 +621,116 @@ describe("relayos overseer note", () => {
   });
 });
 
+describe("relayos overseer decision/decisions", () => {
+  it("records a decision and exits 0", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "decision", "add", "test", "decision", "text"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("decision recorded");
+    expect(cap.stdout).toContain("test decision text");
+    expect(cap.stderr).toBe("");
+  });
+
+  it("appends JSONL entries with ts/text shape and preserves order", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+
+    await runCli(["overseer", "decision", "add", "first decision"], captureIO().io);
+    await runCli(["overseer", "decision", "add", "second decision"], captureIO().io);
+
+    const decisionsPath = join(cwd, ".relayos", "overseer", "decisions.jsonl");
+    const lines = readFileSync(decisionsPath, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { ts: string; text: string });
+
+    expect(lines).toHaveLength(2);
+    expect(Object.keys(lines[0] ?? {}).sort()).toEqual(["text", "ts"]);
+    expect(Object.keys(lines[1] ?? {}).sort()).toEqual(["text", "ts"]);
+    expect(typeof lines[0]?.ts).toBe("string");
+    expect(lines[0]?.ts.length).toBeGreaterThan(0);
+    expect(lines[0]?.text).toBe("first decision");
+    expect(lines[1]?.text).toBe("second decision");
+  });
+
+  it("prints human-readable decisions output", async () => {
+    chdir(tempDir());
+    await runCli(["overseer", "decision", "add", "one"], captureIO().io);
+    await runCli(["overseer", "decision", "add", "two"], captureIO().io);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "decisions"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("OVERSEER DECISIONS");
+    expect(cap.stdout).toContain("decisions (2/8):");
+    expect(cap.stdout).toContain("one");
+    expect(cap.stdout).toContain("two");
+    expect(cap.stderr).toBe("");
+  });
+
+  it("prints stable JSON and honors --limit", async () => {
+    chdir(tempDir());
+    await runCli(["overseer", "decision", "add", "one"], captureIO().io);
+    await runCli(["overseer", "decision", "add", "two"], captureIO().io);
+    await runCli(["overseer", "decision", "add", "three"], captureIO().io);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "decisions", "--json", "--limit", "2"], cap.io);
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect(data.tool).toBe("overseer_decisions");
+    expect(data.limit).toBe(2);
+    expect(data.decisions_count).toBe(2);
+    expect(Array.isArray(data.decisions)).toBe(true);
+    expect((data.decisions as Array<Record<string, string>>).map((n) => n.text)).toEqual([
+      "two",
+      "three",
+    ]);
+    expect(cap.stderr).toBe("");
+  });
+
+  it("listing missing decisions is read-only and does not create .relayos/overseer", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "decisions"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("decisions (0/8):");
+    expect(cap.stdout).toContain("(none)");
+    expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
+  });
+
+  it("exits 1 with usage on invalid flags or invalid limits", async () => {
+    chdir(tempDir());
+    const capFlag = captureIO();
+    const codeFlag = await runCli(["overseer", "decisions", "--yaml"], capFlag.io);
+    expect(codeFlag).toBe(1);
+    expect(capFlag.stderr).toContain("usage: relayos overseer decisions");
+
+    const capLimit = captureIO();
+    const codeLimit = await runCli(["overseer", "decisions", "--limit", "21"], capLimit.io);
+    expect(codeLimit).toBe(1);
+    expect(capLimit.stderr).toContain("usage: relayos overseer decisions");
+  });
+
+  it("exits 1 with usage when decision add text is missing", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "decision", "add"], cap.io);
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("usage: relayos overseer decision add <text>");
+  });
+});
+
 describe("relayos overseer next", () => {
   it("sets and prints the next action", async () => {
     chdir(tempDir());

@@ -1,6 +1,6 @@
 # RelayOS Curated Memory and Context Packs (Design Note)
 
-Status: Future design direction only. This document does not claim current implementation support.
+Status: Mixed. Some curated-memory primitives are implemented in Core; other items remain future design direction.
 
 ## Purpose
 
@@ -42,13 +42,25 @@ A future curated memory model may include:
 
 This structure emphasizes retrievability and audit over full-log replay.
 
+## Current Core Commands
+
+Currently shipped local-first curated-memory commands:
+
+- `relayos overseer context-pack`
+- `relayos overseer decision add <text>`
+- `relayos overseer decisions [--json] [--limit <1-20>]`
+
+Current MCP curated-memory tools:
+
+- `read_overseer_context_pack`
+- `read_overseer_recent`
+- `write_overseer_note`
+
 ## Possible Future Commands and MCP Tools
 
 Potential future command/tool surface (directional only):
 
-- `relayos overseer context-pack`
 - `relayos overseer summarize-session`
-- `relayos overseer decisions`
 - `read_overseer_context_pack`
 - `write_decision_record`
 - `search_overseer_memory`

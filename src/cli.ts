@@ -26,6 +26,7 @@ import {
 import { listEnvelopes } from "./envelope.js";
 import {
   appendBranchProgress,
+  appendDecision,
   appendNote,
   buildOverseerContextPack,
   buildOverseerRunPreflight,
@@ -35,6 +36,7 @@ import {
   readOverseerHandshakeSnapshot,
   readActiveBrief,
   readBranchProgress,
+  readLatestDecisions,
   readLatestNotes,
   readNextAction,
   readOverseerTextFile,
@@ -1239,6 +1241,87 @@ async function runOverseerNote(args: string[], io: CliIO): Promise<number> {
   return 0;
 }
 
+function parseOverseerDecisionsArgs(
+  args: string[],
+): { wantsJson: boolean; limit: number } | null {
+  let wantsJson = false;
+  let limit = 8;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "--json") {
+      wantsJson = true;
+      continue;
+    }
+    if (arg === "--limit") {
+      const raw = args[i + 1];
+      if (!raw) return null;
+      const parsed = Number(raw);
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 20) return null;
+      limit = parsed;
+      i++;
+      continue;
+    }
+    return null;
+  }
+  return { wantsJson, limit };
+}
+
+async function runOverseerDecision(args: string[], io: CliIO): Promise<number> {
+  const [sub, ...rest] = args;
+  if (sub === "add") {
+    if (rest.length === 0) {
+      io.stderr.write("usage: relayos overseer decision add <text>\n");
+      return 1;
+    }
+    const text = rest.join(" ");
+    const layout = resolveOverseerLayout(process.cwd());
+    await appendDecision(layout, text);
+    io.stdout.write(`decision recorded: ${text}\n`);
+    return 0;
+  }
+  io.stderr.write("usage: relayos overseer decision add <text>\n");
+  return 1;
+}
+
+async function runOverseerDecisions(args: string[], io: CliIO): Promise<number> {
+  const parsed = parseOverseerDecisionsArgs(args);
+  if (!parsed) {
+    io.stderr.write("usage: relayos overseer decisions [--json] [--limit <1-20>]\n");
+    return 1;
+  }
+  const layout = resolveOverseerLayout(process.cwd());
+  const decisions = await readLatestDecisions(layout, parsed.limit);
+
+  if (parsed.wantsJson) {
+    io.stdout.write(
+      `${JSON.stringify(
+        {
+          tool: "overseer_decisions",
+          workspace_path: layout.dir,
+          decisions_count: decisions.length,
+          limit: parsed.limit,
+          decisions,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return 0;
+  }
+
+  const lines = [
+    "OVERSEER DECISIONS",
+    OVERSEER_SEP,
+    `  workspace: ${layout.dir}`,
+    `  decisions (${decisions.length}/${parsed.limit}):`,
+    ...(decisions.length > 0
+      ? decisions.map((d) => `    - [${d.ts}] ${d.text}`)
+      : ["    - (none)"]),
+  ];
+  io.stdout.write(`${lines.join("\n")}\n`);
+  return 0;
+}
+
 async function runOverseerNext(args: string[], io: CliIO): Promise<number> {
   const layout = resolveOverseerLayout(process.cwd());
   if (args.length === 0) {
@@ -1590,6 +1673,8 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "context-pack") return runOverseerContextPack(rest, io);
   if (sub === "run-preflight") return runOverseerRunPreflight(rest, io);
   if (sub === "note") return runOverseerNote(rest, io);
+  if (sub === "decision") return runOverseerDecision(rest, io);
+  if (sub === "decisions") return runOverseerDecisions(rest, io);
   if (sub === "next") return runOverseerNext(rest, io);
   if (sub === "start") return runOverseerStart(rest, io);
   if (sub === "mode") return runOverseerMode(rest, io);
@@ -1603,7 +1688,7 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "branch") return runOverseerBranch(rest, io);
   if (sub === "progress") return runOverseerProgress(rest, io);
   io.stderr.write(
-    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|note|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
+    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|note|decision|decisions|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
   );
   return 1;
 }
