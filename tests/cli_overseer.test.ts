@@ -185,3 +185,49 @@ describe("relayos overseer: error cases", () => {
     expect(cap.stderr).toContain("overseer");
   });
 });
+
+describe("relayos overseer brief", () => {
+  it("exits 0 and prints header with no overseer state", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "brief"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("RELAYOS OVERSEER BRIEF");
+    expect(cap.stdout).toContain("missing");
+    expect(cap.stderr).toBe("");
+  });
+
+  it("shows next action when set", async () => {
+    chdir(tempDir());
+    await runCli(["overseer", "next", "ship the patch"], captureIO().io);
+
+    const cap = captureIO();
+    const code = await runCli(["overseer", "brief"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("NEXT ACTION");
+    expect(cap.stdout).toContain("ship the patch");
+  });
+
+  it("includes local data safety warning", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    await runCli(["overseer", "brief"], cap.io);
+
+    expect(cap.stdout).toContain("LOCAL DATA SAFETY");
+    expect(cap.stdout).toContain("gitignored");
+  });
+
+  it("exits 1 with usage on unexpected args", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "brief", "--json"], cap.io);
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("usage: relayos overseer brief");
+  });
+});

@@ -26,6 +26,7 @@ import {
   hasOverseerState,
   readLatestNotes,
   readNextAction,
+  readOverseerTextFile,
   resolveOverseerLayout,
   writeNextAction,
 } from "./overseer.js";
@@ -547,12 +548,76 @@ async function runOverseerNext(args: string[], io: CliIO): Promise<number> {
   return 0;
 }
 
+async function runOverseerBrief(args: string[], io: CliIO): Promise<number> {
+  if (args.length > 0) {
+    io.stderr.write("usage: relayos overseer brief\n");
+    return 1;
+  }
+  const cwd = process.cwd();
+  const layout = resolveOverseerLayout(cwd);
+  const MISSING = "(missing — file not found in .relayos/overseer/)";
+  const sep = OVERSEER_SEP;
+
+  const [projectBrief, currentState, releasePolicy, forbiddenActions, productDirection, nextAction, commitInfo] =
+    await Promise.all([
+      readOverseerTextFile(layout, "project_brief.md"),
+      readOverseerTextFile(layout, "current.md"),
+      readOverseerTextFile(layout, "release_policy.md"),
+      readOverseerTextFile(layout, "forbidden_actions.md"),
+      readOverseerTextFile(layout, "product_direction.md"),
+      readNextAction(layout),
+      isGitRepo(cwd).then(async (isRepo) => {
+        if (!isRepo) return null;
+        const [head, branch] = await Promise.all([gitHead(cwd), gitBranch(cwd)]);
+        return head ? `${head.slice(0, 7)} @ ${branch ?? "(detached)"}` : null;
+      }),
+    ]);
+
+  function section(title: string, content: string | null): string {
+    return [title, sep, content ?? MISSING].join("\n");
+  }
+
+  const parts = [
+    `RELAYOS OVERSEER BRIEF  ${new Date().toISOString()}`,
+    sep,
+    "",
+    section("PROJECT", projectBrief),
+    "",
+    section("CURRENT STATE", currentState),
+    "",
+    section("RELEASE POLICY", releasePolicy),
+    "",
+    section("FORBIDDEN ACTIONS", forbiddenActions),
+    "",
+    section("PRODUCT DIRECTION", productDirection),
+    "",
+    "NEXT ACTION",
+    sep,
+    nextAction ? `  ${nextAction}` : "  (not set)",
+    "",
+    "LATEST COMMIT",
+    sep,
+    commitInfo ? `  ${commitInfo}` : "  (not available — not inside a git repo)",
+    "",
+    "LOCAL DATA SAFETY",
+    sep,
+    "  Do not commit .relayos/overseer/ files, checkpoints, audit logs,",
+    "  handoff envelopes, transcripts, or private scratch to git.",
+    "  Handoff storage defaults to ~/.claude/handoff/ (outside repo).",
+    "  .relayos/overseer/ is gitignored in the project repo.",
+  ];
+
+  io.stdout.write(`${parts.join("\n")}\n`);
+  return 0;
+}
+
 async function runOverseer(args: string[], io: CliIO): Promise<number> {
   const [sub, ...rest] = args;
   if (sub === "status") return runOverseerStatus(rest, io);
   if (sub === "note") return runOverseerNote(rest, io);
   if (sub === "next") return runOverseerNext(rest, io);
-  io.stderr.write("usage: relayos overseer <status|note|next> [args...]\n");
+  if (sub === "brief") return runOverseerBrief(rest, io);
+  io.stderr.write("usage: relayos overseer <status|note|next|brief> [args...]\n");
   return 1;
 }
 

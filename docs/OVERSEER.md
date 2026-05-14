@@ -8,6 +8,7 @@ A gitignored local coordination workspace. Stores a running notes timeline and a
 relayos overseer status
 relayos overseer note <text...>
 relayos overseer next [text...]
+relayos overseer brief
 ```
 
 ### `overseer status`
@@ -51,6 +52,54 @@ next action set: deploy the patch after green CI
 $ relayos overseer next
 deploy the patch after green CI
 ```
+
+### `overseer brief`
+
+Prints a concise startup brief for a fresh AI worker or human operator. Reads all context files from `.relayos/overseer/` and formats them into a single output block with the current next action, latest git commit, and a local data safety reminder.
+
+```
+$ relayos overseer brief
+RELAYOS OVERSEER BRIEF  2026-05-14T10:00:00.000Z
+────────────────────────────────────────────────
+
+PROJECT
+────────────────────────────────────────────────
+RelayOS is a local-first control layer for AI-assisted development.
+...
+
+CURRENT STATE
+────────────────────────────────────────────────
+As of 2026-05-14: all Core/Solo features are shipped.
+
+RELEASE POLICY
+────────────────────────────────────────────────
+...
+
+FORBIDDEN ACTIONS
+────────────────────────────────────────────────
+...
+
+PRODUCT DIRECTION
+────────────────────────────────────────────────
+...
+
+NEXT ACTION
+────────────────────────────────────────────────
+  ship the patch
+
+LATEST COMMIT
+────────────────────────────────────────────────
+  dc80449 @ main
+
+LOCAL DATA SAFETY
+────────────────────────────────────────────────
+  Do not commit .relayos/overseer/ files, checkpoints, audit logs,
+  handoff envelopes, transcripts, or private scratch to git.
+  Handoff storage defaults to ~/.claude/handoff/ (outside repo).
+  .relayos/overseer/ is gitignored in the project repo.
+```
+
+Context files that do not exist are shown as `(missing — file not found in .relayos/overseer/)`. Exits 0 even when all files are absent. Takes no arguments — exits 1 with usage if any are given.
 
 ## Storage
 

@@ -65,3 +65,14 @@ export async function readNextAction(layout: OverseerLayout): Promise<string | n
 export function hasOverseerState(layout: OverseerLayout): boolean {
   return existsSync(layout.timelinePath) || existsSync(layout.nextActionPath);
 }
+
+export async function readOverseerTextFile(
+  layout: OverseerLayout,
+  filename: string,
+): Promise<string | null> {
+  const filePath = join(layout.dir, filename);
+  if (!existsSync(filePath)) return null;
+  const content = await readFile(filePath, "utf8");
+  const trimmed = content.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
