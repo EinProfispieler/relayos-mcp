@@ -45,6 +45,26 @@ Read-only session protocol snapshot for overseer-bound clients.
 - `relayos overseer handshake` prints protocol/session role, repo/workspace paths, context status, must-read files, next-action source, and safety reminders.
 - `relayos overseer handshake --json` returns stable handshake metadata for automation clients.
 - Missing context files mark the handshake as incomplete (`ok: false`) but do not write files.
+
+#### MCP client bootstrap rule
+
+For Claude/Codex/other MCP clients, `read_overseer_handshake` is the
+canonical session-start bootstrap call.
+
+- A separate `read_overseer_context` MCP tool is intentionally not
+  required; handshake already includes context completeness, missing
+  files, and required paths.
+- If `ok` or `context_complete` is false, report missing files and ask
+  the user whether to proceed.
+- Treat `must_read`, `next_action_source`, `forbidden_actions`, and
+  `requires_explicit_user_approval_for` as the session contract.
+- Do not assume RelayOS is a daemon, autonomous agent, or hard security
+  sandbox.
+- Do not proceed with forbidden actions without explicit user approval.
+
+Minimal copy-paste prompt:
+
+`Call read_overseer_handshake first. If ok/context_complete is true, follow the returned session contract. If incomplete, report missing files before acting.`
 OVERSEER STATUS
 ──────────────
 NEXT ACTION

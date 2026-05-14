@@ -137,6 +137,26 @@ Once registered, 14 MCP tools are available from within any MCP-capable agent se
 
 See [MCP tools](#mcp-tools) for the full table.
 
+### Overseer MCP bootstrap (Claude/Codex/other MCP clients)
+
+When starting an overseer-bound session, call `read_overseer_handshake`
+first. This is the canonical MCP bootstrap tool for overseer sessions.
+
+- No separate `read_overseer_context` MCP tool is needed; handshake
+  already includes context completeness (`ok`, `context_complete`),
+  missing files, and required file paths.
+- If `ok` or `context_complete` is `false`, report `missing` to the user
+  and ask whether to proceed before acting.
+- Treat `must_read`, `next_action_source`, `forbidden_actions`, and
+  `requires_explicit_user_approval_for` as the session contract.
+- RelayOS overseer is not a daemon, autonomous agent, or hard security
+  sandbox; keep the human in control.
+- Do not perform forbidden actions without explicit user approval.
+
+Minimal session bootstrap prompt:
+
+`Call read_overseer_handshake first. If ok/context_complete is true, follow the returned session contract. If incomplete, report missing files before acting.`
+
 ### 4. Terminal CLI helpers
 
 From any terminal in your project:

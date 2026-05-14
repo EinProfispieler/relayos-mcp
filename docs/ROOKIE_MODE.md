@@ -77,6 +77,27 @@ wrong — ask Claude to call `doctor`. It runs health checks
 consistency, etc.) and reports what's broken without crashing on bad
 state.
 
+## Overseer-bound MCP bootstrap
+
+For overseer-bound sessions, start by calling
+`read_overseer_handshake` once. This is the canonical MCP bootstrap
+tool for overseer session binding.
+
+- A separate `read_overseer_context` MCP tool is intentionally not
+  needed; handshake already includes context completeness and required
+  files.
+- If `ok` or `context_complete` is false, report missing files and ask
+  the user whether to proceed before acting.
+- Treat `must_read`, `next_action_source`, `forbidden_actions`, and
+  `requires_explicit_user_approval_for` as the active session contract.
+- Do not assume RelayOS is a daemon, autonomous agent, or hard security
+  sandbox.
+- Never proceed with forbidden actions without explicit user approval.
+
+Minimal copy-paste prompt:
+
+`Call read_overseer_handshake first. If ok/context_complete is true, follow the returned session contract. If incomplete, report missing files before acting.`
+
 ---
 
 ## What you say in chat
