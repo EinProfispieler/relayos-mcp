@@ -6,11 +6,11 @@ A RhythmLag project.
   <img src="docs/assets/relayos-social-preview.png" width="720" alt="RelayOS by RhythmLag" />
 </p>
 
-RelayOS coordinates Claude Code and Codex CLI handoffs, enforces policy gates before agent launches, and stores evidence locally so the human stays in control. Nothing leaves your machine. No cloud, no accounts, no auto-execute.
+RelayOS is a local-first control layer for AI-assisted development. It validates and records task handoffs, enforces policy gates before agent launches, and stores evidence locally so the human stays in control. Claude Code and Codex CLI are the current first-party integrations; the envelope format and MCP surface are designed to accommodate additional agents and providers. Nothing leaves your machine. No cloud, no accounts, no auto-execute.
 
 ## Who it is for
 
-**Solo / indie developers** — structured handoffs replace copy-pasted prompts between Claude and Codex. Rookie Mode keeps the workflow chat-only. Policy gates and diff-risk checks prevent unsafe commits. Checkpoint snapshots preserve evidence before risky work.
+**Solo / indie developers** — structured handoffs replace copy-pasted prompts between AI sessions. Rookie Mode keeps the workflow chat-only. Policy gates and diff-risk checks prevent unsafe commits. Checkpoint snapshots preserve evidence before risky work.
 
 **Teams and enterprises** — the same local foundation is designed to extend to policy management, audit timelines, rollback, approval queues, and a risk dashboard. See [Roadmap](#roadmap).
 
@@ -18,8 +18,8 @@ RelayOS coordinates Claude Code and Codex CLI handoffs, enforces policy gates be
 
 | Problem | Without RelayOS |
 |---|---|
-| Context loss | Long Claude sessions drop agent-to-agent instructions on window switch |
-| Unsafe AI changes | Codex edits `.env`, rewrites CI config, or drops hundreds of lines with no pre-commit check |
+| Context loss | Long AI sessions drop agent-to-agent instructions on window switch |
+| Unsafe AI changes | An agent edits `.env`, rewrites CI config, or drops hundreds of lines with no pre-commit check |
 | Unclear permissions | File scope and model choice are implied, not recorded |
 | Missing audit trail | Nothing logs which agent did what, with which model, under what constraints |
 | Hard to review diffs | AI-generated changes touch auth, secrets, or deps without flagging |
@@ -28,11 +28,11 @@ RelayOS coordinates Claude Code and Codex CLI handoffs, enforces policy gates be
 ## How the workflow fits together
 
 ```
-Human → Claude plan
+Human → planning agent
       → RelayOS handoff  (validate + record envelope)
       → policy check     (allow / warn / block before launch)
       → checkpoint       (snapshot HEAD + diff before launch)
-      → Codex patch / review
+      → execution agent  (patch / review / test)
       → diff-risk        (classify working tree before git commit)
       → relayos report   (evidence snapshot)
       → human reviews and commits
@@ -44,7 +44,7 @@ No step runs automatically unless you ask. Every event is appended to an audit l
 
 ### Handoff envelopes
 
-Records a validated task envelope on disk: `model`, `effort`, `execution_mode`, `allowed_files`, `forbidden_files`, `constraints`, `expected_output`. Both Claude Code and Codex CLI read the same envelope via MCP — no copy-pasting, no lost fields.
+Records a validated task envelope on disk: `model`, `effort`, `execution_mode`, `allowed_files`, `forbidden_files`, `constraints`, `expected_output`. Any MCP-capable agent reads the same envelope — no copy-pasting, no lost fields.
 
 ### Templates and quick handoff
 
@@ -122,9 +122,9 @@ args = ["/path/to/relayos/dist/index.js"]
 
 Restart both CLIs after registering so they pick up the tool list.
 
-### 3. MCP tools (inside a Claude or Codex session)
+### 3. MCP tools (inside an AI agent session)
 
-Once registered, 14 MCP tools are available from within any Claude Code or Codex CLI session. Common ones:
+Once registered, 14 MCP tools are available from within any MCP-capable agent session (Claude Code, Codex CLI, or others). Common ones:
 
 - `list_templates` — discover built-in and project templates
 - `create_quick_handoff` — one-shot handoff from a task description
@@ -192,6 +192,7 @@ Then talk to Claude normally. Claude files the handoff; switch to a Codex termin
 - [**docs/DIFF_RISK.md**](docs/DIFF_RISK.md) — `relayos diff-risk` reference
 - [**docs/OVERSEER.md**](docs/OVERSEER.md) — `relayos overseer` reference
 - [**docs/REFERENCES.md**](docs/REFERENCES.md) — RelayOS vs OpenSpec and Superpowers; future interoperability ideas
+- [**docs/MODEL_STRATEGY.md**](docs/MODEL_STRATEGY.md) — role templates, model/provider selection, and the future model-role matrix
 
 ---
 
@@ -199,7 +200,7 @@ Then talk to Claude normally. Claude files the handoff; switch to a Codex termin
 
 ### MCP tools
 
-Available inside any Claude Code or Codex CLI session once the MCP server is registered.
+Available inside any MCP-capable agent session once the server is registered.
 
 | Tool | Purpose |
 |---|---|
@@ -226,14 +227,14 @@ Available from any terminal after `npm link` (or via `./bin/relayos`).
 |---|---|
 | `relayos launch [id\|latest]` | Print the launch command for the newest open handoff. See [docs/LAUNCH.md](docs/LAUNCH.md). |
 | `relayos policy [id\|latest]` | Evaluate a handoff envelope as allow/warn/block. |
-| `relayos checkpoint <create\|list\|show>` | Snapshot HEAD + status + diff before risky handoffs. See [docs/CHECKPOINTS.md](docs/CHECKPOINTS.md). |
+| `relayos checkpoint <create\|list\|show\|restore>` | Snapshot HEAD + status + diff before risky handoffs. See [docs/CHECKPOINTS.md](docs/CHECKPOINTS.md). |
 | `relayos diff-risk` | Classify the current working tree before `git commit`. See [docs/DIFF_RISK.md](docs/DIFF_RISK.md). |
 | `relayos report` | Print a compact evidence snapshot: handoff, checkpoint, diff-risk, git status. |
 | `relayos overseer <status\|note\|next\|brief\|init-context\|branch\|progress>` | Local coordination workspace: notes, next-action, branch/progress context. See [docs/OVERSEER.md](docs/OVERSEER.md). |
 
 ### Diagnostics
 
-If something looks off — wrong template winning, envelope not appearing, server running stale code — call `doctor` for a one-shot health report and `inspect_config` for the resolved config. Both degrade gracefully on broken state. After `npm run build`, restart your Claude or Codex session so the MCP host picks up the refreshed binary.
+If something looks off — wrong template winning, envelope not appearing, server running stale code — call `doctor` for a one-shot health report and `inspect_config` for the resolved config. Both degrade gracefully on broken state. After `npm run build`, restart your agent session so the MCP host picks up the refreshed binary.
 
 ---
 
