@@ -846,11 +846,17 @@ async function runOverseerEnv(args: string[], io: CliIO): Promise<number> {
   const cwd = process.cwd();
   const runtimeHome = process.env.RELAYOS_RUNTIME_HOME;
   const runtimeHomeLine = runtimeHome
-    ? `  RELAYOS_RUNTIME_HOME: set (${runtimeHome})`
+    ? `  RELAYOS_RUNTIME_HOME: configured (${runtimeHome})`
     : "  RELAYOS_RUNTIME_HOME: not set";
   const runtimeWorkspaceLine = runtimeHome
-    ? "  Runtime workspace: configured in environment, but support is future/not active."
+    ? "  Runtime workspace: value detected for inspection only."
     : "  Runtime workspace: not configured (RELAYOS_RUNTIME_HOME is not set).";
+  const switchingLine = runtimeHome
+    ? "  Runtime workspace switching: not active yet."
+    : "  Runtime workspace switching: not active yet.";
+  const behaviorLine = runtimeHome
+    ? "  Current behavior: RelayOS still resolves `.relayos/` relative to the current working directory unless/until future runtime switching is explicitly implemented."
+    : "  Current behavior: `.relayos/` paths resolve relative to the current working directory.";
 
   const lines = [
     "OVERSEER ENVIRONMENT",
@@ -858,8 +864,9 @@ async function runOverseerEnv(args: string[], io: CliIO): Promise<number> {
     `  Current working directory: ${cwd}`,
     runtimeHomeLine,
     runtimeWorkspaceLine,
-    "  Current behavior: `.relayos/` paths resolve relative to the current working directory.",
-    "  RELAYOS_RUNTIME_HOME support is future/not active in this release.",
+    switchingLine,
+    behaviorLine,
+    "  RELAYOS_RUNTIME_HOME support is inspection-only in this release.",
     "  Production runtime state should stay outside the RelayOS source repo.",
   ];
   io.stdout.write(`${lines.join("\n")}\n`);

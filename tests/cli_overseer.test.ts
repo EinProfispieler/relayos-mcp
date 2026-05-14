@@ -254,8 +254,9 @@ describe("relayos overseer env", () => {
       expect(cap.stdout).toContain(`Current working directory: ${process.cwd()}`);
       expect(cap.stdout).toContain("RELAYOS_RUNTIME_HOME: not set");
       expect(cap.stdout).toContain("Runtime workspace: not configured");
+      expect(cap.stdout).toContain("Runtime workspace switching: not active yet.");
       expect(cap.stdout).toContain("`.relayos/` paths resolve relative to the current working directory");
-      expect(cap.stdout).toContain("future/not active");
+      expect(cap.stdout).toContain("inspection-only in this release");
       expect(cap.stdout).toContain("outside the RelayOS source repo");
       expect(cap.stderr).toBe("");
     } finally {
@@ -264,7 +265,7 @@ describe("relayos overseer env", () => {
     }
   });
 
-  it("prints RELAYOS_RUNTIME_HOME when set but marks support as future/not active", async () => {
+  it("prints RELAYOS_RUNTIME_HOME when set but keeps support inspection-only", async () => {
     chdir(tempDir());
     const prev = process.env.RELAYOS_RUNTIME_HOME;
     process.env.RELAYOS_RUNTIME_HOME = "/tmp/relayos-runtime";
@@ -273,9 +274,13 @@ describe("relayos overseer env", () => {
     try {
       const code = await runCli(["overseer", "env"], cap.io);
       expect(code).toBe(0);
-      expect(cap.stdout).toContain("RELAYOS_RUNTIME_HOME: set (/tmp/relayos-runtime)");
-      expect(cap.stdout).toContain("configured in environment, but support is future/not active");
-      expect(cap.stdout).toContain("future/not active");
+      expect(cap.stdout).toContain("RELAYOS_RUNTIME_HOME: configured (/tmp/relayos-runtime)");
+      expect(cap.stdout).toContain("value detected for inspection only");
+      expect(cap.stdout).toContain("Runtime workspace switching: not active yet.");
+      expect(cap.stdout).toContain(
+        "RelayOS still resolves `.relayos/` relative to the current working directory unless/until future runtime switching is explicitly implemented.",
+      );
+      expect(cap.stdout).toContain("inspection-only in this release");
     } finally {
       if (prev === undefined) delete process.env.RELAYOS_RUNTIME_HOME;
       else process.env.RELAYOS_RUNTIME_HOME = prev;

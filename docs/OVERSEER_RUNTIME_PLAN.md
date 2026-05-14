@@ -67,20 +67,21 @@ Each stage is a discrete, safe increment. No stage is skipped. No stage automati
 - No code changes.
 - Operators and future sessions know what is coming and why.
 
-### Stage 2 — read-only env inspection (next safe step)
+### Stage 2 — read-only env boundaries (baseline)
 
 - `relayos overseer env` already ships and prints environment boundaries.
-- Verify that it correctly reports: CWD, whether `RELAYOS_RUNTIME_HOME` is set, whether it resolves to an existing directory.
+- Verify that it correctly reports: CWD and whether `RELAYOS_RUNTIME_HOME` is set.
 - No write paths. No config files created.
 - Acceptance: `relayos overseer env` output is correct and stable; covered by tests.
 
-### Stage 3 — optional runtime home configuration
+### Stage 3 — optional runtime home inspection refinement
 
-- Add `RELAYOS_RUNTIME_HOME` support to `relayos overseer env` output and to `inspect_config`.
-- When set, show the resolved runtime workspace path and whether it exists.
+- Enhance `relayos overseer env` messaging for `RELAYOS_RUNTIME_HOME` when set.
+- Mark the value as inspection-only and explicitly state that runtime workspace switching is not active yet.
+- Do not validate path existence and do not read runtime state from that path.
 - **Still read-only.** No path is written to. No migration happens.
 - `.relayos/config.json` may optionally include `runtimeHome` as a documented field — validated but not yet acted upon.
-- Acceptance: `env` output reflects the env var; config schema accepts the field; no write paths touched.
+- Acceptance: `env` output reflects the env var clearly; no switching/write paths touched.
 
 ### Stage 4 — explicit migration command or guided copy
 

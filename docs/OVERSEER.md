@@ -137,7 +137,8 @@ Prints overseer environment boundaries for the current session:
 It also explains current behavior and future intent:
 
 - today, `.relayos/` paths resolve relative to the current working directory
-- `RELAYOS_RUNTIME_HOME` support is future/not active in current code
+- when `RELAYOS_RUNTIME_HOME` is set, it is detected for inspection only
+- runtime workspace switching is not active yet
 - production runtime state should stay outside the RelayOS source repo
 
 This command is read-only and does not create directories, write files, or change state.
