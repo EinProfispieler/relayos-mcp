@@ -369,7 +369,12 @@ describe("relayos overseer handshake", () => {
     expect(cap.stdout).toContain("workspace path:");
     expect(cap.stdout).toContain("context status: incomplete");
     expect(cap.stdout).toContain("next action source:");
-    expect(cap.stdout).toContain("human-supervised local-first overseer protocol");
+    expect(cap.stdout).toContain("forbidden actions:");
+    expect(cap.stdout).toContain("No daemon/background agent behavior.");
+    expect(cap.stdout).toContain("requires explicit user approval for:");
+    expect(cap.stdout).toContain("Tags or releases.");
+    expect(cap.stdout).toContain("notes:");
+    expect(cap.stdout).toContain("Human-supervised local-first overseer protocol");
     expect(cap.stderr).toBe("");
   });
 

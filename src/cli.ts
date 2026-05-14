@@ -1016,8 +1016,12 @@ async function runOverseerHandshake(args: string[], io: CliIO): Promise<number> 
     "  must-read files:",
     ...handshake.must_read.map((p) => `    - ${p}`),
     `  next action source: ${handshake.next_action_source}`,
-    "  forbidden actions: no runtime activation/migration; no daemon; no parallel/queue/sub-runs; no schema changes.",
-    "  reminder: this is a human-supervised local-first overseer protocol, not a daemon or security sandbox.",
+    "  forbidden actions:",
+    ...handshake.forbidden_actions.map((a) => `    - ${a}`),
+    "  requires explicit user approval for:",
+    ...handshake.requires_explicit_user_approval_for.map((a) => `    - ${a}`),
+    "  notes:",
+    ...handshake.notes.map((n) => `    - ${n}`),
   ];
   if (handshake.missing.length > 0) {
     lines.push("  missing:", ...handshake.missing.map((m) => `    - ${m}`));
