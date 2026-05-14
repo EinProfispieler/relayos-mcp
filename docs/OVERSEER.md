@@ -11,6 +11,7 @@ relayos overseer next [text...]
 relayos overseer start
 relayos overseer mode
 relayos overseer env
+relayos overseer activate-runtime --dry-run --path <runtime-path> [--source <source-repo-path>] [--json]
 relayos overseer brief
 relayos overseer init-context
 relayos overseer branch <name>
@@ -152,6 +153,18 @@ It also explains current behavior and future intent:
 This command is read-only and does not create directories, write files, or change state.
 
 `--json` prints the same environment boundary information as stable machine-readable JSON.
+
+### `overseer activate-runtime --dry-run --path <runtime-path> [--source <source-repo-path>] [--json]`
+
+Read-only activation safety check for a proposed runtime workspace path.
+
+- Requires `--dry-run` and `--path`.
+- `--source` defaults to the current working directory.
+- Reports allow/warn/block based on path safety checks.
+- Never activates runtime switching.
+- Never writes files, creates directories, moves state, or changes `.relayos/` resolution.
+
+`--json` returns the same decision report in machine-readable form.
 
 ### `overseer init-context`
 

@@ -1,4 +1,6 @@
 import { existsSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   CheckpointResolutionError,
@@ -644,6 +646,213 @@ async function runReport(args: string[], io: CliIO): Promise<number> {
 
 const OVERSEER_SEP = "─".repeat(44);
 
+function isPathInside(parentAbs: string, childAbs: string): boolean {
+  const rel = relative(parentAbs, childAbs);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+async function runGitCommand(
+  cwd: string,
+  args: string[],
+): Promise<{ ok: boolean; stdout: string }> {
+  return new Promise((resolveRun) => {
+    execFile("git", args, { cwd, windowsHide: true }, (error, stdout) => {
+      if (error) {
+        resolveRun({ ok: false, stdout: "" });
+        return;
+      }
+      resolveRun({ ok: true, stdout });
+    });
+  });
+}
+
+async function appearsGitTrackedInSourceRepo(
+  sourceRepoAbs: string,
+  runtimePathAbs: string,
+): Promise<boolean> {
+  if (!(await isGitRepo(sourceRepoAbs))) return false;
+  if (!isPathInside(sourceRepoAbs, runtimePathAbs)) return false;
+  const relPath = relative(sourceRepoAbs, runtimePathAbs) || ".";
+  const exact = await runGitCommand(sourceRepoAbs, [
+    "ls-files",
+    "--error-unmatch",
+    "--",
+    relPath,
+  ]);
+  if (exact.ok) return true;
+  const subtree = await runGitCommand(sourceRepoAbs, ["ls-files", "--", relPath]);
+  return subtree.ok && subtree.stdout.trim().length > 0;
+}
+
+interface OverseerActivateRuntimeArgs {
+  dryRun: boolean;
+  json: boolean;
+  path: string;
+  source: string;
+}
+
+function parseOverseerActivateRuntimeArgs(
+  args: string[],
+): OverseerActivateRuntimeArgs | null {
+  let dryRun = false;
+  let json = false;
+  let path: string | null = null;
+  let source: string | null = null;
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "--dry-run") {
+      dryRun = true;
+      continue;
+    }
+    if (arg === "--json") {
+      json = true;
+      continue;
+    }
+    if (arg === "--path") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("--")) return null;
+      path = value;
+      i++;
+      continue;
+    }
+    if (arg === "--source") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("--")) return null;
+      source = value;
+      i++;
+      continue;
+    }
+    return null;
+  }
+
+  if (!path) return null;
+  return {
+    dryRun,
+    json,
+    path,
+    source: source ?? process.cwd(),
+  };
+}
+
+async function runOverseerActivateRuntime(
+  args: string[],
+  io: CliIO,
+): Promise<number> {
+  const parsed = parseOverseerActivateRuntimeArgs(args);
+  if (!parsed) {
+    io.stderr.write(
+      "usage: relayos overseer activate-runtime --dry-run --path <runtime-path> [--source <source-repo-path>] [--json]\n",
+    );
+    return 1;
+  }
+  if (!parsed.dryRun) {
+    io.stderr.write(
+      "relayos overseer activate-runtime: --dry-run is required; activation is not implemented.\n" +
+        "Run with --dry-run to preview checks without modifying any files.\n",
+    );
+    return 1;
+  }
+
+  const cwd = process.cwd();
+  const sourceRepo = resolve(parsed.source);
+  const runtimePath = resolve(parsed.path);
+  const runtimePathExists = existsSync(runtimePath);
+  const runtimePathInsideSourceRepo = isPathInside(sourceRepo, runtimePath);
+  const runtimePathGitTracked = await appearsGitTrackedInSourceRepo(sourceRepo, runtimePath);
+  const sourceOverseerStateExists = existsSync(join(sourceRepo, ".relayos", "overseer"));
+  const relayosRuntimeHomeRaw = process.env.RELAYOS_RUNTIME_HOME;
+  const relayosRuntimeHomeSet = relayosRuntimeHomeRaw !== undefined;
+  const relayosRuntimeHome = relayosRuntimeHomeSet ? relayosRuntimeHomeRaw : null;
+  const relayosRuntimeHomeMatchesPath =
+    relayosRuntimeHomeSet && resolve(relayosRuntimeHomeRaw!) === runtimePath;
+
+  const warnings: string[] = [];
+  const blocks: string[] = [];
+
+  if (runtimePathInsideSourceRepo) {
+    blocks.push("Proposed runtime workspace path is inside the source repo.");
+  }
+  if (runtimePathGitTracked) {
+    blocks.push("Proposed runtime workspace path appears git-tracked.");
+  }
+  if (!runtimePathExists) {
+    warnings.push("Proposed runtime workspace path does not exist.");
+  }
+  if (relayosRuntimeHomeSet && !relayosRuntimeHomeMatchesPath) {
+    warnings.push("RELAYOS_RUNTIME_HOME is set and does not match --path.");
+  }
+
+  const decision = blocks.length > 0 ? "block" : warnings.length > 0 ? "warn" : "allow";
+  const notes = [
+    "Dry-run only: no files were written, moved, or deleted.",
+    "Runtime workspace switching is not active.",
+    "Current `.relayos/` resolution behavior is unchanged.",
+  ];
+
+  if (parsed.json) {
+    io.stdout.write(
+      `${JSON.stringify(
+        {
+          decision,
+          sourceRepo,
+          runtimePath,
+          runtimePathExists,
+          runtimePathInsideSourceRepo,
+          runtimePathGitTracked,
+          sourceOverseerStateExists,
+          relayosRuntimeHomeSet,
+          relayosRuntimeHome,
+          relayosRuntimeHomeMatchesPath,
+          runtimeWorkspaceSwitchingActive: false,
+          wroteFiles: false,
+          createdDirectories: false,
+          warnings,
+          blocks,
+          notes,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return decision === "block" ? 2 : 0;
+  }
+
+  const lines = [
+    "OVERSEER RUNTIME ACTIVATION DRY-RUN",
+    OVERSEER_SEP,
+    `cwd: ${cwd}`,
+    `source repo: ${sourceRepo}`,
+    `proposed runtime path: ${runtimePath}`,
+    relayosRuntimeHomeSet
+      ? `RELAYOS_RUNTIME_HOME: set (${relayosRuntimeHome})`
+      : "RELAYOS_RUNTIME_HOME: not set",
+    "",
+    "CHECKS",
+    OVERSEER_SEP,
+    `  runtime path exists: ${runtimePathExists ? "yes" : "no"}`,
+    `  runtime path inside source repo: ${runtimePathInsideSourceRepo ? "yes" : "no"}`,
+    `  runtime path appears git-tracked: ${runtimePathGitTracked ? "yes" : "no"}`,
+    `  source .relayos/overseer exists: ${sourceOverseerStateExists ? "yes" : "no"}`,
+    `  RELAYOS_RUNTIME_HOME matches --path: ${relayosRuntimeHomeSet ? (relayosRuntimeHomeMatchesPath ? "yes" : "no") : "n/a (RELAYOS_RUNTIME_HOME not set)"}`,
+    "",
+    "WARNINGS",
+    OVERSEER_SEP,
+    ...(warnings.length > 0 ? warnings.map((w) => `  - ${w}`) : ["  (none)"]),
+    "",
+    "BLOCKS",
+    OVERSEER_SEP,
+    ...(blocks.length > 0 ? blocks.map((b) => `  - ${b}`) : ["  (none)"]),
+    "",
+    "FINAL DECISION",
+    OVERSEER_SEP,
+    `  decision: ${decision.toUpperCase()}`,
+    "  no files were written; runtime switching is not active.",
+  ];
+  io.stdout.write(`${lines.join("\n")}\n`);
+  return decision === "block" ? 2 : 0;
+}
+
 async function runOverseerStatus(args: string[], io: CliIO): Promise<number> {
   const wantsJson = args.length === 1 && args[0] === "--json";
   if (args.length > 1 || (args.length === 1 && !wantsJson)) {
@@ -1102,12 +1311,13 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "start") return runOverseerStart(rest, io);
   if (sub === "mode") return runOverseerMode(rest, io);
   if (sub === "env") return runOverseerEnv(rest, io);
+  if (sub === "activate-runtime") return runOverseerActivateRuntime(rest, io);
   if (sub === "brief") return runOverseerBrief(rest, io);
   if (sub === "init-context") return runOverseerInitContext(rest, io);
   if (sub === "branch") return runOverseerBranch(rest, io);
   if (sub === "progress") return runOverseerProgress(rest, io);
   io.stderr.write(
-    "usage: relayos overseer <status|note|next|start|mode|env|brief|init-context|branch|progress> [args...]\n",
+    "usage: relayos overseer <status|note|next|start|mode|env|activate-runtime|brief|init-context|branch|progress> [args...]\n",
   );
   return 1;
 }

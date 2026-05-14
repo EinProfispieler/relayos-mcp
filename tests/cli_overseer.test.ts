@@ -6,6 +6,7 @@ import { runCli } from "../src/cli.js";
 
 const cleanups: Array<() => void> = [];
 let previousCwd: string | undefined;
+const REPO_ROOT = process.cwd();
 
 afterEach(() => {
   if (previousCwd) {
@@ -455,6 +456,169 @@ describe("relayos overseer env", () => {
 
     expect(code).toBe(1);
     expect(cap.stderr).toContain("usage: relayos overseer env");
+  });
+});
+
+describe("relayos overseer activate-runtime --dry-run", () => {
+  it("exits 1 with usage when --path is missing", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "activate-runtime", "--dry-run"], cap.io);
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("usage: relayos overseer activate-runtime");
+  });
+
+  it("exits 1 with refusal when --dry-run is missing", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(
+      ["overseer", "activate-runtime", "--path", "/tmp/relayos-runtime"],
+      cap.io,
+    );
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("--dry-run is required");
+  });
+
+  it("returns WARN (exit 0) when runtime path does not exist", async () => {
+    chdir(tempDir());
+    const source = tempDir();
+    const runtime = join(tempDir(), "missing-runtime");
+    const cap = captureIO();
+
+    const code = await runCli(
+      ["overseer", "activate-runtime", "--dry-run", "--source", source, "--path", runtime],
+      cap.io,
+    );
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("OVERSEER RUNTIME ACTIVATION DRY-RUN");
+    expect(cap.stdout).toContain("decision: WARN");
+    expect(cap.stdout).toContain("does not exist");
+  });
+
+  it("returns BLOCK (non-zero) when runtime path is inside source repo", async () => {
+    chdir(tempDir());
+    const source = tempDir();
+    const runtime = join(source, ".relayos-runtime");
+    const cap = captureIO();
+
+    const code = await runCli(
+      ["overseer", "activate-runtime", "--dry-run", "--source", source, "--path", runtime],
+      cap.io,
+    );
+
+    expect(code).toBe(2);
+    expect(cap.stdout).toContain("decision: BLOCK");
+    expect(cap.stdout).toContain("inside the source repo");
+  });
+
+  it("returns BLOCK (non-zero) when runtime path appears git-tracked", async () => {
+    chdir(tempDir());
+    const runtime = join(REPO_ROOT, "README.md");
+    const cap = captureIO();
+
+    const code = await runCli(
+      [
+        "overseer",
+        "activate-runtime",
+        "--dry-run",
+        "--source",
+        REPO_ROOT,
+        "--path",
+        runtime,
+      ],
+      cap.io,
+    );
+
+    expect(code).toBe(2);
+    expect(cap.stdout).toContain("decision: BLOCK");
+    expect(cap.stdout).toContain("appears git-tracked");
+  });
+
+  it("prints stable JSON for allow path", async () => {
+    chdir(tempDir());
+    const source = tempDir();
+    const runtime = tempDir();
+    const cap = captureIO();
+
+    const code = await runCli(
+      [
+        "overseer",
+        "activate-runtime",
+        "--dry-run",
+        "--source",
+        source,
+        "--path",
+        runtime,
+        "--json",
+      ],
+      cap.io,
+    );
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect(data.decision).toBe("allow");
+    expect(data.sourceRepo).toBe(source);
+    expect(data.runtimePath).toBe(runtime);
+    expect(data.runtimePathExists).toBe(true);
+    expect(data.runtimePathInsideSourceRepo).toBe(false);
+    expect(data.runtimePathGitTracked).toBe(false);
+    expect(data.sourceOverseerStateExists).toBe(false);
+    expect(data.relayosRuntimeHomeSet).toBe(false);
+    expect(data.relayosRuntimeHome).toBeNull();
+    expect(data.relayosRuntimeHomeMatchesPath).toBe(false);
+    expect(data.runtimeWorkspaceSwitchingActive).toBe(false);
+    expect(data.wroteFiles).toBe(false);
+    expect(data.createdDirectories).toBe(false);
+    expect(Array.isArray(data.warnings)).toBe(true);
+    expect((data.warnings as unknown[]).length).toBe(0);
+    expect(Array.isArray(data.blocks)).toBe(true);
+    expect((data.blocks as unknown[]).length).toBe(0);
+    expect(Array.isArray(data.notes)).toBe(true);
+    expect(cap.stderr).toBe("");
+  });
+
+  it("prints stable JSON WARN when RELAYOS_RUNTIME_HOME differs from --path", async () => {
+    chdir(tempDir());
+    const source = tempDir();
+    const runtime = tempDir();
+    const prev = process.env.RELAYOS_RUNTIME_HOME;
+    process.env.RELAYOS_RUNTIME_HOME = "/tmp/relayos-other";
+    const cap = captureIO();
+
+    try {
+      const code = await runCli(
+        [
+          "overseer",
+          "activate-runtime",
+          "--dry-run",
+          "--source",
+          source,
+          "--path",
+          runtime,
+          "--json",
+        ],
+        cap.io,
+      );
+
+      expect(code).toBe(0);
+      const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+      expect(data.decision).toBe("warn");
+      expect(data.relayosRuntimeHomeSet).toBe(true);
+      expect(data.relayosRuntimeHome).toBe("/tmp/relayos-other");
+      expect(data.relayosRuntimeHomeMatchesPath).toBe(false);
+      expect(Array.isArray(data.warnings)).toBe(true);
+      expect((data.warnings as string[]).some((w) => w.includes("does not match --path"))).toBe(
+        true,
+      );
+    } finally {
+      if (prev === undefined) delete process.env.RELAYOS_RUNTIME_HOME;
+      else process.env.RELAYOS_RUNTIME_HOME = prev;
+    }
   });
 });
 

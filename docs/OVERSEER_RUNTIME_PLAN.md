@@ -156,9 +156,9 @@ When a future session begins implementing any stage past Stage 2, these guardrai
 
 ---
 
-## 8. Dry-run command design (future, not implemented)
+## 8. Dry-run command design (implemented baseline + future extensions)
 
-**This section is a design spec, not a description of current behavior.** Nothing described here is implemented. The command and all behaviors are future direction.
+The read-only dry-run command now exists in baseline form. This section keeps the broader design and future extensions that are not yet implemented.
 
 ### Purpose
 
@@ -171,11 +171,11 @@ relayos overseer activate-runtime --dry-run [--path <runtime-path>] [--source <s
 ```
 
 - `--dry-run` is always required for the read-only inspection mode. The command must not accept activation without it until Stage 5 is fully implemented and tested.
-- `--path` specifies the proposed runtime workspace path. Defaults to `RELAYOS_RUNTIME_HOME` if set.
+- `--path` specifies the proposed runtime workspace path. It is required in the current implementation.
 - `--source` specifies the source repo to check against. Defaults to the current working directory.
 - `--json` outputs the same report in machine-readable JSON (same shape as other `--json` commands).
 
-Alternative name under consideration: `relayos overseer runtime-check`. Final name TBD before implementation.
+Alternative name under consideration: `relayos overseer runtime-check`.
 
 ### Inputs
 
