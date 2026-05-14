@@ -8,6 +8,7 @@ A gitignored local coordination workspace. Stores a running notes timeline and a
 relayos overseer status
 relayos overseer note <text...>
 relayos overseer next [text...]
+relayos overseer start
 relayos overseer brief
 relayos overseer init-context
 relayos overseer branch <name>
@@ -103,6 +104,15 @@ LOCAL DATA SAFETY
 ```
 
 Context files that do not exist are shown as `(missing — file not found in .relayos/overseer/)`. Exits 0 even when all files are absent. Takes no arguments — exits 1 with usage if any are given.
+
+### `overseer start`
+
+Prints the RelayOS banner, prints the current overseer brief, and emits explicit startup guidance:
+
+- serial mode is the default
+- parallel mode is future/opt-in and is not automatically enabled
+
+This command is intentionally safe and read-only for orchestration: it does not launch Codex/Claude sub-runs, does not create branches/worktrees, and does not execute queue or parallel runners.
 
 ### `overseer init-context`
 

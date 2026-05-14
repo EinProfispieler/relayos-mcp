@@ -186,6 +186,33 @@ describe("relayos overseer: error cases", () => {
   });
 });
 
+describe("relayos overseer start", () => {
+  it("prints banner, startup mode guidance, and overseer brief", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "start"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("Local-first safety, audit, and handoff layer");
+    expect(cap.stdout).toContain("OVERSEER STARTUP MODE");
+    expect(cap.stdout).toContain("Serial mode is the default");
+    expect(cap.stdout).toContain("Parallel mode is future/opt-in");
+    expect(cap.stdout).toContain("RELAYOS OVERSEER BRIEF");
+    expect(cap.stderr).toBe("");
+  });
+
+  it("exits 1 with usage on unexpected args", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "start", "--json"], cap.io);
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("usage: relayos overseer start");
+  });
+});
+
 describe("relayos overseer brief", () => {
   it("exits 0 and prints header with no overseer state", async () => {
     chdir(tempDir());
