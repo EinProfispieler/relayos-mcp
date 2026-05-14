@@ -21,6 +21,14 @@ import {
   isGitRepo,
 } from "./git.js";
 import { listEnvelopes } from "./envelope.js";
+import {
+  appendNote,
+  hasOverseerState,
+  readLatestNotes,
+  readNextAction,
+  resolveOverseerLayout,
+  writeNextAction,
+} from "./overseer.js";
 import { evaluatePolicy, formatBannerLines } from "./policy.js";
 import type { Envelope } from "./schema.js";
 import { ensureStorage, resolveStorageLayout } from "./storage.js";
@@ -31,7 +39,7 @@ interface CliIO {
 }
 
 function usage(): string {
-  return "usage: relayos [launch|policy|checkpoint|diff-risk|report] [--force] [args...]\n";
+  return "usage: relayos [launch|policy|checkpoint|diff-risk|report|overseer] [--force] [args...]\n";
 }
 
 function checkpointUsage(): string {
@@ -470,6 +478,84 @@ async function runReport(args: string[], io: CliIO): Promise<number> {
   return 0;
 }
 
+const OVERSEER_SEP = "─".repeat(44);
+
+async function runOverseerStatus(_args: string[], io: CliIO): Promise<number> {
+  const layout = resolveOverseerLayout(process.cwd());
+  const lines: string[] = ["OVERSEER STATUS", OVERSEER_SEP];
+
+  if (!hasOverseerState(layout)) {
+    lines.push(
+      "(no overseer state — use `relayos overseer note` or `relayos overseer next` to begin)",
+    );
+    io.stdout.write(`${lines.join("\n")}\n`);
+    return 0;
+  }
+
+  const [nextAction, notes] = await Promise.all([
+    readNextAction(layout),
+    readLatestNotes(layout, 5),
+  ]);
+
+  lines.push("NEXT ACTION");
+  if (nextAction) {
+    lines.push(`  ${nextAction}`);
+  } else {
+    lines.push("  (none — use `relayos overseer next <text>` to set one)");
+  }
+
+  lines.push("");
+  lines.push("RECENT NOTES");
+  if (notes.length === 0) {
+    lines.push("  (none — use `relayos overseer note <text>` to add one)");
+  } else {
+    for (const n of notes) {
+      lines.push(`  [${n.ts}] ${n.text}`);
+    }
+  }
+
+  io.stdout.write(`${lines.join("\n")}\n`);
+  return 0;
+}
+
+async function runOverseerNote(args: string[], io: CliIO): Promise<number> {
+  if (args.length === 0) {
+    io.stderr.write("usage: relayos overseer note <text>\n");
+    return 1;
+  }
+  const text = args.join(" ");
+  const layout = resolveOverseerLayout(process.cwd());
+  await appendNote(layout, text);
+  io.stdout.write(`note recorded: ${text}\n`);
+  return 0;
+}
+
+async function runOverseerNext(args: string[], io: CliIO): Promise<number> {
+  const layout = resolveOverseerLayout(process.cwd());
+  if (args.length === 0) {
+    const current = await readNextAction(layout);
+    if (current) {
+      io.stdout.write(`${current}\n`);
+    } else {
+      io.stdout.write("(no next action set — use `relayos overseer next <text>` to set one)\n");
+    }
+    return 0;
+  }
+  const text = args.join(" ");
+  await writeNextAction(layout, text);
+  io.stdout.write(`next action set: ${text}\n`);
+  return 0;
+}
+
+async function runOverseer(args: string[], io: CliIO): Promise<number> {
+  const [sub, ...rest] = args;
+  if (sub === "status") return runOverseerStatus(rest, io);
+  if (sub === "note") return runOverseerNote(rest, io);
+  if (sub === "next") return runOverseerNext(rest, io);
+  io.stderr.write("usage: relayos overseer <status|note|next> [args...]\n");
+  return 1;
+}
+
 export async function runCli(
   argv = process.argv.slice(2),
   io: CliIO = { stdout: process.stdout, stderr: process.stderr },
@@ -486,6 +572,7 @@ export async function runCli(
   if (command === "checkpoint") return runCheckpoint(rest, io);
   if (command === "diff-risk") return runDiffRisk(rest, io);
   if (command === "report") return runReport(rest, io);
+  if (command === "overseer") return runOverseer(rest, io);
 
   io.stderr.write(usage());
   return 1;

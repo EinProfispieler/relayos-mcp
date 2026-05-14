@@ -6,3 +6,4 @@ coverage/
 .vitest-cache/
 .claude/
 docs/plans/
+.relayos/overseer/

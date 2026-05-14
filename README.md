@@ -96,6 +96,7 @@ Start here if you are new to the project:
 - [**docs/LAUNCH.md**](docs/LAUNCH.md) — the `relayos launch` CLI helper for printing the exact command to run the target.
 - [**docs/CHECKPOINTS.md**](docs/CHECKPOINTS.md) — `relayos checkpoint` snapshots HEAD + status + diff + untracked files before risky handoffs.
 - [**docs/DIFF_RISK.md**](docs/DIFF_RISK.md) — `relayos diff-risk` classifies the current working tree before `git commit`.
+- [**docs/OVERSEER.md**](docs/OVERSEER.md) — `relayos overseer` local coordination workspace for notes and next actions.
 
 ## What you get
 
@@ -119,7 +120,11 @@ Fourteen MCP tools, plus CLI helpers:
   [`docs/CHECKPOINTS.md`](docs/CHECKPOINTS.md). `relayos diff-risk` —
   classifies the current working tree (status + diff + untracked) as
   `allow`/`warn`/`block` before `git commit`. See
-  [`docs/DIFF_RISK.md`](docs/DIFF_RISK.md).
+  [`docs/DIFF_RISK.md`](docs/DIFF_RISK.md). `relayos report` —
+  prints a compact evidence snapshot: latest handoff, latest checkpoint,
+  diff-risk summary, and git status. `relayos overseer` — local
+  coordination workspace for notes and next actions. See
+  [`docs/OVERSEER.md`](docs/OVERSEER.md).
 
 Full table with descriptions: see [Tools](#tools) below.
 
@@ -215,6 +220,8 @@ Override storage path via the `HANDOFF_DIR` env var (default `~/.claude/handoff/
 | `doctor`               | Run health checks; never throws on broken state. |
 | `relayos checkpoint` *(CLI)* | Snapshot HEAD + status + diff + untracked files before risky handoffs. See [`docs/CHECKPOINTS.md`](docs/CHECKPOINTS.md). |
 | `relayos diff-risk` *(CLI)*  | Classify the current working tree as `allow`/`warn`/`block` before `git commit`. See [`docs/DIFF_RISK.md`](docs/DIFF_RISK.md). |
+| `relayos report` *(CLI)*     | Print a compact evidence snapshot: latest handoff, checkpoint, diff-risk, and git status. |
+| `relayos overseer` *(CLI)*   | Local coordination workspace: notes timeline and next-action store. See [`docs/OVERSEER.md`](docs/OVERSEER.md). |
 
 ### Diagnostics
 
