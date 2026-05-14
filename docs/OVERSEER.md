@@ -13,6 +13,7 @@ relayos overseer start
 relayos overseer mode
 relayos overseer env
 relayos overseer activate-runtime --dry-run --path <runtime-path> [--source <source-repo-path>] [--json]
+relayos overseer runtime-check --path <runtime-path> [--source <source-repo-path>] [--json]
 relayos overseer brief
 relayos overseer init-context
 relayos overseer branch <name>
@@ -223,6 +224,10 @@ Read-only activation safety check for a proposed runtime workspace path.
 - Human and JSON output both explicitly report that no files were written and runtime switching is not active.
 
 `--json` returns the same decision report in machine-readable form.
+
+### `overseer runtime-check --path <runtime-path> [--source <source-repo-path>] [--json]`
+
+Read-only alias for `overseer activate-runtime --dry-run ...` with equivalent safety checks and output.
 
 ### `overseer init-context`
 

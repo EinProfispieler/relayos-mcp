@@ -182,7 +182,7 @@ relayos overseer activate-runtime --dry-run [--path <runtime-path>] [--source <s
 - `--source` specifies the source repo to check against. Defaults to the current working directory.
 - `--json` outputs the same report in machine-readable JSON (same shape as other `--json` commands).
 
-Alternative name under consideration: `relayos overseer runtime-check`.
+Alias available: `relayos overseer runtime-check` (equivalent to `activate-runtime --dry-run`).
 
 ### Inputs
 

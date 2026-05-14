@@ -1403,12 +1403,15 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "mode") return runOverseerMode(rest, io);
   if (sub === "env") return runOverseerEnv(rest, io);
   if (sub === "activate-runtime") return runOverseerActivateRuntime(rest, io);
+  if (sub === "runtime-check") {
+    return runOverseerActivateRuntime(["--dry-run", ...rest], io);
+  }
   if (sub === "brief") return runOverseerBrief(rest, io);
   if (sub === "init-context") return runOverseerInitContext(rest, io);
   if (sub === "branch") return runOverseerBranch(rest, io);
   if (sub === "progress") return runOverseerProgress(rest, io);
   io.stderr.write(
-    "usage: relayos overseer <status|recent|note|next|start|mode|env|activate-runtime|brief|init-context|branch|progress> [args...]\n",
+    "usage: relayos overseer <status|recent|note|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
   );
   return 1;
 }

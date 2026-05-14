@@ -1063,6 +1063,66 @@ describe("relayos overseer activate-runtime --dry-run", () => {
   });
 });
 
+describe("relayos overseer runtime-check (alias)", () => {
+  it("runs the same read-only dry-run checks (human output)", async () => {
+    chdir(tempDir());
+    const source = tempDir();
+    const runtime = join(tempDir(), "missing-runtime");
+    const cap = captureIO();
+
+    const code = await runCli(
+      ["overseer", "runtime-check", "--source", source, "--path", runtime],
+      cap.io,
+    );
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("OVERSEER RUNTIME ACTIVATION DRY-RUN");
+    expect(cap.stdout).toContain(`source repo: ${source}`);
+    expect(cap.stdout).toContain(`proposed runtime path: ${runtime}`);
+    expect(cap.stdout).toContain("decision: WARN");
+    expect(cap.stdout).toContain("no files were written");
+    expect(cap.stdout).toContain("runtime switching is not active");
+  });
+
+  it("supports --json via the same dry-run path", async () => {
+    chdir(tempDir());
+    const source = tempDir();
+    const runtime = tempDir();
+    const cap = captureIO();
+
+    const code = await runCli(
+      ["overseer", "runtime-check", "--source", source, "--path", runtime, "--json"],
+      cap.io,
+    );
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect(data.decision).toBe("allow");
+    expect(data.sourceRepo).toBe(source);
+    expect(data.runtimePath).toBe(runtime);
+    expect(data.runtimeWorkspaceSwitchingActive).toBe(false);
+    expect(data.wroteFiles).toBe(false);
+    expect(data.createdDirectories).toBe(false);
+  });
+
+  it("does not create runtime or overseer state directories", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    const source = tempDir();
+    const runtime = join(tempDir(), "missing-runtime");
+    const cap = captureIO();
+
+    const code = await runCli(
+      ["overseer", "runtime-check", "--source", source, "--path", runtime],
+      cap.io,
+    );
+
+    expect(code).toBe(0);
+    expect(existsSync(runtime)).toBe(false);
+    expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
+  });
+});
+
 describe("relayos overseer brief", () => {
   it("exits 0 and prints header with no overseer state", async () => {
     chdir(tempDir());
