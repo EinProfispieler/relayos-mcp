@@ -23,6 +23,8 @@ RelayOS should preserve curated continuity, not raw chat sync.
 
 Curated continuity should keep only what operators and collaborators need to continue work safely and efficiently.
 
+RelayOS should not over-optimize away useful local context only to minimize disk usage. Curated memory should be practical for real project continuity and audit.
+
 ## Memory Layers (Conceptual)
 
 A future curated memory model may include:
@@ -69,6 +71,17 @@ A context pack could include stable sections such as:
 
 Goal: allow a new MCP-connected session to recover intent and constraints without replaying full transcript history.
 
+## Local Storage Posture (Future)
+
+RelayOS can prioritize useful local evidence retention over aggressive size minimization.
+
+- modern developer machines commonly have fast SSD capacity that can hold substantial curated state
+- Linux/macOS environments may also rely on memory-backed caches or swap during large local context preparation
+- because most AI inference is remote, local resources are mainly consumed by preparation, indexing, summarization, and audit workflows
+- curated context packs and structured evidence should be preferred over raw unbounded prompt injection
+
+Disk usage should still be observable and manageable through clear local accounting and operator controls.
+
 ## Privacy and Safety Defaults
 
 Future curated memory should follow conservative defaults:
@@ -81,6 +94,39 @@ Future curated memory should follow conservative defaults:
 
 Any transcript retention should be explicit, bounded, and reviewable.
 
+## Private Backup and Versioning Direction (Future)
+
+Future RelayOS may support opt-in private backup/versioning for curated overseer state.
+
+Possible targets:
+
+- private GitHub repository
+- private git remote
+- self-hosted git server
+
+Candidate content:
+
+- markdown state files
+- curated session summaries
+- decision records
+- context packs
+- timeline summaries
+- audit evidence indexes
+
+Intended benefits:
+
+- backup and disaster recovery
+- versioned conversation/workflow state
+- stronger markdown state management across long-running projects
+
+Safety boundaries for this direction:
+
+- no default cloud sync
+- no automatic upload of raw full chat transcripts
+- no secrets in backup
+- require redaction and ignore rules
+- private backup must be explicit and operator-approved
+
 ## Product Tier Direction
 
 Direction by tier:
@@ -89,6 +135,8 @@ Direction by tier:
 - Pro: context packs and multi-project memory
 - Business: shared team memory and approval evidence
 - Enterprise: searchable audit memory, retention policy, compliance export
+
+Business/Enterprise direction may extend backup governance with retention policy, access controls, audit exports, and admin-managed backup policies.
 
 ## Non-Goals For Now
 

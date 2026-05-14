@@ -51,6 +51,24 @@ Why this direction:
 - selective reuse across clients
 - reduced context pollution and prompt drift
 
+Local storage posture (future direction):
+
+- RelayOS should not over-optimize away useful local context just to save disk space
+- modern developer machines commonly have fast SSDs; Linux/macOS environments may also use memory-backed caches or swap for large local context preparation
+- since model inference is usually remote, local resources are primarily used for preparing, indexing, summarizing, and auditing context
+- prefer structured local evidence and curated context packs over raw unbounded prompt injection
+- disk usage should remain observable and manageable
+
+Private backup/versioning direction (future, opt-in only):
+
+- possible targets: private GitHub repository, private git remote, self-hosted git server
+- possible content: markdown state files, curated session summaries, decision records, context packs, timeline summaries, audit evidence indexes
+- no default cloud sync
+- no automatic upload of raw full chat transcripts
+- no secrets in backup
+- redaction and ignore rules required
+- private backup must be explicit and operator-approved
+
 ## 3) Advanced Rookie Mode
 
 Advanced Rookie Mode direction: a human-supervised agent routing and handoff runtime.
@@ -150,6 +168,7 @@ Business:
 - approval queues
 - admin provider allowlists
 - team overseer assignment
+- admin-managed backup policies (future direction)
 
 Enterprise:
 
@@ -159,6 +178,7 @@ Enterprise:
 - compliance export
 - managed agent registry
 - private deployment/server control plane
+- retention policy and access controls for curated memory/backup
 
 ## 8) Near-Term Recommended Direction
 
