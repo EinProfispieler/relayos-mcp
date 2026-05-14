@@ -7,6 +7,7 @@ A gitignored local coordination workspace. Stores a running notes timeline and a
 ```
 relayos overseer status
 relayos overseer context
+relayos overseer handshake
 relayos overseer recent
 relayos overseer note <text...>
 relayos overseer next [text...]
@@ -36,6 +37,14 @@ Read-only context availability check for local `.relayos/overseer/` canonical fi
 - `relayos overseer context` prints a compact file-availability summary.
 - `relayos overseer context --json` returns `{ ok, workspace_path, files, missing, gitignored }`.
 - Missing files are reported, not treated as fatal.
+
+### `overseer handshake`
+
+Read-only session protocol snapshot for overseer-bound clients.
+
+- `relayos overseer handshake` prints protocol/session role, repo/workspace paths, context status, must-read files, next-action source, and safety reminders.
+- `relayos overseer handshake --json` returns stable handshake metadata for automation clients.
+- Missing context files mark the handshake as incomplete (`ok: false`) but do not write files.
 OVERSEER STATUS
 ──────────────
 NEXT ACTION

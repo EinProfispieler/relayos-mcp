@@ -1018,6 +1018,88 @@ async function runOverseerContext(args: string[], io: CliIO): Promise<number> {
   return 0;
 }
 
+async function runOverseerHandshake(args: string[], io: CliIO): Promise<number> {
+  const wantsJson = args.length === 1 && args[0] === "--json";
+  if (args.length > 1 || (args.length === 1 && !wantsJson)) {
+    io.stderr.write("usage: relayos overseer handshake\n");
+    return 1;
+  }
+
+  const protocol = "relayos-overseer-session-v1" as const;
+  const sessionRole = "overseer_client" as const;
+  const repoPath = process.cwd();
+  const workspacePath = join(repoPath, ".relayos", "overseer");
+  const files = OVERSEER_CONTEXT_CANONICAL_FILES.map((name) => ({
+    name,
+    exists: existsSync(join(workspacePath, name)),
+  }));
+  const missing = files.filter((f) => !f.exists).map((f) => f.name);
+  const contextComplete = missing.length === 0;
+  const mustRead = OVERSEER_CONTEXT_CANONICAL_FILES.map((name) => join(workspacePath, name));
+  const nextActionSource = join(workspacePath, "NEXT_ACTION.md");
+  const forbiddenActions = [
+    "No runtime activation/switching or migration.",
+    "No daemon/background agent behavior.",
+    "No parallel mode, queue runner, or sub-run orchestration.",
+    "No storage/envelope/audit format changes.",
+  ];
+  const requiresExplicitUserApprovalFor = [
+    "Tags or releases.",
+    "Force push, amend published commits, or --no-verify.",
+    "Any write-path beyond approved read-only commands.",
+  ];
+  const notes = [
+    "Human-supervised local-first overseer protocol, not a daemon or security sandbox.",
+    "Missing context files are reported; this command never creates files.",
+  ];
+  const ok = contextComplete;
+
+  if (wantsJson) {
+    io.stdout.write(
+      `${JSON.stringify(
+        {
+          ok,
+          protocol,
+          session_role: sessionRole,
+          repo_path: repoPath,
+          workspace_path: workspacePath,
+          context_complete: contextComplete,
+          files,
+          missing,
+          must_read: mustRead,
+          next_action_source: nextActionSource,
+          forbidden_actions: forbiddenActions,
+          requires_explicit_user_approval_for: requiresExplicitUserApprovalFor,
+          notes,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return 0;
+  }
+
+  const lines = [
+    "OVERSEER HANDSHAKE",
+    OVERSEER_SEP,
+    `  protocol: ${protocol}`,
+    `  session_role: ${sessionRole}`,
+    `  repo path: ${repoPath}`,
+    `  workspace path: ${workspacePath}`,
+    `  context status: ${contextComplete ? "complete" : "incomplete"}`,
+    "  must-read files:",
+    ...mustRead.map((p) => `    - ${p}`),
+    `  next action source: ${nextActionSource}`,
+    "  forbidden actions: no runtime activation/migration; no daemon; no parallel/queue/sub-runs; no schema changes.",
+    "  reminder: this is a human-supervised local-first overseer protocol, not a daemon or security sandbox.",
+  ];
+  if (missing.length > 0) {
+    lines.push("  missing:", ...missing.map((m) => `    - ${m}`));
+  }
+  io.stdout.write(`${lines.join("\n")}\n`);
+  return 0;
+}
+
 function firstContentLine(text: string | null): string | null {
   if (!text) return null;
   for (const raw of text.split("\n")) {
@@ -1466,6 +1548,7 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   const [sub, ...rest] = args;
   if (sub === "status") return runOverseerStatus(rest, io);
   if (sub === "context") return runOverseerContext(rest, io);
+  if (sub === "handshake") return runOverseerHandshake(rest, io);
   if (sub === "recent") return runOverseerRecent(rest, io);
   if (sub === "note") return runOverseerNote(rest, io);
   if (sub === "next") return runOverseerNext(rest, io);
@@ -1481,7 +1564,7 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "branch") return runOverseerBranch(rest, io);
   if (sub === "progress") return runOverseerProgress(rest, io);
   io.stderr.write(
-    "usage: relayos overseer <status|context|recent|note|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
+    "usage: relayos overseer <status|context|handshake|recent|note|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
   );
   return 1;
 }

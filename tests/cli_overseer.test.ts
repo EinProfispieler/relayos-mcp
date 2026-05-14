@@ -338,6 +338,97 @@ describe("relayos overseer context", () => {
   });
 });
 
+describe("relayos overseer handshake", () => {
+  const REQUIRED_HANDSHAKE_JSON_FIELDS = [
+    "ok",
+    "protocol",
+    "session_role",
+    "repo_path",
+    "workspace_path",
+    "context_complete",
+    "files",
+    "missing",
+    "must_read",
+    "next_action_source",
+    "forbidden_actions",
+    "requires_explicit_user_approval_for",
+    "notes",
+  ] as const;
+
+  it("prints compact human-readable handshake output", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "handshake"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("OVERSEER HANDSHAKE");
+    expect(cap.stdout).toContain("protocol: relayos-overseer-session-v1");
+    expect(cap.stdout).toContain("session_role: overseer_client");
+    expect(cap.stdout).toContain("repo path:");
+    expect(cap.stdout).toContain("workspace path:");
+    expect(cap.stdout).toContain("context status: incomplete");
+    expect(cap.stdout).toContain("next action source:");
+    expect(cap.stdout).toContain("human-supervised local-first overseer protocol");
+    expect(cap.stderr).toBe("");
+  });
+
+  it("prints stable JSON handshake output", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "handshake", "--json"], cap.io);
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    for (const key of REQUIRED_HANDSHAKE_JSON_FIELDS) expect(key in data).toBe(true);
+    expect(data.ok).toBe(false);
+    expect(data.protocol).toBe("relayos-overseer-session-v1");
+    expect(data.session_role).toBe("overseer_client");
+    expect(data.context_complete).toBe(false);
+    expect(Array.isArray(data.files)).toBe(true);
+    expect(Array.isArray(data.missing)).toBe(true);
+    expect(Array.isArray(data.must_read)).toBe(true);
+    expect(Array.isArray(data.forbidden_actions)).toBe(true);
+    expect(Array.isArray(data.requires_explicit_user_approval_for)).toBe(true);
+    expect(Array.isArray(data.notes)).toBe(true);
+    expect(cap.stderr).toBe("");
+  });
+
+  it("reports complete context in JSON when canonical files exist", async () => {
+    chdir(REPO_ROOT);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "handshake", "--json"], cap.io);
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect(data.context_complete).toBe(true);
+    expect(data.ok).toBe(true);
+  });
+
+  it("does not create overseer directories or files", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "handshake"], cap.io);
+
+    expect(code).toBe(0);
+    expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
+  });
+
+  it("exits 1 with usage on unsupported flag", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "handshake", "--yaml"], cap.io);
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("usage: relayos overseer handshake");
+  });
+});
+
 describe("relayos overseer note", () => {
   it("records a note and exits 0", async () => {
     chdir(tempDir());

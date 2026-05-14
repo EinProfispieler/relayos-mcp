@@ -243,7 +243,7 @@ Available from any terminal after `npm link` (or via `./bin/relayos`).
 | `relayos checkpoint <create\|list\|show\|restore>` | Snapshot HEAD + status + diff before risky handoffs. See [docs/CHECKPOINTS.md](docs/CHECKPOINTS.md). |
 | `relayos diff-risk` | Classify the current working tree before `git commit`. See [docs/DIFF_RISK.md](docs/DIFF_RISK.md). |
 | `relayos report` | Print a compact evidence snapshot: handoff, checkpoint, diff-risk, git status. |
-| `relayos overseer <status\|context\|recent\|note\|next\|start\|mode\|env\|activate-runtime\|brief\|init-context\|branch\|progress>` | Local coordination workspace and read-only runtime-safety checks. See [docs/OVERSEER.md](docs/OVERSEER.md). |
+| `relayos overseer <status\|context\|handshake\|recent\|note\|next\|start\|mode\|env\|activate-runtime\|brief\|init-context\|branch\|progress>` | Local coordination workspace and read-only runtime-safety checks. See [docs/OVERSEER.md](docs/OVERSEER.md). |
 
 ### Diagnostics
 
