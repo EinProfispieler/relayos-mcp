@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -460,11 +460,47 @@ describe("relayos overseer env", () => {
 });
 
 describe("relayos overseer activate-runtime --dry-run", () => {
+  it("exits 1 with usage when no args are provided", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "activate-runtime"], cap.io);
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("usage: relayos overseer activate-runtime");
+  });
+
   it("exits 1 with usage when --path is missing", async () => {
     chdir(tempDir());
     const cap = captureIO();
 
     const code = await runCli(["overseer", "activate-runtime", "--dry-run"], cap.io);
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("usage: relayos overseer activate-runtime");
+  });
+
+  it("exits 1 with usage when --dry-run --json is provided without --path", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(
+      ["overseer", "activate-runtime", "--dry-run", "--json"],
+      cap.io,
+    );
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("usage: relayos overseer activate-runtime");
+  });
+
+  it("exits 1 with usage when --path is present but value is missing", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(
+      ["overseer", "activate-runtime", "--dry-run", "--path"],
+      cap.io,
+    );
 
     expect(code).toBe(1);
     expect(cap.stderr).toContain("usage: relayos overseer activate-runtime");
@@ -481,6 +517,19 @@ describe("relayos overseer activate-runtime --dry-run", () => {
 
     expect(code).toBe(1);
     expect(cap.stderr).toContain("--dry-run is required");
+  });
+
+  it("keeps filesystem unchanged on argument-validation failures", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    const before = readdirSync(cwd).slice().sort();
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "activate-runtime", "--dry-run", "--path"], cap.io);
+
+    const after = readdirSync(cwd).slice().sort();
+    expect(code).toBe(1);
+    expect(after).toEqual(before);
   });
 
   it("returns WARN (exit 0) when runtime path does not exist", async () => {
