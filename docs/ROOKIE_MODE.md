@@ -107,6 +107,23 @@ Minimal copy-paste prompt:
 
 `Call read_overseer_handshake first. If ok/context_complete is true, follow the returned session contract. If incomplete, report missing files before acting.`
 
+### MCP smoke verification
+
+After `npm run build`, restart Claude Code/Codex so they reload
+`dist/index.js`. RelayOS MCP runs via stdio registration (not a
+daemon/background service).
+
+1. Confirm RelayOS tools are visible in the MCP client.
+2. Call `read_overseer_handshake {}`.
+3. If `ok` or `context_complete` is false, report `missing` and ask the user before proceeding.
+4. Call `read_overseer_recent { "limit": 5 }`.
+5. Optionally call `write_overseer_note { "text": "smoke: connected via MCP" }`.
+6. Call `read_overseer_recent { "limit": 5 }` again and confirm the note appears.
+
+This does not change safety posture: local-only overseer state, no
+daemon, no automatic orchestration, no runtime activation, no security
+sandbox, and forbidden actions still require explicit user approval.
+
 ---
 
 ## What you say in chat

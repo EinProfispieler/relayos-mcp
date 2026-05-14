@@ -127,7 +127,7 @@ Restart both CLIs after registering so they pick up the tool list.
 
 ### 3. MCP tools (inside an AI agent session)
 
-Once registered, 14 MCP tools are available from within any MCP-capable agent session (Claude Code, Codex CLI, or others). Common ones:
+Once registered, 17 MCP tools are available from within any MCP-capable agent session (Claude Code, Codex CLI, or others). Common ones:
 
 - `list_templates` — discover built-in and project templates
 - `create_quick_handoff` — one-shot handoff from a task description
@@ -165,6 +165,23 @@ Current overseer MCP surface for this flow:
 Minimal session bootstrap prompt:
 
 `Call read_overseer_handshake first. If ok/context_complete is true, follow the returned session contract. If incomplete, report missing files before acting.`
+
+### MCP smoke verification (overseer loop)
+
+After `npm run build`, restart Claude/Codex MCP clients so they reload
+`dist/index.js`. RelayOS MCP runs via the configured stdio entrypoint
+(not a daemon).
+
+1. Confirm RelayOS tools are visible in the MCP client.
+2. Call `read_overseer_handshake {}`.
+3. If `ok` or `context_complete` is false, report `missing` and ask the user before proceeding.
+4. Call `read_overseer_recent { "limit": 5 }`.
+5. Optionally call `write_overseer_note { "text": "smoke: connected via MCP" }`.
+6. Call `read_overseer_recent { "limit": 5 }` again and confirm the note appears.
+
+Safety boundaries still apply: local-only overseer state, no daemon, no
+automatic orchestration, no runtime activation, no security sandbox, and
+forbidden actions still require explicit user approval.
 
 ### 4. Terminal CLI helpers
 
@@ -257,6 +274,8 @@ Available inside any MCP-capable agent session once the server is registered.
 | `read_handoff` | Return one envelope + all its audit events. |
 | `read_latest_handoff` | Return the most recent open handoff (filter by `assigned_to`). |
 | `read_overseer_handshake` | Return a read-only overseer session handshake snapshot for MCP clients. |
+| `read_overseer_recent` | Return a compact read-only overseer session/state + recent-notes snapshot. |
+| `write_overseer_note` | Append a local overseer timeline note for progress tracking. |
 | `list_open_handoffs` | List open handoff summaries — no full envelope leak. |
 | `inspect_config` | Show the effective RelayOS config: storage dir, templates, warnings. |
 | `doctor` | Run health checks; never throws on broken state. |
