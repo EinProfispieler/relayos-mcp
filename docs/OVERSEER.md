@@ -6,6 +6,7 @@ A gitignored local coordination workspace. Stores a running notes timeline and a
 
 ```
 relayos overseer status
+relayos overseer recent
 relayos overseer note <text...>
 relayos overseer next [text...]
 relayos overseer start
@@ -25,6 +26,19 @@ Prints the current next action and the five most recent notes. If no state exist
 `--json` prints the same core status data as stable machine-readable JSON.
 
 ```
+
+### `overseer recent`
+
+Prints a compact read-only summary of current local overseer context for fast terminal recovery:
+
+- project identity (one-line, from local `project_brief.md` when available)
+- current state anchor (from local current-state anchor when available, else latest git commit context)
+- active branch/task
+- next action
+- current mode posture (serial default)
+- runtime posture (switching inactive; `RELAYOS_RUNTIME_HOME` inspection-only)
+
+Missing optional local files are shown as `not available` instead of failing.
 OVERSEER STATUS
 ──────────────
 NEXT ACTION

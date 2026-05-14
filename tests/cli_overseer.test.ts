@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -136,6 +136,61 @@ describe("relayos overseer status", () => {
   });
 });
 
+describe("relayos overseer recent", () => {
+  it("prints a compact human-readable summary", async () => {
+    chdir(tempDir());
+    await runCli(["overseer", "next", "ship the patch"], captureIO().io);
+    await runCli(["overseer", "branch", "my-feature"], captureIO().io);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "recent"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("OVERSEER RECENT");
+    expect(cap.stdout).toContain("project:");
+    expect(cap.stdout).toContain("state anchor:");
+    expect(cap.stdout).toContain("active branch/task: my-feature");
+    expect(cap.stdout).toContain("next action: ship the patch");
+    expect(cap.stdout).toContain("mode: serial (default)");
+    expect(cap.stdout).toContain("runtime posture:");
+    expect(cap.stderr).toBe("");
+  });
+
+  it("degrades gracefully when optional local files are missing", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "recent"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("project: not available");
+    expect(cap.stdout).toContain("active branch/task: not available");
+    expect(cap.stdout).toContain("next action: not available");
+    expect(cap.stderr).toBe("");
+  });
+
+  it("does not write overseer state", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "recent"], cap.io);
+
+    expect(code).toBe(0);
+    expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
+  });
+
+  it("exits 1 with usage on unexpected args", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "recent", "--json"], cap.io);
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("usage: relayos overseer recent");
+  });
+});
+
 describe("relayos overseer note", () => {
   it("records a note and exits 0", async () => {
     chdir(tempDir());
@@ -216,6 +271,7 @@ describe("relayos overseer: error cases", () => {
 
     expect(code).toBe(1);
     expect(cap.stderr).toContain("usage: relayos overseer");
+    expect(cap.stderr).toContain("recent");
   });
 
   it("exits 1 with usage when no subcommand is given", async () => {

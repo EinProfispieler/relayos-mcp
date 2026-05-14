@@ -949,6 +949,53 @@ async function runOverseerStatus(args: string[], io: CliIO): Promise<number> {
   return 0;
 }
 
+function firstContentLine(text: string | null): string | null {
+  if (!text) return null;
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    return line;
+  }
+  return null;
+}
+
+async function runOverseerRecent(args: string[], io: CliIO): Promise<number> {
+  if (args.length > 0) {
+    io.stderr.write("usage: relayos overseer recent\n");
+    return 1;
+  }
+
+  const cwd = process.cwd();
+  const layout = resolveOverseerLayout(cwd);
+  const [projectBrief, currentState, nextAction, activeBranch, isRepo] = await Promise.all([
+    readOverseerTextFile(layout, "project_brief.md"),
+    readOverseerTextFile(layout, "current.md"),
+    readNextAction(layout),
+    readActiveBrief(layout),
+    isGitRepo(cwd),
+  ]);
+  const [head, branch] = isRepo ? await Promise.all([gitHead(cwd), gitBranch(cwd)]) : [null, null];
+  const commitInfo = head ? `${head.slice(0, 7)} @ ${branch ?? "(detached)"}` : null;
+  const currentAnchorMatch = currentState?.match(/`([0-9a-f]{7,40})`/i) ?? null;
+  const currentAnchor = currentAnchorMatch?.[1] ?? null;
+  const runtimeHome = process.env.RELAYOS_RUNTIME_HOME;
+
+  const lines = [
+    "OVERSEER RECENT",
+    OVERSEER_SEP,
+    `project: ${firstContentLine(projectBrief) ?? "not available"}`,
+    `state anchor: ${currentAnchor ?? commitInfo ?? "not available"}`,
+    `active branch/task: ${activeBranch ?? "not available"}`,
+    `next action: ${nextAction ?? "not available"}`,
+    "mode: serial (default)",
+    runtimeHome
+      ? `runtime posture: switching inactive; RELAYOS_RUNTIME_HOME set (${runtimeHome}) and inspect-only`
+      : "runtime posture: switching inactive; RELAYOS_RUNTIME_HOME not set (inspect-only)",
+  ];
+  io.stdout.write(`${lines.join("\n")}\n`);
+  return 0;
+}
+
 async function runOverseerNote(args: string[], io: CliIO): Promise<number> {
   if (args.length === 0) {
     io.stderr.write("usage: relayos overseer note <text>\n");
@@ -1306,6 +1353,7 @@ async function runOverseerProgress(args: string[], io: CliIO): Promise<number> {
 async function runOverseer(args: string[], io: CliIO): Promise<number> {
   const [sub, ...rest] = args;
   if (sub === "status") return runOverseerStatus(rest, io);
+  if (sub === "recent") return runOverseerRecent(rest, io);
   if (sub === "note") return runOverseerNote(rest, io);
   if (sub === "next") return runOverseerNext(rest, io);
   if (sub === "start") return runOverseerStart(rest, io);
@@ -1317,7 +1365,7 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "branch") return runOverseerBranch(rest, io);
   if (sub === "progress") return runOverseerProgress(rest, io);
   io.stderr.write(
-    "usage: relayos overseer <status|note|next|start|mode|env|activate-runtime|brief|init-context|branch|progress> [args...]\n",
+    "usage: relayos overseer <status|recent|note|next|start|mode|env|activate-runtime|brief|init-context|branch|progress> [args...]\n",
   );
   return 1;
 }
