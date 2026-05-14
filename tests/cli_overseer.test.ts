@@ -516,6 +516,25 @@ describe("relayos overseer activate-runtime --dry-run", () => {
     expect(cap.stdout).toContain("inside the source repo");
   });
 
+  it("uses provided --source in human output and blocks inside-source runtime paths even when cwd differs", async () => {
+    const cwd = tempDir();
+    const source = tempDir();
+    chdir(cwd);
+    const runtime = join(source, "runtime");
+    const cap = captureIO();
+
+    const code = await runCli(
+      ["overseer", "activate-runtime", "--dry-run", "--source", source, "--path", runtime],
+      cap.io,
+    );
+
+    expect(code).toBe(2);
+    expect(cap.stdout).toContain(`source repo: ${source}`);
+    expect(cap.stdout).toContain(`proposed runtime path: ${runtime}`);
+    expect(cap.stdout).toContain("runtime path inside source repo: yes");
+    expect(cap.stdout).toContain("decision: BLOCK");
+  });
+
   it("returns BLOCK (non-zero) when runtime path appears git-tracked", async () => {
     chdir(tempDir());
     const runtime = join(REPO_ROOT, "README.md");
@@ -580,6 +599,35 @@ describe("relayos overseer activate-runtime --dry-run", () => {
     expect((data.blocks as unknown[]).length).toBe(0);
     expect(Array.isArray(data.notes)).toBe(true);
     expect(cap.stderr).toBe("");
+  });
+
+  it("uses provided --source for inside-source JSON checks when cwd differs", async () => {
+    const cwd = tempDir();
+    const source = tempDir();
+    const runtime = tempDir();
+    chdir(cwd);
+    const cap = captureIO();
+
+    const code = await runCli(
+      [
+        "overseer",
+        "activate-runtime",
+        "--dry-run",
+        "--source",
+        source,
+        "--path",
+        runtime,
+        "--json",
+      ],
+      cap.io,
+    );
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect(data.sourceRepo).toBe(source);
+    expect(data.runtimePath).toBe(runtime);
+    expect(data.runtimePathInsideSourceRepo).toBe(false);
+    expect(data.decision).toBe("allow");
   });
 
   it("prints stable JSON WARN when RELAYOS_RUNTIME_HOME differs from --path", async () => {
