@@ -240,6 +240,59 @@ describe("relayos overseer mode", () => {
   });
 });
 
+describe("relayos overseer env", () => {
+  it("prints cwd and reports runtime workspace as not configured when RELAYOS_RUNTIME_HOME is unset", async () => {
+    chdir(tempDir());
+    const prev = process.env.RELAYOS_RUNTIME_HOME;
+    delete process.env.RELAYOS_RUNTIME_HOME;
+    const cap = captureIO();
+
+    try {
+      const code = await runCli(["overseer", "env"], cap.io);
+      expect(code).toBe(0);
+      expect(cap.stdout).toContain("OVERSEER ENVIRONMENT");
+      expect(cap.stdout).toContain(`Current working directory: ${process.cwd()}`);
+      expect(cap.stdout).toContain("RELAYOS_RUNTIME_HOME: not set");
+      expect(cap.stdout).toContain("Runtime workspace: not configured");
+      expect(cap.stdout).toContain("`.relayos/` paths resolve relative to the current working directory");
+      expect(cap.stdout).toContain("future/not active");
+      expect(cap.stdout).toContain("outside the RelayOS source repo");
+      expect(cap.stderr).toBe("");
+    } finally {
+      if (prev === undefined) delete process.env.RELAYOS_RUNTIME_HOME;
+      else process.env.RELAYOS_RUNTIME_HOME = prev;
+    }
+  });
+
+  it("prints RELAYOS_RUNTIME_HOME when set but marks support as future/not active", async () => {
+    chdir(tempDir());
+    const prev = process.env.RELAYOS_RUNTIME_HOME;
+    process.env.RELAYOS_RUNTIME_HOME = "/tmp/relayos-runtime";
+    const cap = captureIO();
+
+    try {
+      const code = await runCli(["overseer", "env"], cap.io);
+      expect(code).toBe(0);
+      expect(cap.stdout).toContain("RELAYOS_RUNTIME_HOME: set (/tmp/relayos-runtime)");
+      expect(cap.stdout).toContain("configured in environment, but support is future/not active");
+      expect(cap.stdout).toContain("future/not active");
+    } finally {
+      if (prev === undefined) delete process.env.RELAYOS_RUNTIME_HOME;
+      else process.env.RELAYOS_RUNTIME_HOME = prev;
+    }
+  });
+
+  it("exits 1 with usage on unexpected args", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "env", "--json"], cap.io);
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("usage: relayos overseer env");
+  });
+});
+
 describe("relayos overseer brief", () => {
   it("exits 0 and prints header with no overseer state", async () => {
     chdir(tempDir());

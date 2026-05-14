@@ -10,6 +10,7 @@ relayos overseer note <text...>
 relayos overseer next [text...]
 relayos overseer start
 relayos overseer mode
+relayos overseer env
 relayos overseer brief
 relayos overseer init-context
 relayos overseer branch <name>
@@ -124,6 +125,22 @@ Prints the current execution mode guidance for overseer orchestration:
 - parallel mode is future/opt-in and is not automatically enabled
 
 This command is read-only and does not change state, create config files, launch sub-runs, or create branches/worktrees.
+
+### `overseer env`
+
+Prints overseer environment boundaries for the current session:
+
+- current working directory
+- whether `RELAYOS_RUNTIME_HOME` is set
+- whether runtime workspace is configured
+
+It also explains current behavior and future intent:
+
+- today, `.relayos/` paths resolve relative to the current working directory
+- `RELAYOS_RUNTIME_HOME` support is future/not active in current code
+- production runtime state should stay outside the RelayOS source repo
+
+This command is read-only and does not create directories, write files, or change state.
 
 ### `overseer init-context`
 

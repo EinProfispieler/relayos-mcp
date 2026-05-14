@@ -837,6 +837,35 @@ async function runOverseerMode(args: string[], io: CliIO): Promise<number> {
   return 0;
 }
 
+async function runOverseerEnv(args: string[], io: CliIO): Promise<number> {
+  if (args.length > 0) {
+    io.stderr.write("usage: relayos overseer env\n");
+    return 1;
+  }
+
+  const cwd = process.cwd();
+  const runtimeHome = process.env.RELAYOS_RUNTIME_HOME;
+  const runtimeHomeLine = runtimeHome
+    ? `  RELAYOS_RUNTIME_HOME: set (${runtimeHome})`
+    : "  RELAYOS_RUNTIME_HOME: not set";
+  const runtimeWorkspaceLine = runtimeHome
+    ? "  Runtime workspace: configured in environment, but support is future/not active."
+    : "  Runtime workspace: not configured (RELAYOS_RUNTIME_HOME is not set).";
+
+  const lines = [
+    "OVERSEER ENVIRONMENT",
+    OVERSEER_SEP,
+    `  Current working directory: ${cwd}`,
+    runtimeHomeLine,
+    runtimeWorkspaceLine,
+    "  Current behavior: `.relayos/` paths resolve relative to the current working directory.",
+    "  RELAYOS_RUNTIME_HOME support is future/not active in this release.",
+    "  Production runtime state should stay outside the RelayOS source repo.",
+  ];
+  io.stdout.write(`${lines.join("\n")}\n`);
+  return 0;
+}
+
 async function runOverseerInitContext(_args: string[], io: CliIO): Promise<number> {
   const layout = resolveOverseerLayout(process.cwd());
   const created = await initContextFiles(layout);
@@ -888,12 +917,13 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "next") return runOverseerNext(rest, io);
   if (sub === "start") return runOverseerStart(rest, io);
   if (sub === "mode") return runOverseerMode(rest, io);
+  if (sub === "env") return runOverseerEnv(rest, io);
   if (sub === "brief") return runOverseerBrief(rest, io);
   if (sub === "init-context") return runOverseerInitContext(rest, io);
   if (sub === "branch") return runOverseerBranch(rest, io);
   if (sub === "progress") return runOverseerProgress(rest, io);
   io.stderr.write(
-    "usage: relayos overseer <status|note|next|start|mode|brief|init-context|branch|progress> [args...]\n",
+    "usage: relayos overseer <status|note|next|start|mode|env|brief|init-context|branch|progress> [args...]\n",
   );
   return 1;
 }
