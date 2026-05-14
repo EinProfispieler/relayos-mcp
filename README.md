@@ -81,15 +81,21 @@ Local coordination workspace stored under `.relayos/overseer/` (gitignored). App
 
 ## Quick start
 
+### 1. Install
+
 ```bash
 git clone https://github.com/EinProfispieler/relayos.git
 cd relayos
 npm install
 npm run build
-npm link          # makes `relayos` available in your PATH
+npm link
 ```
 
-Register the MCP server in your clients (`./scripts/install.sh` prints the snippets with your local path filled in):
+`npm link` makes `relayos` available as a global command in your terminal.
+
+### 2. Register the MCP server
+
+Run `./scripts/install.sh` to print the registration snippets with your local path filled in. Then paste them into your client configs:
 
 **Claude Code** (`~/.claude.json` → `mcpServers`):
 
@@ -110,29 +116,47 @@ command = "node"
 args = ["/path/to/relayos/dist/index.js"]
 ```
 
-Restart both CLIs after registering so they pick up the tool list. From within a Claude or Codex session you now have access to 14 MCP tools (`list_templates`, `create_quick_handoff`, `read_latest_handoff`, `doctor`, and more — see [Tools](#tools)). From a terminal:
+Restart both CLIs after registering so they pick up the tool list.
+
+### 3. MCP tools (inside a Claude or Codex session)
+
+Once registered, 14 MCP tools are available from within any Claude Code or Codex CLI session. Common ones:
+
+- `list_templates` — discover built-in and project templates
+- `create_quick_handoff` — one-shot handoff from a task description
+- `create_handoff_from_template` — handoff with template + overrides
+- `read_latest_handoff` — Codex reads its current assignment
+- `doctor` — health check for config and storage
+
+See [MCP tools](#mcp-tools) for the full table.
+
+### 4. Terminal CLI helpers
+
+From any terminal in your project:
 
 ```bash
-# Handoff and launch
-relayos launch latest                  # print command for the newest open handoff
+# Print the launch command for the newest open handoff
+relayos launch latest
 
-# Policy check before running an agent
-relayos policy latest                  # evaluate the newest handoff as allow/warn/block
+# Evaluate the newest handoff as allow/warn/block
+relayos policy latest
 
-# Checkpoint before a risky handoff
-relayos checkpoint create              # snapshot HEAD + diff
-relayos checkpoint list                # list all checkpoints
-relayos checkpoint show latest         # show the most recent
+# Snapshot HEAD + diff before launching an agent
+relayos checkpoint create
 
-# Working-tree safety before commit
+# List and inspect checkpoints
+relayos checkpoint list
+relayos checkpoint show latest
+
+# Classify the working tree before git commit
 relayos diff-risk
 
-# Evidence snapshot
+# Print an evidence snapshot (handoff + checkpoint + diff-risk + git status)
 relayos report
 
 # Coordination workspace
-relayos overseer status                # show next action and recent notes
-relayos overseer next "review PR #42"  # set the next action
+relayos overseer status
+relayos overseer next "review PR #42"
 relayos overseer note "blocked: CI failing on auth tests"
 ```
 
@@ -158,6 +182,10 @@ Then talk to Claude normally. Claude files the handoff; switch to a Codex termin
 
 ## Tools
 
+### MCP tools
+
+Available inside any Claude Code or Codex CLI session once the MCP server is registered.
+
 | Tool | Purpose |
 |---|---|
 | `create_handoff` | Validate + record a handoff envelope; optionally spawn the target. |
@@ -174,12 +202,19 @@ Then talk to Claude normally. Claude files the handoff; switch to a Codex termin
 | `list_open_handoffs` | List open handoff summaries — no full envelope leak. |
 | `inspect_config` | Show the effective RelayOS config: storage dir, templates, warnings. |
 | `doctor` | Run health checks; never throws on broken state. |
-| `relayos launch` *(CLI)* | Print the launch command for the newest open handoff. See [docs/LAUNCH.md](docs/LAUNCH.md). |
-| `relayos policy` *(CLI)* | Evaluate a handoff envelope as allow/warn/block. |
-| `relayos checkpoint` *(CLI)* | Snapshot HEAD + status + diff before risky handoffs. See [docs/CHECKPOINTS.md](docs/CHECKPOINTS.md). |
-| `relayos diff-risk` *(CLI)* | Classify the current working tree before `git commit`. See [docs/DIFF_RISK.md](docs/DIFF_RISK.md). |
-| `relayos report` *(CLI)* | Print a compact evidence snapshot: handoff, checkpoint, diff-risk, git status. |
-| `relayos overseer` *(CLI)* | Local coordination workspace: notes and next-action store. See [docs/OVERSEER.md](docs/OVERSEER.md). |
+
+### CLI commands
+
+Available from any terminal after `npm link` (or via `./bin/relayos`).
+
+| Command | Purpose |
+|---|---|
+| `relayos launch [id\|latest]` | Print the launch command for the newest open handoff. See [docs/LAUNCH.md](docs/LAUNCH.md). |
+| `relayos policy [id\|latest]` | Evaluate a handoff envelope as allow/warn/block. |
+| `relayos checkpoint <create\|list\|show>` | Snapshot HEAD + status + diff before risky handoffs. See [docs/CHECKPOINTS.md](docs/CHECKPOINTS.md). |
+| `relayos diff-risk` | Classify the current working tree before `git commit`. See [docs/DIFF_RISK.md](docs/DIFF_RISK.md). |
+| `relayos report` | Print a compact evidence snapshot: handoff, checkpoint, diff-risk, git status. |
+| `relayos overseer <status\|note\|next>` | Local coordination workspace: notes and next-action store. See [docs/OVERSEER.md](docs/OVERSEER.md). |
 
 ### Diagnostics
 
@@ -261,6 +296,8 @@ $HANDOFF_DIR/                    # default: ~/.claude/handoff/
 
 Override `HANDOFF_DIR` via environment variable (default `~/.claude/handoff/`).
 
+> **Do not commit** handoff envelopes, checkpoint instances, audit logs, overseer notes, transcripts, or private scratch files. Handoff storage lives outside the repo by default; `.relayos/overseer/` is gitignored.
+
 ---
 
 ## Examples
@@ -298,6 +335,8 @@ Returns the latest open envelope for Codex — full task, scope, and expected ou
 ---
 
 ## Roadmap
+
+RelayOS Core remains local-first. Team/Enterprise features are future server/panel scope built on the same local evidence model.
 
 ### Core / Solo (shipped)
 
