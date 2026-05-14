@@ -712,7 +712,8 @@ async function runOverseerNext(args: string[], io: CliIO): Promise<number> {
 }
 
 async function runOverseerBrief(args: string[], io: CliIO): Promise<number> {
-  if (args.length > 0) {
+  const wantsJson = args.length === 1 && args[0] === "--json";
+  if (args.length > 1 || (args.length === 1 && !wantsJson)) {
     io.stderr.write("usage: relayos overseer brief\n");
     return 1;
   }
@@ -746,6 +747,39 @@ async function runOverseerBrief(args: string[], io: CliIO): Promise<number> {
       return head ? `${head.slice(0, 7)} @ ${branch ?? "(detached)"}` : null;
     }),
   ]);
+
+  if (wantsJson) {
+    const branchProgressEntries =
+      branchProgress === null
+        ? []
+        : branchProgress
+            .split("\n")
+            .map((l) => l.trim())
+            .filter((l) => l.length > 0);
+    io.stdout.write(
+      `${JSON.stringify(
+        {
+          project: projectBrief,
+          currentState,
+          releasePolicy,
+          forbiddenActions,
+          productDirection,
+          nextAction,
+          activeBranch,
+          branchProgress: branchProgressEntries,
+          latestCommit: commitInfo,
+          notes: [
+            "Missing sections are returned as null or empty arrays.",
+            "Current brief data resolves from local `.relayos/` state relative to the current working directory.",
+            "No runtime workspace switching is active in this release.",
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return 0;
+  }
 
   function section(title: string, content: string | null): string {
     return [title, sep, content ?? MISSING].join("\n");

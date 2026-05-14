@@ -107,6 +107,8 @@ LOCAL DATA SAFETY
 
 Context files that do not exist are shown as `(missing — file not found in .relayos/overseer/)`. Exits 0 even when all files are absent. Takes no arguments — exits 1 with usage if any are given.
 
+`--json` prints the same core brief data as stable machine-readable JSON.
+
 ### `overseer start`
 
 Prints the RelayOS banner, prints the current overseer brief, and emits explicit startup guidance:

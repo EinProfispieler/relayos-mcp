@@ -442,11 +442,52 @@ describe("relayos overseer brief", () => {
     expect(cap.stdout).toContain("gitignored");
   });
 
-  it("exits 1 with usage on unexpected args", async () => {
+  it("prints stable JSON with null/empty values when overseer state is missing", async () => {
     chdir(tempDir());
     const cap = captureIO();
 
     const code = await runCli(["overseer", "brief", "--json"], cap.io);
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect(data.project).toBeNull();
+    expect(data.currentState).toBeNull();
+    expect(data.releasePolicy).toBeNull();
+    expect(data.forbiddenActions).toBeNull();
+    expect(data.productDirection).toBeNull();
+    expect(data.nextAction).toBeNull();
+    expect(data.activeBranch).toBeNull();
+    expect(data.latestCommit === null || typeof data.latestCommit === "string").toBe(true);
+    expect(Array.isArray(data.branchProgress)).toBe(true);
+    expect((data.branchProgress as unknown[]).length).toBe(0);
+    expect(Array.isArray(data.notes)).toBe(true);
+    expect(cap.stderr).toBe("");
+  });
+
+  it("prints stable JSON with populated values", async () => {
+    chdir(tempDir());
+    await runCli(["overseer", "next", "ship the patch"], captureIO().io);
+    await runCli(["overseer", "branch", "my-feature"], captureIO().io);
+    await runCli(["overseer", "progress", "first entry"], captureIO().io);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "brief", "--json"], cap.io);
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect(data.nextAction).toBe("ship the patch");
+    expect(data.activeBranch).toBe("my-feature");
+    expect(Array.isArray(data.branchProgress)).toBe(true);
+    expect((data.branchProgress as string[]).some((line) => line.includes("first entry"))).toBe(true);
+    expect(Array.isArray(data.notes)).toBe(true);
+    expect(cap.stderr).toBe("");
+  });
+
+  it("exits 1 with usage on unsupported flag", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "brief", "--yaml"], cap.io);
 
     expect(code).toBe(1);
     expect(cap.stderr).toContain("usage: relayos overseer brief");
