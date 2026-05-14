@@ -249,7 +249,7 @@ git check-ignore -v .relayos/overseer/timeline.jsonl
 
 When running RelayOS as a tool against a different project, operate from that project's directory. RelayOS resolves `.relayos/` relative to the current working directory, so coordination state stays in the target project, not in the RelayOS source tree.
 
-Production runtime state — coordination notes, sub-run outputs, generated reports, operational logs for non-RelayOS projects — belongs outside the source repo entirely. See [docs/OVERSEER_WORKFLOW.md](OVERSEER_WORKFLOW.md) § "Source repo vs. runtime workspace" for the full treatment, and [docs/OVERSEER_RUNTIME_PLAN.md](OVERSEER_RUNTIME_PLAN.md) for the staged migration plan toward a separate production runtime workspace.
+Production runtime state — coordination notes, sub-run outputs, generated reports, operational logs for non-RelayOS projects — belongs outside the source repo entirely. See [docs/OVERSEER_WORKFLOW.md](OVERSEER_WORKFLOW.md) § "Source repo vs. runtime workspace" for the full treatment, and [docs/OVERSEER_RUNTIME_PLAN.md](OVERSEER_RUNTIME_PLAN.md) for the staged migration plan toward a separate production runtime workspace, including the future `relayos overseer activate-runtime --dry-run` design (§ 8).
 
 ## Non-goals
 

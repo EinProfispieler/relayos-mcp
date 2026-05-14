@@ -156,6 +156,150 @@ When a future session begins implementing any stage past Stage 2, these guardrai
 
 ---
 
+## 8. Dry-run command design (future, not implemented)
+
+**This section is a design spec, not a description of current behavior.** Nothing described here is implemented. The command and all behaviors are future direction.
+
+### Purpose
+
+Before any real runtime workspace activation happens, the operator needs a way to inspect what activation would do, catch safety problems, and get a clear allow/warn/block verdict — all without touching the file system. This is the dry-run command.
+
+### Command
+
+```
+relayos overseer activate-runtime --dry-run [--path <runtime-path>] [--source <source-repo-path>]
+```
+
+- `--dry-run` is always required for the read-only inspection mode. The command must not accept activation without it until Stage 5 is fully implemented and tested.
+- `--path` specifies the proposed runtime workspace path. Defaults to `RELAYOS_RUNTIME_HOME` if set.
+- `--source` specifies the source repo to check against. Defaults to the current working directory.
+- `--json` outputs the same report in machine-readable JSON (same shape as other `--json` commands).
+
+Alternative name under consideration: `relayos overseer runtime-check`. Final name TBD before implementation.
+
+### Inputs
+
+| Input | Source | Default |
+|---|---|---|
+| Proposed runtime workspace path | `--path` or `RELAYOS_RUNTIME_HOME` | Required if env var not set |
+| Source repo path | `--source` | Current working directory |
+| `RELAYOS_RUNTIME_HOME` env var | Process environment | Unset |
+
+The command reads these inputs and performs all checks below without writing to any path.
+
+### Read-only checks
+
+Each check is performed in order. Later checks may be skipped if an earlier one produces a block.
+
+1. **Current working directory** — report the resolved CWD; confirm it matches the expected source repo.
+2. **Proposed runtime path existence** — does the path exist? If not, note it would be created on activation.
+3. **Inside-source-repo check** — is the proposed runtime path under the source repo root? This is a hard block condition (see Safety decisions).
+4. **Git-tracked check** — is the proposed runtime path inside any git-tracked tree? Check whether `git check-ignore -v <path>` exits non-zero (i.e., not gitignored). A non-gitignored path within a tracked repo is a block or strong warn.
+5. **Expected subdirectory presence** — if the path exists, does it contain expected runtime subdirs (e.g., `.relayos/overseer/`)? Missing subdirs produce an informational note; unexpected top-level contents produce a warn.
+6. **Source-repo overseer state** — does `.relayos/overseer/` currently exist in the source repo? Report its size and last-modified time so the operator knows what would need to be migrated.
+7. **`RELAYOS_RUNTIME_HOME` consistency** — if the env var is set, confirm it matches `--path`. If they differ, warn.
+
+### Safety decisions
+
+| Condition | Decision | Reason |
+|---|---|---|
+| Runtime path is inside source repo root | **block** | Would contaminate source tree with runtime state |
+| Runtime path is inside any git-tracked tree and not gitignored | **block** | Runtime files would be stageable; accidental commits likely |
+| Runtime path does not exist | **warn** | Would be created on activation — operator must confirm intent |
+| Runtime path exists but contains unexpected top-level files | **warn** | May indicate wrong directory or prior state collision |
+| Runtime path is gitignored within a tracked repo (but outside source repo) | **warn** | Acceptable, but confirm intent; gitignore protects it |
+| `RELAYOS_RUNTIME_HOME` set but differs from `--path` | **warn** | Ambiguous; env var and flag should agree |
+| All checks pass | **allow** | Safe to proceed to activation when implemented |
+
+No state is moved, deleted, or created in dry-run regardless of decision.
+
+### Output format
+
+Human-readable (default):
+
+```
+RELAYOS OVERSEER ACTIVATE-RUNTIME  (dry-run)
+────────────────────────────────────────────
+
+SOURCE REPO
+  /Users/randy/GID
+  .relayos/overseer/ exists: yes (last modified 2026-05-14)
+
+PROPOSED RUNTIME PATH
+  /Users/randy/relayos-runtime
+  exists: no (would be created on activation)
+  inside source repo: no
+  git-tracked: no
+
+RUNTIME HOME ENV
+  RELAYOS_RUNTIME_HOME: not set
+
+CHECKS
+  [OK]   Source repo identified
+  [OK]   Runtime path is outside source repo
+  [OK]   Runtime path is not git-tracked
+  [WARN] Runtime path does not exist — would be created on activation
+  [OK]   No unexpected files at runtime path
+
+DECISION: warn
+
+  One or more warnings require operator acknowledgment before activation.
+  Review the warnings above and re-run with --confirm when ready (future flag).
+  No files were written, moved, or deleted.
+```
+
+Machine-readable JSON shape (`--json`):
+
+```json
+{
+  "command": "activate-runtime",
+  "dry_run": true,
+  "source_repo": "/Users/randy/GID",
+  "source_overseer_exists": true,
+  "source_overseer_last_modified": "2026-05-14T10:00:00.000Z",
+  "proposed_runtime_path": "/Users/randy/relayos-runtime",
+  "runtime_path_exists": false,
+  "runtime_path_inside_source_repo": false,
+  "runtime_path_git_tracked": false,
+  "runtime_path_gitignored": false,
+  "relayos_runtime_home_env": null,
+  "env_path_matches_flag": true,
+  "checks": [
+    { "id": "source_repo",       "status": "ok",   "detail": "Source repo identified" },
+    { "id": "outside_source",    "status": "ok",   "detail": "Runtime path is outside source repo" },
+    { "id": "not_git_tracked",   "status": "ok",   "detail": "Runtime path is not git-tracked" },
+    { "id": "path_exists",       "status": "warn", "detail": "Runtime path does not exist — would be created on activation" },
+    { "id": "no_unexpected",     "status": "ok",   "detail": "No unexpected files at runtime path" }
+  ],
+  "decision": "warn"
+}
+```
+
+The JSON shape is a design target. Field names and structure may change before implementation, but the top-level fields `dry_run`, `decision`, and `checks` are stable anchors.
+
+### Non-goals
+
+- No actual activation. `--dry-run` is read-only; no state changes.
+- No file writes. No directory creation. No path mutation of any kind.
+- No migration of `.relayos/overseer/` content. Migration is Stage 4's concern.
+- No background sub-runs. No parallel mode enablement.
+- No modification of `RELAYOS_RUNTIME_HOME` or any environment variable.
+- No changes to envelope, checkpoint, or audit log formats.
+
+### Future implementation guardrails
+
+When this command is implemented:
+
+- **First implementation must be strictly read-only.** No write path may be added until the dry-run output has been stable for at least one released version.
+- **Inside-source-repo block must have tests.** Cover: path equal to source root, path is a subdirectory of source root, path is a sibling directory (allowed).
+- **Unset/set `RELAYOS_RUNTIME_HOME` must both be tested.** Cover: env unset + `--path` provided, env set + no `--path`, env set + `--path` matches, env set + `--path` differs (warn).
+- **Git-tracked check must have tests.** Cover: path inside tracked repo not gitignored (block), path inside tracked repo and gitignored (warn), path outside any repo (ok).
+- **`--json` output must be tested.** The JSON shape is a contract; field renames require a semver bump.
+- **No runtime switching until dry-run output is stable.** Stage 5 (actual activation) must not begin until the dry-run command has shipped, has test coverage, and has been reviewed in at least one real session.
+- **The `decision` field drives automation.** Future CI or agent workflows that want to automate activation must gate on `decision === "allow"` from `--json` output. Warn and block must both halt automation.
+
+---
+
 ## See also
 
 - [`docs/OVERSEER_WORKFLOW.md`](OVERSEER_WORKFLOW.md) — Overseer role, serial/parallel mode, safety rules, source/runtime separation
