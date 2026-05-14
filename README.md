@@ -1,66 +1,83 @@
 # RelayOS
 
-> **A local-first MCP control layer for structured handoffs between AI coding agents.**
+> A local-first control layer for AI-assisted development.
 
-RelayOS is an MCP server that runs on your machine. It turns "ask Codex to
-refactor this" or "have Claude review that" into a recorded, validated
-handoff — instead of a copy-pasted prompt you hope the other agent reads
-correctly. It registers in both Claude Code and Codex CLI over stdio, so the
-source agent files the handoff and the target agent picks it up through the
-same tool, in the same format, with the same audit trail every time.
+RelayOS coordinates Claude Code and Codex CLI handoffs, enforces policy gates before agent launches, and stores evidence locally so the human stays in control. Nothing leaves your machine. No cloud, no accounts, no auto-execute.
 
-**The problem.** When you switch between Claude Code and Codex CLI today, the
-handoff is a chat-window paste. Model choice gets dropped. Reasoning effort is
-guessed. File scope is implied. Expected output is fuzzy. Nothing is logged.
-If something goes wrong, you cannot tell which agent did what, with which
-model, or under what constraints.
+## Who it is for
 
-**Structured handoff.** RelayOS replaces the paste with a validated envelope:
-`model`, `effort`, `execution_mode`, `allowed_files`, `forbidden_files`,
-`constraints`, `expected_output`. The envelope is written to disk under
-`$HANDOFF_DIR` (default `~/.claude/handoff/`), every event is appended to an
-append-only audit log, and the target agent reads its own assignment via MCP.
-No chat-window paste, no lost fields. Local-first: nothing leaves your
-machine, no cloud, no account, no telemetry.
+**Solo / indie developers** — structured handoffs replace copy-pasted prompts between Claude and Codex. Rookie Mode keeps the workflow chat-only. Policy gates and diff-risk checks prevent unsafe commits. Checkpoint snapshots preserve evidence before risky work.
 
-Record-only by default. `auto_spawn` is opt-in per call and never default.
+**Teams and enterprises** — the same local foundation is designed to extend to policy management, audit timelines, rollback, approval queues, and a risk dashboard. See [Roadmap](#roadmap).
 
-## How it fits together
+## The problem
+
+| Problem | Without RelayOS |
+|---|---|
+| Context loss | Long Claude sessions drop agent-to-agent instructions on window switch |
+| Unsafe AI changes | Codex edits `.env`, rewrites CI config, or drops hundreds of lines with no pre-commit check |
+| Unclear permissions | File scope and model choice are implied, not recorded |
+| Missing audit trail | Nothing logs which agent did what, with which model, under what constraints |
+| Hard to review diffs | AI-generated changes touch auth, secrets, or deps without flagging |
+| Unreliable coordination | Notes and next steps live only in terminal scrollback |
+
+## How the workflow fits together
 
 ```
-   ┌────────────┐
-   │    You     │  "Ask Codex to refactor format.ts"
-   └─────┬──────┘
-         ▼
-   ┌────────────┐     MCP      ┌──────────────────────────────┐
-   │  Claude    │  ─────────▶  │  RelayOS                     │
-   │  Code      │ create_      │   envelope on disk           │
-   │  session   │  handoff     │   + audit.jsonl event        │
-   └────────────┘              └──────────────┬───────────────┘
-                                              │  on disk
-                                              ▼
-   ┌────────────┐     MCP      ┌──────────────────────────────┐
-   │  Codex     │  ─────────▶  │  read_latest_handoff         │
-   │  CLI       │ read_latest_ │   returns the envelope with  │
-   │  session   │  handoff     │   full task + scope + output │
-   └────────────┘              └──────────────────────────────┘
+Human → Claude plan
+      → RelayOS handoff  (validate + record envelope)
+      → policy check     (allow / warn / block before launch)
+      → checkpoint       (snapshot HEAD + diff before launch)
+      → Codex patch / review
+      → diff-risk        (classify working tree before git commit)
+      → relayos report   (evidence snapshot)
+      → human reviews and commits
 ```
 
-You stay in one chat. Claude files the handoff. Codex reads it the next time
-you switch terminals. Nothing runs automatically — switching windows is the
-trigger.
+No step runs automatically unless you ask. Every event is appended to an audit log.
 
-## Rookie Mode
+## Current features
 
-Rookie Mode is the supported workflow for users who do not want to think
-about handoff envelopes, template names, or which CLI to invoke when. You
-talk to one Claude Code session; Claude calls `create_quick_handoff` for
-you; Codex reads its assignment via `read_latest_handoff` when you switch
-to the Codex terminal. Two drop-in files do the wiring: a Claude Code subagent
-([`examples/claude-subagents/relayos-orchestrator.md`](examples/claude-subagents/relayos-orchestrator.md))
-and a Codex `AGENTS.md` snippet
-([`examples/codex/AGENTS.md`](examples/codex/AGENTS.md)). Full walkthrough:
-[**docs/ROOKIE_MODE.md**](docs/ROOKIE_MODE.md).
+### Handoff envelopes
+
+Records a validated task envelope on disk: `model`, `effort`, `execution_mode`, `allowed_files`, `forbidden_files`, `constraints`, `expected_output`. Both Claude Code and Codex CLI read the same envelope via MCP — no copy-pasting, no lost fields.
+
+### Templates and quick handoff
+
+Six built-in templates cover the common cases. Pass the task as plain text; RelayOS fills the rest. Override per-call or via `.relayos/config.json`.
+
+### `relayos launch`
+
+Print the exact `codex exec` or `claude -p` command for the newest open handoff. Print-only, never spawns. See [`docs/LAUNCH.md`](docs/LAUNCH.md).
+
+### Policy gates
+
+Evaluate a handoff envelope as `allow` / `warn` / `block` before running the target agent. Detects: high-effort patches, secret file scope, CI/deploy path scope, and risky commands.
+
+### `relayos checkpoint`
+
+Snapshot HEAD + `git status` + diff + untracked files before a risky handoff. Stored locally, listable and readable after the fact. See [`docs/CHECKPOINTS.md`](docs/CHECKPOINTS.md).
+
+### `relayos diff-risk`
+
+Classify the current working tree as `allow` / `warn` / `block` before `git commit`. Detects: secret config paths, CI/deploy paths, dependency manifests, auth/security/payment/database paths, large deletions, and risky commands in added diff lines. Read-only — no working-tree mutation. See [`docs/DIFF_RISK.md`](docs/DIFF_RISK.md).
+
+### `relayos report`
+
+Print a compact evidence snapshot in four sections: latest handoff, latest checkpoint, diff-risk summary, and git status. One command, exit 0.
+
+### `relayos overseer`
+
+Local coordination workspace stored under `.relayos/overseer/` (gitignored). Append timestamped notes, set and read a current next action. Survives terminal closes and context resets. See [`docs/OVERSEER.md`](docs/OVERSEER.md).
+
+## Safety model
+
+- **Print-only by default.** `relayos launch` prints the command; you run it. `auto_spawn` is opt-in per call, never the default.
+- **Deterministic policy checks.** Allow/warn/block decisions are rule-based, not probabilistic.
+- **Checkpoint before risky work.** `relayos checkpoint create` preserves a recoverable snapshot before you hand off a risky task.
+- **Diff-risk before commit.** `relayos diff-risk` catches secrets, CI changes, and risky commands before they land in git history.
+- **Safe from accidental commits.** `.relayos/overseer/` is gitignored in the project repo. Handoff storage (envelopes, checkpoints, audit logs) defaults to `~/.claude/handoff/` — outside any project repo entirely.
+- **No cloud, no accounts, no telemetry.** All storage is local files on your machine.
 
 ## Quick start
 
@@ -69,181 +86,108 @@ git clone https://github.com/EinProfispieler/relayos.git
 cd relayos
 npm install
 npm run build
-./scripts/install.sh   # prints MCP snippets to paste into your clients
+npm link          # makes `relayos` available in your PATH
 ```
 
-1. Paste the printed `relayos` block into `~/.claude.json` (under
-   `mcpServers`) and into `~/.codex/config.toml`. Restart both CLIs so they
-   re-read the tool list.
-2. Drop the two Rookie Mode files in:
-   `examples/claude-subagents/relayos-orchestrator.md` →
-   `~/.claude/agents/`; `examples/codex/AGENTS.md` → your project root (or
-   merge into an existing `AGENTS.md`).
-3. In a Claude Code session, say:
-   *"Ask Codex to refactor `src/api/util/format.ts` to template literals."*
-   Claude files the handoff. Open a Codex terminal in the same project and
-   start `codex` — it reads the assignment and goes.
+Register the MCP server in your clients (`./scripts/install.sh` prints the snippets with your local path filled in):
 
-Detailed install snippets, the full tools table, and end-to-end examples are
-below.
-
-## Walkthroughs
-
-Start here if you are new to the project:
-
-- [**docs/QUICK_DEMO.md**](docs/QUICK_DEMO.md) — a 5-step Claude → RelayOS → Codex demo using plain English.
-- [**docs/ROOKIE_MODE.md**](docs/ROOKIE_MODE.md) — the supported chat-only workflow, including the risk gate.
-- [**docs/LAUNCH.md**](docs/LAUNCH.md) — the `relayos launch` CLI helper for printing the exact command to run the target.
-- [**docs/CHECKPOINTS.md**](docs/CHECKPOINTS.md) — `relayos checkpoint` snapshots HEAD + status + diff + untracked files before risky handoffs.
-- [**docs/DIFF_RISK.md**](docs/DIFF_RISK.md) — `relayos diff-risk` classifies the current working tree before `git commit`.
-- [**docs/OVERSEER.md**](docs/OVERSEER.md) — `relayos overseer` local coordination workspace for notes and next actions.
-
-## What you get
-
-Fourteen MCP tools, plus CLI helpers:
-
-- **Creating handoffs.** `create_quick_handoff`,
-  `create_handoff_from_template`, `create_handoff` — from one-shot to fully
-  manual.
-- **Reading handoffs.** `read_latest_handoff`, `read_handoff`,
-  `list_open_handoffs`, `list_handoffs` — what is queued, what is done.
-- **Rendering & validation.** `validate_handoff`, `render_claude_prompt`,
-  `render_codex_prompt` — dry-run envelopes and inspect rendered prompts.
-- **Audit.** `write_audit_log` — append a custom event to an existing
-  handoff.
-- **Diagnostics.** `doctor`, `inspect_config`, `list_templates` —
-  health checks, effective config, and template discovery.
-- **CLI helpers.** `relayos launch` — prints the launch command for the
-  newest open handoff (or a specific id). Print-only, never spawns.
-  See [`docs/LAUNCH.md`](docs/LAUNCH.md). `relayos checkpoint` — captures
-  HEAD + status + diff + untracked files before a risky handoff. See
-  [`docs/CHECKPOINTS.md`](docs/CHECKPOINTS.md). `relayos diff-risk` —
-  classifies the current working tree (status + diff + untracked) as
-  `allow`/`warn`/`block` before `git commit`. See
-  [`docs/DIFF_RISK.md`](docs/DIFF_RISK.md). `relayos report` —
-  prints a compact evidence snapshot: latest handoff, latest checkpoint,
-  diff-risk summary, and git status. `relayos overseer` — local
-  coordination workspace for notes and next actions. See
-  [`docs/OVERSEER.md`](docs/OVERSEER.md).
-
-Full table with descriptions: see [Tools](#tools) below.
-
-## Scope (v1)
-
-RelayOS v1 is intentionally narrow. The OSS core covers the Claude Code ↔
-Codex CLI handoff and nothing else. RelayOS is **not** a chat bridge, a
-session-level coordinator, or a multi-agent chat room — it controls one
-thing: how a single task gets handed from one coding agent to another.
-
-**In scope**
-
-- Claude Code (`claude` CLI)
-- Codex CLI (`codex` CLI)
-- One MCP server binary, registered in both clients over stdio
-
-**Out of scope for v1** (no plans to add via this OSS repo)
-
-- GLM, Cursor, Gemini, OpenCode, Windsurf, or any other agent
-- General multi-agent orchestration / chat-level back-and-forth between agents
-- Cross-host transport (stdio only)
-- Web UI, TUI, dashboard
-- Auto-commit, auto-push, auto-merge
-- Full filesystem sandbox (native flags are best-effort; prompt-level enforcement is the floor)
-
----
-
-## Install
-
-```bash
-git clone https://github.com/EinProfispieler/relayos.git && cd relayos
-npm install
-npm run build           # produces dist/index.js
-./scripts/install.sh    # prints registration snippets for your MCP clients
-```
-
-`install.sh` prints the snippets you paste into your MCP client configs. It does
-**not** edit those files automatically — they usually contain other servers.
-
-Run `./scripts/install.sh` after `npm run build` — it prints the snippets below
-with the absolute path of your local `dist/index.js` filled in.
-
-### Claude Code (`~/.claude.json` → `mcpServers`)
+**Claude Code** (`~/.claude.json` → `mcpServers`):
 
 ```json
 "relayos": {
   "type": "stdio",
   "command": "node",
-  "args": ["/absolute/path/to/relayos-mcp/dist/index.js"]
+  "args": ["/path/to/relayos/dist/index.js"]
 }
 ```
 
-### Codex CLI (`~/.codex/config.toml`)
+**Codex CLI** (`~/.codex/config.toml`):
 
 ```toml
 [mcp_servers.relayos]
 type = "stdio"
 command = "node"
-args = ["/absolute/path/to/relayos-mcp/dist/index.js"]
+args = ["/path/to/relayos/dist/index.js"]
 ```
 
-Override storage path via the `HANDOFF_DIR` env var (default `~/.claude/handoff/`).
+Restart both CLIs after registering so they pick up the tool list. From within a Claude or Codex session you now have access to 14 MCP tools (`list_templates`, `create_quick_handoff`, `read_latest_handoff`, `doctor`, and more — see [Tools](#tools)). From a terminal:
 
-> **Upgrading?** MCP clients capture the tool list when they start the
-> server. After `git pull && npm run build` to a new RelayOS version,
-> **restart your Claude Code (and Codex) session** — otherwise newly
-> added tools (e.g. `doctor`, `inspect_config`, `list_open_handoffs`
-> from v0.4.0) will not appear in the host's tool list even though
-> `dist/index.js` exposes them.
-> The same applies after local template or runtime source changes:
-> rebuild with `npm run build`, then restart Claude/MCP so it runs the
-> refreshed `dist/` code.
+```bash
+# Handoff and launch
+relayos launch latest                  # print command for the newest open handoff
+
+# Policy check before running an agent
+relayos policy latest                  # evaluate the newest handoff as allow/warn/block
+
+# Checkpoint before a risky handoff
+relayos checkpoint create              # snapshot HEAD + diff
+relayos checkpoint list                # list all checkpoints
+relayos checkpoint show latest         # show the most recent
+
+# Working-tree safety before commit
+relayos diff-risk
+
+# Evidence snapshot
+relayos report
+
+# Coordination workspace
+relayos overseer status                # show next action and recent notes
+relayos overseer next "review PR #42"  # set the next action
+relayos overseer note "blocked: CI failing on auth tests"
+```
+
+## Rookie Mode
+
+The quickest path to a working multi-agent setup. Drop two files in place:
+
+1. `examples/claude-subagents/relayos-orchestrator.md` → `~/.claude/agents/`
+2. `examples/codex/AGENTS.md` → your project root
+
+Then talk to Claude normally. Claude files the handoff; switch to a Codex terminal and Codex reads its assignment. Full walkthrough: [**docs/ROOKIE_MODE.md**](docs/ROOKIE_MODE.md).
+
+## Walkthroughs
+
+- [**docs/QUICK_DEMO.md**](docs/QUICK_DEMO.md) — 5-step Claude → RelayOS → Codex demo
+- [**docs/ROOKIE_MODE.md**](docs/ROOKIE_MODE.md) — chat-only workflow, including the risk gate
+- [**docs/LAUNCH.md**](docs/LAUNCH.md) — `relayos launch` reference
+- [**docs/CHECKPOINTS.md**](docs/CHECKPOINTS.md) — `relayos checkpoint` reference
+- [**docs/DIFF_RISK.md**](docs/DIFF_RISK.md) — `relayos diff-risk` reference
+- [**docs/OVERSEER.md**](docs/OVERSEER.md) — `relayos overseer` reference
 
 ---
 
 ## Tools
 
-| Tool                   | Purpose                                                       |
-|------------------------|---------------------------------------------------------------|
-| `create_handoff`       | Validate + record an envelope; optionally spawn the target.   |
-| `list_templates`               | List built-in + project handoff templates.                    |
-| `create_handoff_from_template` | Create a handoff from a named template + short task string.   |
-| `create_quick_handoff`         | One-shot: pick a template from `target_agent` + `mode`.       |
-| `validate_handoff`     | Pure schema check, no side effects.                           |
-| `render_claude_prompt` | Render the prompt + `claude -p` argv for an envelope.         |
-| `render_codex_prompt`  | Render the prompt + `codex exec` argv for an envelope.        |
-| `write_audit_log`      | Append a custom audit event to an existing handoff.           |
-| `list_handoffs`        | List envelopes (newest first), filter by source/target/status.|
-| `read_handoff`         | Return one envelope + all its audit events.                   |
-| `read_latest_handoff`  | Return the most recent open handoff (filter by `assigned_to`).|
-| `list_open_handoffs`   | List open handoff summaries (`recorded`+`spawning`) — no full envelope leak. |
-| `inspect_config`       | Show the effective RelayOS config (source, storage dir, templates, warnings). |
-| `doctor`               | Run health checks; never throws on broken state. |
-| `relayos checkpoint` *(CLI)* | Snapshot HEAD + status + diff + untracked files before risky handoffs. See [`docs/CHECKPOINTS.md`](docs/CHECKPOINTS.md). |
-| `relayos diff-risk` *(CLI)*  | Classify the current working tree as `allow`/`warn`/`block` before `git commit`. See [`docs/DIFF_RISK.md`](docs/DIFF_RISK.md). |
-| `relayos report` *(CLI)*     | Print a compact evidence snapshot: latest handoff, checkpoint, diff-risk, and git status. |
-| `relayos overseer` *(CLI)*   | Local coordination workspace: notes timeline and next-action store. See [`docs/OVERSEER.md`](docs/OVERSEER.md). |
+| Tool | Purpose |
+|---|---|
+| `create_handoff` | Validate + record a handoff envelope; optionally spawn the target. |
+| `create_handoff_from_template` | Create a handoff from a named template + short task string. |
+| `create_quick_handoff` | One-shot: pick a template from `target_agent` + `mode`. |
+| `list_templates` | List built-in + project handoff templates. |
+| `validate_handoff` | Pure schema check — no side effects. |
+| `render_claude_prompt` | Render the prompt + `claude -p` argv for an envelope. |
+| `render_codex_prompt` | Render the prompt + `codex exec` argv for an envelope. |
+| `write_audit_log` | Append a custom audit event to an existing handoff. |
+| `list_handoffs` | List envelopes (newest first), filter by source/target/status. |
+| `read_handoff` | Return one envelope + all its audit events. |
+| `read_latest_handoff` | Return the most recent open handoff (filter by `assigned_to`). |
+| `list_open_handoffs` | List open handoff summaries — no full envelope leak. |
+| `inspect_config` | Show the effective RelayOS config: storage dir, templates, warnings. |
+| `doctor` | Run health checks; never throws on broken state. |
+| `relayos launch` *(CLI)* | Print the launch command for the newest open handoff. See [docs/LAUNCH.md](docs/LAUNCH.md). |
+| `relayos policy` *(CLI)* | Evaluate a handoff envelope as allow/warn/block. |
+| `relayos checkpoint` *(CLI)* | Snapshot HEAD + status + diff before risky handoffs. See [docs/CHECKPOINTS.md](docs/CHECKPOINTS.md). |
+| `relayos diff-risk` *(CLI)* | Classify the current working tree before `git commit`. See [docs/DIFF_RISK.md](docs/DIFF_RISK.md). |
+| `relayos report` *(CLI)* | Print a compact evidence snapshot: handoff, checkpoint, diff-risk, git status. |
+| `relayos overseer` *(CLI)* | Local coordination workspace: notes and next-action store. See [docs/OVERSEER.md](docs/OVERSEER.md). |
 
 ### Diagnostics
 
-If something doesn't look right — an envelope isn't appearing, the wrong
-template is winning, the server seems to be using a config you didn't
-write — call `doctor` for a one-shot health report and `inspect_config`
-to see the resolved config (including any project templates that shadow
-built-ins). `inspect_config` is read-only, and both tools degrade gracefully on broken
-state: malformed `config.json` is reported as a structured error rather
-than crashing the call. `list_open_handoffs` returns lightweight
-summaries (no full envelopes) when you just want to see what's queued.
+If something looks off — wrong template winning, envelope not appearing, server running stale code — call `doctor` for a one-shot health report and `inspect_config` for the resolved config. Both degrade gracefully on broken state. After `npm run build`, restart your Claude or Codex session so the MCP host picks up the refreshed binary.
 
-### Optional: slash-command shortcuts
+---
 
-Slash commands are not bundled or required. If you want a one-keystroke
-wrapper around `create_handoff_from_template`, drop a Markdown file in
-`~/.claude/commands/` that instructs Claude to call the tool with a
-fixed template name. There is no install step in this repo for slash
-commands — `list_templates` + `create_handoff_from_template` is the
-supported interface.
-
-### The handoff envelope
+## Handoff envelope
 
 ```ts
 {
@@ -260,426 +204,125 @@ supported interface.
   expected_output:  string | string[],
   working_dir?:     string,
   auto_spawn?:      boolean,    // default false
-  audit_metadata?: { parent_handoff_id?, source_session_id?, tags? }
+  audit_metadata?:  { parent_handoff_id?, source_session_id?, tags? }
 }
 ```
 
-When `auto_spawn=false` (the default), RelayOS validates, writes the envelope,
-appends audit lines, and returns a ready-to-paste `launch_command` — the source
-agent (or you) runs the target itself. You can also recover the same line at
-any time from a terminal with [`relayos launch`](docs/LAUNCH.md).
+`auto_spawn` defaults to `false`. RelayOS validates, writes the envelope, appends audit events, and returns a ready-to-paste `launch_command`. Nothing runs until you do.
 
-`validate_handoff` accepts candidate envelopes wrapped as `{ "payload": ... }`
-so MCP clients pass the full candidate through to RelayOS for validation. Legacy
-direct input is still accepted for v0.1.x compatibility, but new callers should
-use the wrapped form.
+When `auto_spawn=true`: if the target CLI is missing, the call hard-fails with `error.code = "missing_target_cli"` (envelope still recorded). If the CLI is found, RelayOS spawns it and captures stdout/stderr.
 
-When `auto_spawn=true`:
+## Templates and project config
 
-- Missing target CLI → **hard fail** with `error.code = "missing_target_cli"`. The
-  envelope is still recorded; the audit log gets `spawn_failed:missing_target_cli`.
-- CLI present → RelayOS spawns the target, captures stdout/stderr to
-  `${HANDOFF_DIR}/envelopes/{id}.stdout.log` and `.stderr.log`, and returns the
-  final envelope status with last-16 KB tails.
+### Built-in templates
 
-### Storage layout
+| Name | target | mode | model | effort |
+|---|---|---|---|---|
+| `codex-patch` | codex | patch | `gpt-5.5` | high |
+| `codex-review` | codex | review | `gpt-5.5` | medium |
+| `codex-test` | codex | test | `gpt-5.5` | medium |
+| `codex-plan` | codex | plan | `gpt-5.5` | high |
+| `claude-review` | claude | review | `claude-opus-4-7` | medium |
+| `claude-plan` | claude | plan | `claude-opus-4-7` | high |
+
+No built-in template defaults to `max` or `xhigh`. Use `overrides.effort` when you want to deviate. `codex-patch` is the default for code-patch handoffs.
+
+### Project config — `.relayos/config.json` (optional)
+
+```json
+{
+  "version": 1,
+  "defaults": {
+    "forbidden_files": [".env*", "secrets/**", "**/node_modules/**"],
+    "constraints": ["No new dependencies without approval."]
+  },
+  "templates": {
+    "codex-patch": { "allowed_files": ["src/**", "tests/**"], "effort": "high" }
+  }
+}
+```
+
+Merge order (lowest precedence first): built-in → project `defaults` → project per-template → call-time `overrides`.
+
+## Storage layout
 
 ```
 $HANDOFF_DIR/                    # default: ~/.claude/handoff/
 ├── audit.jsonl                  # append-only, one JSON event per line
 └── envelopes/
     ├── h_01HQ….json             # full envelope
-    ├── h_01HQ….stdout.log       # only when spawned
+    ├── h_01HQ….stdout.log       # only when auto_spawn=true
     └── h_01HQ….stderr.log
+
+.relayos/overseer/               # project-local, gitignored
+├── timeline.jsonl               # append-only notes log
+└── next_action.md               # current next action (overwritten each set)
 ```
 
-### Scope enforcement
-
-v1 is **best-effort native flags + always advisory prompt**:
-
-- `allowed_files` / `forbidden_files` / `constraints` are **always injected into
-  the rendered target prompt** and **always recorded in the audit log**.
-- Native CLI flags are applied **when the adapter clearly supports them**:
-  - `effort` → `codex exec -c model_reasoning_effort=...` (native on Codex).
-  - `execution_mode` → `--sandbox read-only|workspace-write` on Codex;
-    `--permission-mode plan|acceptEdits` and (for `read_only`) `--allowed-tools` on Claude.
-- When a constraint has no native enforcement (e.g. per-file allowlists, Claude's
-  effort), `advisory_only_enforcement` is logged with the specific note.
-- RelayOS does **not** build a filesystem sandbox in v1.
-
-## Templates and project config
-
-Most callers should not write a full handoff envelope by hand. Instead,
-use the template tools: pick a named template and pass the user's task
-as plain text. RelayOS fills `model`, `effort`, `execution_mode`,
-`allowed_files`, `forbidden_files`, `constraints`, and `expected_output`
-from the template, layered with optional project config and call-time
-overrides.
-
-> **Core uses static, reliability-first defaults.** Each built-in
-> template carries a fixed `model` and `effort` chosen to bias toward a
-> good result rather than the lowest cost. No built-in defaults to
-> `max` or `xhigh`. RelayOS Core never auto-selects `max`. Cost-aware
-> model + effort routing, budgets, historical success/failure
-> statistics, automatic downgrade for simple tasks, and automatic
-> escalation after failed attempts are **future Pro features and are
-> not in this repository.** Use `overrides.model` and `overrides.effort`
-> when you want to deviate from a template's defaults.
-
-### Built-in templates
-
-| Name            | target | execution_mode | model             | effort   |
-|-----------------|--------|----------------|-------------------|----------|
-| `codex-patch`   | codex  | `patch`        | `gpt-5.5`         | `high`   |
-| `codex-review`  | codex  | `review`       | `gpt-5.5`         | `medium` |
-| `codex-test`    | codex  | `test`         | `gpt-5.5`         | `medium` |
-| `codex-plan`    | codex  | `plan`         | `gpt-5.5`         | `high`   |
-| `claude-review` | claude | `review`       | `claude-opus-4-7` | `medium` |
-| `claude-plan`   | claude | `plan`         | `claude-opus-4-7` | `high`   |
-
-`codex-patch` is the default for code-patch handoffs. There is no
-built-in `claude-patch` template; define one in project config if you
-need it.
-
-Template `model` values are recommendations. Override them when your
-Codex CLI authentication mode or account does not have access to the
-recommended model.
-
-`xhigh` is a valid effort *override*, but no built-in template defaults
-to `xhigh`. `max` is a valid override at the RelayOS layer — Core
-passes it through to the target CLI — but Core itself never selects
-`max` automatically. If you want max, you ask for max.
-
-### Project config — `.relayos/config.json` (optional)
-
-Place a JSON file at `.relayos/config.json` in your project root (or
-anywhere up the directory tree from cwd). RelayOS finds it
-automatically. Override with `RELAYOS_CONFIG=/abs/path/to/file.json`.
-
-```json
-{
-  "version": 1,
-  "defaults": {
-    "forbidden_files": [".env*", "secrets/**", "**/node_modules/**", "**/dist/**"],
-    "constraints": ["No new dependencies without approval."]
-  },
-  "templates": {
-    "codex-patch": {
-      "allowed_files": ["src/**", "tests/**"],
-      "effort": "high"
-    },
-    "internal-migration": {
-      "target_agent": "codex",
-      "model": "gpt-5.5",
-      "effort": "high",
-      "execution_mode": "patch",
-      "expected_output": [
-        "A unified diff scoped to migrations/**.",
-        "A rollback note."
-      ]
-    }
-  }
-}
-```
-
-Merge order (lowest precedence first):
-
-1. Built-in template
-2. Project `defaults` (extends list-shaped fields like `forbidden_files`)
-3. Project per-template overrides (`templates.<name>`)
-4. Call-time `overrides` in `create_handoff_from_template`
-
-### Tool: `list_templates`
-
-```json
-{ "target_agent": "codex" }
-```
-
-Returns all available templates, each tagged `source: "builtin" | "project"`.
-Optional `target_agent` filter.
-
-### Tool: `create_handoff_from_template`
-
-```json
-{
-  "template": "codex-patch",
-  "task": "Fix validate_handoff so MCP clients can wrap the candidate in { payload } without losing fields. Add a regression test.",
-  "overrides": {
-    "allowed_files": ["src/tools/validate_handoff.ts", "tests/tools.test.ts"]
-  }
-}
-```
-
-Returns the same shape as `create_handoff`: `handoff_id`, `envelope_path`,
-`launch_command`, and (when `auto_spawn: true`) spawn results. The
-envelope's `audit_metadata.tags` includes `template:<name>` so you can
-trace which template each handoff came from.
-
-`task_title` is derived from the first line of `task` (truncated to 80
-characters, trailing punctuation stripped) unless you pass an explicit
-`task_title`.
-
-### When to call `create_handoff` directly
-
-Use `create_handoff` (the low-level API) when you need full control of
-every envelope field — no template, no project config interference. The
-two APIs produce identical envelope files; templates are purely an
-ergonomics layer.
+Override `HANDOFF_DIR` via environment variable (default `~/.claude/handoff/`).
 
 ---
 
 ## Examples
 
-All examples use `create_handoff`. Each shows the JSON payload + the resulting
-`launch_command` you'd see in the response.
-
-### A. Claude → Codex patch (record-only)
-
-```json
-{
-  "source_agent": "claude",
-  "target_agent": "codex",
-  "model": "gpt-5.5",
-  "effort": "high",
-  "execution_mode": "patch",
-  "task_title": "Refactor format helpers to template literals",
-  "task_description": "Replace string concatenation in src/api/util/format.ts with template literals. Behavior must be identical; update unit tests if assertions need updating.",
-  "allowed_files": ["src/api/util/**/*.ts", "tests/api/util/**"],
-  "forbidden_files": [".env*", "secrets/**"],
-  "constraints": ["No new dependencies", "Keep public exports stable"],
-  "expected_output": ["A unified diff.", "A one-paragraph summary."]
-}
-```
-
-Rendered `launch_command`:
-
-```
-codex exec --model gpt-5.5 -c model_reasoning_effort=high --sandbox workspace-write --skip-git-repo-check '<prefixed prompt with HANDOFF header, scope, constraints, task>'
-```
-
-### B. Codex → Claude review (record-only)
-
-```json
-{
-  "source_agent": "codex",
-  "target_agent": "claude",
-  "model": "claude-opus-4-7",
-  "effort": "medium",
-  "execution_mode": "review",
-  "task_title": "Review the auth-middleware rewrite for compliance gaps",
-  "task_description": "Read src/auth/middleware.ts and the related tests, and report any places where session tokens are persisted in ways that violate the new compliance policy.",
-  "allowed_files": ["src/auth/**", "tests/auth/**"],
-  "forbidden_files": ["**/node_modules/**"],
-  "constraints": ["Cite file:line for every finding"],
-  "expected_output": "A bulleted list of findings, each with severity and file:line."
-}
-```
-
-Rendered `launch_command`:
-
-```
-claude -p '<prefixed prompt …>' --model claude-opus-4-7 --permission-mode plan --max-turns 50 --output-format text
-```
-
-### C. Record-only (no spawn)
-
-Identical to A or B with `auto_spawn` omitted or set to `false`. RelayOS returns
-the envelope path + `launch_command` and writes a `created` + `validated` audit
-event. **No subprocess runs.** The source agent (or you) executes the
-`launch_command` when ready.
-
-### D. Auto-spawn
-
-```json
-{
-  "source_agent": "claude",
-  "target_agent": "codex",
-  "model": "gpt-5.5",
-  "effort": "medium",
-  "execution_mode": "test",
-  "task_title": "Run the unit tests under tests/api/util",
-  "task_description": "Run `npx vitest run tests/api/util` and report the result.",
-  "allowed_files": ["tests/api/util/**"],
-  "forbidden_files": [],
-  "constraints": [],
-  "expected_output": "Exit code + summary of failures (if any).",
-  "auto_spawn": true
-}
-```
-
-Response (abridged):
-
-```json
-{
-  "handoff_id": "h_01HQ…",
-  "envelope_path": "/Users/you/.claude/handoff/envelopes/h_01HQ….json",
-  "launch_command": "codex exec …",
-  "status": "completed",
-  "cli_detection": {
-    "target_binary": "codex",
-    "found": true,
-    "resolved_path": "/opt/homebrew/bin/codex"
-  },
-  "spawn": {
-    "started_at": "2026-05-13T03:00:00.000Z",
-    "finished_at": "2026-05-13T03:00:42.123Z",
-    "exit_code": 0,
-    "duration_ms": 42123,
-    "stdout_tail": "…",
-    "stderr_tail": ""
-  }
-}
-```
-
-Matching audit events:
-
-```
-{"ts":"…","handoff_id":"h_01HQ…","event":"created", …}
-{"ts":"…","handoff_id":"h_01HQ…","event":"validated", …}
-{"ts":"…","handoff_id":"h_01HQ…","event":"advisory_only_enforcement", …}
-{"ts":"…","handoff_id":"h_01HQ…","event":"spawn_started", …}
-{"ts":"…","handoff_id":"h_01HQ…","event":"spawn_completed", …}
-```
-
-### E. End-to-end: Claude asks Codex to do X
-
-The friction-free path for "ask Codex to fix X" requests. Three messages,
-no envelope id ever pasted by the user.
-
-**1. User → Claude (in the Claude Code session):**
-
-> Ask Codex to refactor the format helpers in `src/api/util/format.ts` to
-> template literals.
-
-**2. Claude → MCP** (`create_handoff_from_template`):
+### Create a handoff from a template
 
 ```json
 {
   "template": "codex-patch",
-  "task": "Refactor src/api/util/format.ts to use template literals. Behavior must be identical; update unit tests if assertions need updating.",
+  "task": "Refactor src/api/util/format.ts to use template literals. Behavior must be identical.",
   "overrides": {
     "allowed_files": ["src/api/util/**/*.ts", "tests/api/util/**"]
   }
 }
 ```
 
-Response (abridged):
+### One-shot quick handoff
 
 ```json
-{
-  "handoff_id": "h_01HQ…",
-  "envelope_path": "/Users/you/.claude/handoff/envelopes/h_01HQ….json",
-  "launch_command": "codex exec --model gpt-5.5 …",
-  "status": "recorded"
-}
+{ "target_agent": "codex", "task": "Run unit tests under tests/api/util.", "mode": "test" }
 ```
 
-`auto_spawn` is off (the template default), so nothing has been launched —
-the envelope is just on disk.
+Codex defaults to `patch` when `mode` is omitted. Claude defaults to `plan`. Unmapped combinations (`claude` + `patch`, `claude` + `test`) throw `quick_handoff_no_template` — use `create_handoff_from_template` with a project template.
 
-**3. Codex → MCP** (`read_latest_handoff`), in the Codex CLI session:
+### Codex reads its assignment
+
+In the Codex session:
 
 ```json
 { "assigned_to": "codex" }
 ```
 
-Response (abridged):
-
-```json
-{
-  "envelope": {
-    "id": "h_01HQ…",
-    "target_agent": "codex",
-    "execution_mode": "patch",
-    "task_title": "Refactor format helpers to template literals",
-    "task_description": "Refactor src/api/util/format.ts …",
-    "allowed_files": ["src/api/util/**/*.ts", "tests/api/util/**"],
-    "expected_output": ["A unified diff.", "A one-paragraph summary."],
-    "status": "recorded"
-  },
-  "events": [
-    { "event": "created", … },
-    { "event": "validated", … }
-  ]
-}
-```
-
-Codex now has its full assignment — task, scope, expected output —
-without the user pasting a handoff id. If `envelope` is `null`, Codex
-knows nothing is queued and can poll again later.
-
-### F. One-shot quick handoff
-
-Skip the template name. Pass `target_agent` + `task` and the server picks
-a built-in template based on `target_agent` and (optional) `mode`.
-
-```json
-{
-  "target_agent": "codex",
-  "task": "Refactor src/api/util/format.ts to use template literals.",
-  "allowed_files": ["src/api/util/**/*.ts", "tests/api/util/**"]
-}
-```
-
-That's equivalent to `create_handoff_from_template` with
-`template: "codex-patch"` (codex defaults to `patch`). Override `mode`
-when you want a different built-in:
-
-```json
-{ "target_agent": "codex", "task": "Run unit tests under tests/api/util.", "mode": "test" }
-{ "target_agent": "claude", "task": "Review the auth-middleware rewrite.", "mode": "review" }
-{ "target_agent": "claude", "task": "Plan the auth-middleware rewrite." }
-```
-
-Mapping (modes: `patch`, `review`, `test`, `plan`):
-
-| target / mode | patch         | review         | test         | plan         |
-|---------------|---------------|----------------|--------------|--------------|
-| `codex`       | `codex-patch` | `codex-review` | `codex-test` | `codex-plan` |
-| `claude`      | _(error)_     | `claude-review`| _(error)_    | `claude-plan`|
-
-Defaults: `codex` → `patch`, `claude` → `plan`. Unmapped combinations
-(`claude` + `patch`, `claude` + `test`) throw `quick_handoff_no_template`
-— use `create_handoff_from_template` with a project template, or
-`create_handoff` for full envelope control.
+Returns the latest open envelope for Codex — full task, scope, and expected output. If `envelope` is `null`, nothing is queued.
 
 ---
 
-## Open Source vs Future Paid Features
+## Roadmap
 
-RelayOS is intentionally narrow at v1. The open-source core is everything you
-need to use structured handoffs between Claude Code and Codex CLI safely and
-auditably. The features listed under "Future Pro / Team" are **not implemented
-in this repository** and are listed only to clarify scope — so contributors
-don't waste effort on them and users know what to expect later.
+### Core / Solo (shipped)
 
-### Open Source Core (this repo)
+| Feature | Status |
+|---|---|
+| Handoff + launch flow | done |
+| Rookie Mode risk gate | done |
+| Policy gates | done |
+| Checkpoint | done |
+| diff-risk scanner | done |
+| Report command | done |
+| Overseer workspace | done |
 
-- Claude ↔ Codex structured handoff
-- MCP server (stdio, registered in both clients from one binary)
-- Validated handoff envelopes (Zod schema)
-- Template-based handoff creation (`list_templates`, `create_handoff_from_template`, `create_quick_handoff`)
-- Six built-in templates + optional `.relayos/config.json` project overrides
-- `model` / `effort` / `execution_mode` fields
-- `allowed_files` / `forbidden_files` scope (prompt-level + native flags where supported)
-- JSONL append-only audit log
-- Per-envelope JSON files on disk
-- Record-only by default
-- Optional `auto_spawn` per handoff
+### Team / Enterprise (future, not in this repo)
 
-### Future Pro / Team (NOT in this repo)
+These require a server component and are out of scope for the OSS core. No timeline is set.
 
-- Project-level policies (e.g. "this repo's `patch` handoffs always require model X and effort ≥ high")
-- Richer history search / queryable storage backend
-- Cost & model-usage statistics across handoffs
-- Dashboard / TUI
-- PR integration (open a PR from a completed handoff, attach audit trail)
-- Approval workflow (human-in-the-loop gate before spawn)
-- Team audit export (SIEM-friendly formats)
-- Enterprise policy controls (org-wide forbidden_files defaults, model allowlists)
-
-If you want any of those today, they need to be built outside this repo or
-behind a separate license.
+- Internal web panel / dashboard
+- Audit timeline with visual evidence review
+- Rollback center
+- Approval queue (human-in-the-loop gate before launch)
+- Risk dashboard (aggregate diff-risk + policy across agents)
+- Policy management UI
+- Agent registry
+- Multi-repo support
 
 ---
 
@@ -689,11 +332,10 @@ behind a separate license.
 npm install
 npm test           # vitest run
 npm run typecheck  # tsc --noEmit
-npm run build      # tsup → dist/index.js
-npm run dev        # tsx src/index.ts (run against a real MCP client over stdio)
+npm run build      # tsup → dist/
 ```
 
-`HANDOFF_DIR=/tmp/scratch npm test` writes all artifacts under `/tmp/scratch`.
+Override storage for tests: `HANDOFF_DIR=/tmp/scratch npm test`
 
 ---
 
