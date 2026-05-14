@@ -106,6 +106,32 @@ describe("relayos launch", () => {
     expect(command).toContain("gpt-5.5");
   });
 
+  it("latest skips newer completed handoffs in the CLI", async () => {
+    const { layout } = await withLayout();
+    const open = await makeEnvelope(
+      layout,
+      { task_title: "open", model: "gpt-5.4" },
+      "2026-05-13T10:00:00.000Z",
+    );
+    await makeEnvelope(
+      layout,
+      { task_title: "completed", model: "gpt-5.5", status: "completed" },
+      "2026-05-13T11:00:00.000Z",
+    );
+    let stdout = "";
+    let stderr = "";
+
+    const code = await runCli(["launch", "latest"], {
+      stdout: { write: (chunk: string) => (stdout += chunk) },
+      stderr: { write: (chunk: string) => (stderr += chunk) },
+    });
+
+    expect(code).toBe(0);
+    expect(stderr).toBe("");
+    expect(stdout).toContain(open.model);
+    expect(stdout).not.toContain("gpt-5.5");
+  });
+
   it("no-arg form behaves identically to latest", async () => {
     const { layout } = await withLayout();
     await makeEnvelope(
