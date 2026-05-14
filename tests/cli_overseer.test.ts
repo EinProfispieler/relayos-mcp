@@ -568,6 +568,30 @@ describe("relayos overseer activate-runtime --dry-run", () => {
     expect(cap.stdout).toContain("does not exist");
   });
 
+  it("prints complete human-readable WARN safety report", async () => {
+    chdir(tempDir());
+    const source = tempDir();
+    const runtime = join(tempDir(), "missing-runtime");
+    const cap = captureIO();
+
+    const code = await runCli(
+      ["overseer", "activate-runtime", "--dry-run", "--source", source, "--path", runtime],
+      cap.io,
+    );
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("OVERSEER RUNTIME ACTIVATION DRY-RUN");
+    expect(cap.stdout).toContain(`source repo: ${source}`);
+    expect(cap.stdout).toContain(`proposed runtime path: ${runtime}`);
+    expect(cap.stdout).toContain("RELAYOS_RUNTIME_HOME: not set");
+    expect(cap.stdout).toContain("runtime path exists: no");
+    expect(cap.stdout).toContain("runtime path inside source repo: no");
+    expect(cap.stdout).toContain("runtime path appears git-tracked: no");
+    expect(cap.stdout).toContain("decision: WARN");
+    expect(cap.stdout).toContain("no files were written");
+    expect(cap.stdout).toContain("runtime switching is not active");
+  });
+
   it("returns BLOCK (non-zero) when runtime path is inside source repo", async () => {
     chdir(tempDir());
     const source = tempDir();
@@ -582,6 +606,30 @@ describe("relayos overseer activate-runtime --dry-run", () => {
     expect(code).toBe(2);
     expect(cap.stdout).toContain("decision: BLOCK");
     expect(cap.stdout).toContain("inside the source repo");
+  });
+
+  it("prints complete human-readable BLOCK safety report", async () => {
+    chdir(tempDir());
+    const source = tempDir();
+    const runtime = join(source, ".relayos-runtime");
+    const cap = captureIO();
+
+    const code = await runCli(
+      ["overseer", "activate-runtime", "--dry-run", "--source", source, "--path", runtime],
+      cap.io,
+    );
+
+    expect(code).toBe(2);
+    expect(cap.stdout).toContain("OVERSEER RUNTIME ACTIVATION DRY-RUN");
+    expect(cap.stdout).toContain(`source repo: ${source}`);
+    expect(cap.stdout).toContain(`proposed runtime path: ${runtime}`);
+    expect(cap.stdout).toContain("RELAYOS_RUNTIME_HOME: not set");
+    expect(cap.stdout).toContain("runtime path exists: no");
+    expect(cap.stdout).toContain("runtime path inside source repo: yes");
+    expect(cap.stdout).toContain("runtime path appears git-tracked: no");
+    expect(cap.stdout).toContain("decision: BLOCK");
+    expect(cap.stdout).toContain("no files were written");
+    expect(cap.stdout).toContain("runtime switching is not active");
   });
 
   it("uses provided --source in human output and blocks inside-source runtime paths even when cwd differs", async () => {
@@ -696,6 +744,30 @@ describe("relayos overseer activate-runtime --dry-run", () => {
     expect(Array.isArray(data.notes)).toBe(true);
     for (const key of REQUIRED_JSON_FIELDS) expect(key in data).toBe(true);
     expect(cap.stderr).toBe("");
+  });
+
+  it("prints complete human-readable ALLOW safety report", async () => {
+    chdir(tempDir());
+    const source = tempDir();
+    const runtime = tempDir();
+    const cap = captureIO();
+
+    const code = await runCli(
+      ["overseer", "activate-runtime", "--dry-run", "--source", source, "--path", runtime],
+      cap.io,
+    );
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("OVERSEER RUNTIME ACTIVATION DRY-RUN");
+    expect(cap.stdout).toContain(`source repo: ${source}`);
+    expect(cap.stdout).toContain(`proposed runtime path: ${runtime}`);
+    expect(cap.stdout).toContain("RELAYOS_RUNTIME_HOME: not set");
+    expect(cap.stdout).toContain("runtime path exists: yes");
+    expect(cap.stdout).toContain("runtime path inside source repo: no");
+    expect(cap.stdout).toContain("runtime path appears git-tracked: no");
+    expect(cap.stdout).toContain("decision: ALLOW");
+    expect(cap.stdout).toContain("no files were written");
+    expect(cap.stdout).toContain("runtime switching is not active");
   });
 
   it("does not block for git-tracked reasons on an external non-tracked runtime path", async () => {
