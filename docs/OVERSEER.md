@@ -50,6 +50,10 @@ Read-only session protocol snapshot for overseer-bound clients.
 
 For Claude/Codex/other MCP clients, `read_overseer_handshake` is the
 canonical session-start bootstrap call.
+Current overseer MCP surface for this bootstrap flow:
+
+- `read_overseer_handshake` (canonical bootstrap)
+- `write_overseer_note` (optional local progress note append)
 
 - A separate `read_overseer_context` MCP tool is intentionally not
   required; handshake already includes context completeness, missing
@@ -58,6 +62,8 @@ canonical session-start bootstrap call.
   the user whether to proceed.
 - Treat `must_read`, `next_action_source`, `forbidden_actions`, and
   `requires_explicit_user_approval_for` as the session contract.
+- Use `write_overseer_note` only after handshake when you need to append
+  local gitignored timeline notes; it is optional.
 - Do not assume RelayOS is a daemon, autonomous agent, or hard security
   sandbox.
 - Do not proceed with forbidden actions without explicit user approval.

@@ -82,6 +82,10 @@ state.
 For overseer-bound sessions, start by calling
 `read_overseer_handshake` once. This is the canonical MCP bootstrap
 tool for overseer session binding.
+Current overseer MCP surface for this flow:
+
+- `read_overseer_handshake` (canonical bootstrap)
+- `write_overseer_note` (optional local progress note append)
 
 - A separate `read_overseer_context` MCP tool is intentionally not
   needed; handshake already includes context completeness and required
@@ -90,6 +94,8 @@ tool for overseer session binding.
   the user whether to proceed before acting.
 - Treat `must_read`, `next_action_source`, `forbidden_actions`, and
   `requires_explicit_user_approval_for` as the active session contract.
+- Use `write_overseer_note` only after handshake when you want to append
+  local gitignored overseer timeline notes.
 - Do not assume RelayOS is a daemon, autonomous agent, or hard security
   sandbox.
 - Never proceed with forbidden actions without explicit user approval.
