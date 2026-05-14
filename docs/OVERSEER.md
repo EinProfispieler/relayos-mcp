@@ -126,6 +126,8 @@ Prints the current execution mode guidance for overseer orchestration:
 
 This command is read-only and does not change state, create config files, launch sub-runs, or create branches/worktrees.
 
+`--json` prints the same mode information as stable machine-readable JSON.
+
 ### `overseer env`
 
 Prints overseer environment boundaries for the current session:

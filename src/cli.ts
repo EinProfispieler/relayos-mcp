@@ -821,9 +821,34 @@ async function runOverseerStart(args: string[], io: CliIO): Promise<number> {
 }
 
 async function runOverseerMode(args: string[], io: CliIO): Promise<number> {
-  if (args.length > 0) {
+  const wantsJson = args.length === 1 && args[0] === "--json";
+  if (args.length > 1 || (args.length === 1 && !wantsJson)) {
     io.stderr.write("usage: relayos overseer mode\n");
     return 1;
+  }
+
+  const notes = [
+    "Serial mode is the current/default mode.",
+    "Write tasks are processed one at a time.",
+    "Parallel mode is future/opt-in and is not automatically enabled.",
+  ];
+
+  if (wantsJson) {
+    io.stdout.write(
+      `${JSON.stringify(
+        {
+          currentMode: "serial",
+          defaultMode: "serial",
+          parallelModeAvailable: false,
+          parallelModeEnabled: false,
+          writeTasks: "serial",
+          notes,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return 0;
   }
 
   const lines = [

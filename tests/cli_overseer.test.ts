@@ -238,6 +238,37 @@ describe("relayos overseer mode", () => {
     expect(code).toBe(1);
     expect(cap.stderr).toContain("usage: relayos overseer mode");
   });
+
+  it("prints stable JSON mode output", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "mode", "--json"], cap.io);
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect(data.currentMode).toBe("serial");
+    expect(data.defaultMode).toBe("serial");
+    expect(data.parallelModeAvailable).toBe(false);
+    expect(data.parallelModeEnabled).toBe(false);
+    expect(data.writeTasks).toBe("serial");
+    expect(Array.isArray(data.notes)).toBe(true);
+    const notes = (data.notes as string[]).join(" ");
+    expect(notes).toContain("current/default mode");
+    expect(notes).toContain("one at a time");
+    expect(notes).toContain("future/opt-in");
+    expect(cap.stderr).toBe("");
+  });
+
+  it("exits 1 with usage on unsupported flag", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "mode", "--yaml"], cap.io);
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("usage: relayos overseer mode");
+  });
 });
 
 describe("relayos overseer env", () => {
