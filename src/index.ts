@@ -27,6 +27,7 @@ import { listHandoffs } from "./tools/list_handoffs.js";
 import { readHandoff } from "./tools/read_handoff.js";
 import { readLatestHandoff } from "./tools/read_latest_handoff.js";
 import { readOverseerHandshake } from "./tools/read_overseer_handshake.js";
+import { readOverseerRecent } from "./tools/read_overseer_recent.js";
 import { writeOverseerNote } from "./tools/write_overseer_note.js";
 import { inspectConfig } from "./tools/inspect_config.js";
 import { doctor } from "./tools/doctor.js";
@@ -341,6 +342,23 @@ export async function buildServer() {
     },
     async (args) => {
       const result = await writeOverseerNote(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "read_overseer_recent",
+    {
+      title: "Read overseer recent",
+      description:
+        "Read-only compact overseer session readback for MCP clients: context completeness, missing files, " +
+        "next action, compact current state, and latest timeline notes. Local-only. Never creates files.",
+      inputSchema: {
+        limit: z.number().int().min(1).max(20).optional(),
+      },
+    },
+    async (args) => {
+      const result = await readOverseerRecent(args);
       return jsonResult(result);
     },
   );
