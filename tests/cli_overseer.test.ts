@@ -501,6 +501,80 @@ describe("relayos overseer context-pack", () => {
   });
 });
 
+describe("relayos overseer run-preflight", () => {
+  it("prints compact human-readable preflight output", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "run-preflight"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("OVERSEER RUN PREFLIGHT");
+    expect(cap.stdout).toContain("context status:");
+    expect(cap.stdout).toContain("ready for future run:");
+    expect(cap.stdout).toContain("Preflight only: no run was created.");
+    expect(cap.stdout).toContain("No agent process was started.");
+    expect(cap.stderr).toBe("");
+  });
+
+  it("prints stable JSON output", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "run-preflight", "--json"], cap.io);
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect(data.ok).toBe(true);
+    expect(data.tool).toBe("run-preflight");
+    expect(typeof data.workspace_path).toBe("string");
+    expect(typeof data.context_complete).toBe("boolean");
+    expect(Array.isArray(data.missing)).toBe(true);
+    expect(Array.isArray(data.checks)).toBe(true);
+    expect(typeof data.recent_notes_count).toBe("number");
+    expect(data.runtime_active).toBe(false);
+    expect(data.runner_active).toBe(false);
+    expect(data.queue_active).toBe(false);
+    expect(typeof data.ready_for_future_run).toBe("boolean");
+    expect(Array.isArray(data.notes)).toBe(true);
+    expect(cap.stderr).toBe("");
+  });
+
+  it("degrades gracefully with missing context", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "run-preflight", "--json"], cap.io);
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect(data.context_complete).toBe(false);
+    expect(Array.isArray(data.missing)).toBe(true);
+  });
+
+  it("does not create .relayos/overseer state", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "run-preflight"], cap.io);
+
+    expect(code).toBe(0);
+    expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
+  });
+
+  it("exits 1 with usage on unsupported flags", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "run-preflight", "--yaml"], cap.io);
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("usage: relayos overseer run-preflight");
+  });
+});
+
 describe("relayos overseer note", () => {
   it("records a note and exits 0", async () => {
     chdir(tempDir());

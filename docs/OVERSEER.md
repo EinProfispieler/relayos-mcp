@@ -10,6 +10,7 @@ relayos overseer context
 relayos overseer handshake
 relayos overseer recent
 relayos overseer context-pack [--json] [--limit <1-20>]
+relayos overseer run-preflight [--json]
 relayos overseer note <text...>
 relayos overseer next [text...]
 relayos overseer start
@@ -172,6 +173,15 @@ Read-only curated continuity snapshot for non-MCP CLI workflows.
 - `--limit <1-20>` bounds `recent_notes` (default `8`, max `20`).
 - Missing local files are reported in `missing`; command remains read-only.
 - No raw full chat transcript is returned.
+
+### `overseer run-preflight`
+
+Read-only future-run readiness check for scoped Rookie/handoff workflows.
+
+- `relayos overseer run-preflight` prints a compact readiness summary.
+- `relayos overseer run-preflight --json` prints deterministic machine-readable preflight output.
+- This command is preflight only: it does not create a run, start agents, activate runtime, or mutate local state.
+- Runner/queue/runtime execution are not active in current Core.
 
 ### `overseer note <text...>`
 

@@ -1188,6 +1188,125 @@ async function runOverseerContextPack(args: string[], io: CliIO): Promise<number
   return 0;
 }
 
+async function runOverseerRunPreflight(args: string[], io: CliIO): Promise<number> {
+  const wantsJson = args.length === 1 && args[0] === "--json";
+  if (args.length > 1 || (args.length === 1 && !wantsJson)) {
+    io.stderr.write("usage: relayos overseer run-preflight [--json]\n");
+    return 1;
+  }
+
+  const cwd = process.cwd();
+  const layout = resolveOverseerLayout(cwd);
+  const [context, nextAction, currentState, modelPolicy, forbiddenActions, notes] =
+    await Promise.all([
+      readOverseerContextSnapshot(cwd),
+      readOverseerTextFile(layout, "NEXT_ACTION.md"),
+      readOverseerTextFile(layout, "CURRENT_STATE.md"),
+      readOverseerTextFile(layout, "MODEL_POLICY.md"),
+      readOverseerTextFile(layout, "FORBIDDEN_ACTIONS.md"),
+      readLatestNotes(layout, 20),
+    ]);
+
+  const hasNextAction = Boolean(nextAction);
+  const hasCurrentState = Boolean(currentState);
+  const hasModelPolicy = Boolean(modelPolicy);
+  const hasForbiddenActions = Boolean(forbiddenActions);
+  const recentNotesCount = notes.length;
+  const runtimeActive = false;
+  const runnerActive = false;
+  const queueActive = false;
+  const readyForFutureRun =
+    context.ok &&
+    hasNextAction &&
+    hasCurrentState &&
+    hasModelPolicy &&
+    hasForbiddenActions;
+
+  const checks = [
+    {
+      name: "context_complete",
+      status: context.ok ? "pass" : "warn",
+      detail: context.ok ? "canonical overseer context files are present" : "missing canonical overseer files",
+    },
+    {
+      name: "has_next_action",
+      status: hasNextAction ? "pass" : "warn",
+      detail: hasNextAction ? "NEXT_ACTION.md is present and non-empty" : "NEXT_ACTION.md is missing or empty",
+    },
+    {
+      name: "has_current_state",
+      status: hasCurrentState ? "pass" : "warn",
+      detail: hasCurrentState ? "CURRENT_STATE.md is present and non-empty" : "CURRENT_STATE.md is missing or empty",
+    },
+    {
+      name: "has_model_policy",
+      status: hasModelPolicy ? "pass" : "warn",
+      detail: hasModelPolicy ? "MODEL_POLICY.md is present and non-empty" : "MODEL_POLICY.md is missing or empty",
+    },
+    {
+      name: "has_forbidden_actions",
+      status: hasForbiddenActions ? "pass" : "warn",
+      detail: hasForbiddenActions
+        ? "FORBIDDEN_ACTIONS.md is present and non-empty"
+        : "FORBIDDEN_ACTIONS.md is missing or empty",
+    },
+  ] as const;
+
+  const notesOut = [
+    "Preflight only: no run was created.",
+    "No agent process was started.",
+    "Runner/queue/runtime activation are not active in current Core.",
+    "High-risk actions still require explicit human approval (commit/push/tag/release/deletion/schema/runtime/provider).",
+  ];
+
+  if (wantsJson) {
+    io.stdout.write(
+      `${JSON.stringify(
+        {
+          ok: true,
+          tool: "run-preflight",
+          workspace_path: context.workspace_path,
+          context_complete: context.ok,
+          missing: context.missing,
+          checks,
+          recent_notes_count: recentNotesCount,
+          runtime_active: runtimeActive,
+          runner_active: runnerActive,
+          queue_active: queueActive,
+          ready_for_future_run: readyForFutureRun,
+          notes: notesOut,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return 0;
+  }
+
+  const lines = [
+    "OVERSEER RUN PREFLIGHT",
+    OVERSEER_SEP,
+    `  workspace: ${context.workspace_path}`,
+    `  context status: ${context.ok ? "complete" : "incomplete"}`,
+    `  has next action: ${hasNextAction ? "yes" : "no"}`,
+    `  has current state: ${hasCurrentState ? "yes" : "no"}`,
+    `  has model policy: ${hasModelPolicy ? "yes" : "no"}`,
+    `  has forbidden actions: ${hasForbiddenActions ? "yes" : "no"}`,
+    `  recent notes count: ${recentNotesCount}`,
+    `  runtime active: ${runtimeActive ? "yes" : "no"}`,
+    `  runner active: ${runnerActive ? "yes" : "no"}`,
+    `  queue active: ${queueActive ? "yes" : "no"}`,
+    `  ready for future run: ${readyForFutureRun ? "yes" : "no"}`,
+    "  notes:",
+    ...notesOut.map((n) => `    - ${n}`),
+  ];
+  if (context.missing.length > 0) {
+    lines.push("  missing:", ...context.missing.map((m) => `    - ${m}`));
+  }
+  io.stdout.write(`${lines.join("\n")}\n`);
+  return 0;
+}
+
 async function runOverseerNote(args: string[], io: CliIO): Promise<number> {
   if (args.length === 0) {
     io.stderr.write("usage: relayos overseer note <text>\n");
@@ -1549,6 +1668,7 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "handshake") return runOverseerHandshake(rest, io);
   if (sub === "recent") return runOverseerRecent(rest, io);
   if (sub === "context-pack") return runOverseerContextPack(rest, io);
+  if (sub === "run-preflight") return runOverseerRunPreflight(rest, io);
   if (sub === "note") return runOverseerNote(rest, io);
   if (sub === "next") return runOverseerNext(rest, io);
   if (sub === "start") return runOverseerStart(rest, io);
@@ -1563,7 +1683,7 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "branch") return runOverseerBranch(rest, io);
   if (sub === "progress") return runOverseerProgress(rest, io);
   io.stderr.write(
-    "usage: relayos overseer <status|context|handshake|recent|context-pack|note|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
+    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|note|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
   );
   return 1;
 }

@@ -77,6 +77,7 @@ Use `relayos overseer recent` for a compact current overseer summary.
 Use `relayos overseer recent --json` for automation-friendly JSON output.
 Use `relayos overseer context-pack` for a compact curated continuity pack.
 Use `relayos overseer context-pack --json` for MCP-aligned JSON payload output.
+Use `relayos overseer run-preflight` for read-only future run readiness checks.
 Use `relayos overseer runtime-check` as a read-only alias for `relayos overseer activate-runtime --dry-run`.
 
 ## Safety model
@@ -233,6 +234,8 @@ relayos overseer progress "tests passing, moving to review"
 relayos overseer brief
 relayos overseer context-pack
 relayos overseer context-pack --json --limit 8
+relayos overseer run-preflight
+relayos overseer run-preflight --json
 ```
 
 Shell aliases are optional and user-managed. RelayOS does not modify
@@ -325,7 +328,7 @@ Available from any terminal after `npm link` (or via `./bin/relayos`).
 | `relayos checkpoint <create\|list\|show\|restore>` | Snapshot HEAD + status + diff before risky handoffs. See [docs/CHECKPOINTS.md](docs/CHECKPOINTS.md). |
 | `relayos diff-risk` | Classify the current working tree before `git commit`. See [docs/DIFF_RISK.md](docs/DIFF_RISK.md). |
 | `relayos report` | Print a compact evidence snapshot: handoff, checkpoint, diff-risk, git status. |
-| `relayos overseer <status\|context\|handshake\|recent\|note\|next\|start\|mode\|env\|activate-runtime\|brief\|init-context\|branch\|progress>` | Local coordination workspace and read-only runtime-safety checks. See [docs/OVERSEER.md](docs/OVERSEER.md). |
+| `relayos overseer <status\|context\|handshake\|recent\|context-pack\|run-preflight\|note\|next\|start\|mode\|env\|activate-runtime\|brief\|init-context\|branch\|progress>` | Local coordination workspace and read-only runtime-safety checks. See [docs/OVERSEER.md](docs/OVERSEER.md). |
 
 ### Diagnostics
 
