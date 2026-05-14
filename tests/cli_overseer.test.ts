@@ -169,6 +169,48 @@ describe("relayos overseer recent", () => {
     expect(cap.stderr).toBe("");
   });
 
+  it("prints stable JSON summary output", async () => {
+    chdir(tempDir());
+    await runCli(["overseer", "next", "ship the patch"], captureIO().io);
+    await runCli(["overseer", "branch", "my-feature"], captureIO().io);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "recent", "--json"], cap.io);
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect("project" in data).toBe(true);
+    expect("currentState" in data).toBe(true);
+    expect("activeBranch" in data).toBe(true);
+    expect("nextAction" in data).toBe(true);
+    expect("mode" in data).toBe(true);
+    expect("runtime" in data).toBe(true);
+    expect("warnings" in data).toBe(true);
+    expect(data.activeBranch).toBe("my-feature");
+    expect(data.nextAction).toBe("ship the patch");
+    expect((data.mode as Record<string, unknown>).current).toBe("serial");
+    expect((data.runtime as Record<string, unknown>).runtimeWorkspaceSwitchingActive).toBe(false);
+    expect(Array.isArray(data.warnings)).toBe(true);
+    expect(cap.stderr).toBe("");
+  });
+
+  it("prints JSON with null/unavailable values without crashing when optional files are missing", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "recent", "--json"], cap.io);
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect(data.project).toBeNull();
+    expect((data.currentState as Record<string, unknown>).raw).toBeNull();
+    expect(data.activeBranch).toBeNull();
+    expect(data.nextAction).toBeNull();
+    expect(Array.isArray(data.warnings)).toBe(true);
+    expect((data.warnings as string[]).length).toBeGreaterThan(0);
+    expect(cap.stderr).toBe("");
+  });
+
   it("does not write overseer state", async () => {
     const cwd = tempDir();
     chdir(cwd);
@@ -180,11 +222,34 @@ describe("relayos overseer recent", () => {
     expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
   });
 
-  it("exits 1 with usage on unexpected args", async () => {
-    chdir(tempDir());
+  it("remains read-only in JSON mode", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
     const cap = captureIO();
 
     const code = await runCli(["overseer", "recent", "--json"], cap.io);
+
+    expect(code).toBe(0);
+    expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
+  });
+
+  it("keeps human-readable output behavior", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "recent"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("OVERSEER RECENT");
+    expect(cap.stdout).toContain("mode: serial (default)");
+    expect(cap.stdout).toContain("runtime posture:");
+  });
+
+  it("exits 1 with usage on unsupported flag", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "recent", "--yaml"], cap.io);
 
     expect(code).toBe(1);
     expect(cap.stderr).toContain("usage: relayos overseer recent");

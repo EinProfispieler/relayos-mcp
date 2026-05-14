@@ -960,7 +960,8 @@ function firstContentLine(text: string | null): string | null {
 }
 
 async function runOverseerRecent(args: string[], io: CliIO): Promise<number> {
-  if (args.length > 0) {
+  const wantsJson = args.length === 1 && args[0] === "--json";
+  if (args.length > 1 || (args.length === 1 && !wantsJson)) {
     io.stderr.write("usage: relayos overseer recent\n");
     return 1;
   }
@@ -979,12 +980,54 @@ async function runOverseerRecent(args: string[], io: CliIO): Promise<number> {
   const currentAnchorMatch = currentState?.match(/`([0-9a-f]{7,40})`/i) ?? null;
   const currentAnchor = currentAnchorMatch?.[1] ?? null;
   const runtimeHome = process.env.RELAYOS_RUNTIME_HOME;
+  const runtimeHomeSet = runtimeHome !== undefined;
+  const project = firstContentLine(projectBrief);
+  const stateAnchor = currentAnchor ?? commitInfo ?? null;
+  const warnings: string[] = [];
+  if (!projectBrief) warnings.push("project brief not available");
+  if (!currentState) warnings.push("current state not available");
+  if (!activeBranch) warnings.push("active branch/task not available");
+  if (!nextAction) warnings.push("next action not available");
+
+  if (wantsJson) {
+    io.stdout.write(
+      `${JSON.stringify(
+        {
+          project,
+          currentState: {
+            anchor: stateAnchor,
+            raw: currentState,
+          },
+          activeBranch,
+          nextAction,
+          mode: {
+            current: "serial",
+            default: "serial",
+            writeTasks: "serial",
+          },
+          runtime: {
+            relayosRuntimeHomeSet: runtimeHomeSet,
+            relayosRuntimeHome: runtimeHomeSet ? runtimeHome : null,
+            runtimeWorkspaceSwitchingActive: false,
+            currentRelayosResolution: "cwd",
+            posture: runtimeHomeSet
+              ? "switching inactive; RELAYOS_RUNTIME_HOME set and inspect-only"
+              : "switching inactive; RELAYOS_RUNTIME_HOME not set (inspect-only)",
+          },
+          warnings,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return 0;
+  }
 
   const lines = [
     "OVERSEER RECENT",
     OVERSEER_SEP,
-    `project: ${firstContentLine(projectBrief) ?? "not available"}`,
-    `state anchor: ${currentAnchor ?? commitInfo ?? "not available"}`,
+    `project: ${project ?? "not available"}`,
+    `state anchor: ${stateAnchor ?? "not available"}`,
     `active branch/task: ${activeBranch ?? "not available"}`,
     `next action: ${nextAction ?? "not available"}`,
     "mode: serial (default)",

@@ -39,6 +39,8 @@ Prints a compact read-only summary of current local overseer context for fast te
 - runtime posture (switching inactive; `RELAYOS_RUNTIME_HOME` inspection-only)
 
 Missing optional local files are shown as `not available` instead of failing.
+
+`--json` prints the same core summary as stable machine-readable JSON with top-level fields including `project`, `currentState`, `activeBranch`, `nextAction`, `mode`, `runtime`, and `warnings`. Missing optional values are returned as `null` or clear unavailable signals instead of failing.
 OVERSEER STATUS
 ──────────────
 NEXT ACTION
