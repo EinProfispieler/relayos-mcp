@@ -47,7 +47,7 @@ deliberate, not autonomous.
 
 ## One-time setup
 
-1. **Install RelayOS** in both clients (see [README → Install](../README.md#install)).
+1. **Install RelayOS** in both clients (see [README → Install](../README.md#1-install)).
    Both Claude Code and Codex CLI must have the `relayos-mcp` server
    registered. This step is the only one that touches MCP config.
 
@@ -209,7 +209,7 @@ any of these is true:
   `execution_mode: read_only`, exotic `model`, hand-tuned
   `expected_output`. Use `create_handoff` and pass every field
   yourself. See [README → When to call `create_handoff`
-  directly](../README.md#when-to-call-create_handoff-directly).
+  directly](../README.md#handoff-envelope).
 
 - You want **auto-spawn** (Claude immediately runs Codex without you
   switching terminals). The Rookie Mode subagent intentionally leaves

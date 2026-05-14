@@ -8,7 +8,7 @@ your machine; nothing is auto-executed.
 
 - `npm install && npm run build` in this repo.
 - RelayOS MCP server registered in both Claude Code and Codex CLI (see
-  [README → Install](../README.md#install)).
+  [README → Install](../README.md#1-install)).
 - For the CLI part, either `./bin/relayos` from the repo or `npm link`
   for a global `relayos` command. See [`docs/LAUNCH.md`](./LAUNCH.md).
 

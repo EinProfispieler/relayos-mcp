@@ -8,7 +8,7 @@ snapshot at the end. All storage is local; nothing runs automatically.
 
 - `npm install && npm run build && npm link` in this repo.
 - RelayOS MCP server registered in Claude Code and Codex CLI (see
-  [README → Install](../README.md#install)).
+  [README → Install](../README.md#1-install)).
 
 ---
 
@@ -35,7 +35,7 @@ If the workspace hasn't been initialized yet:
 relayos overseer init-context   # scaffolds stub files; skips existing ones
 ```
 
-Then fill in the stubs and run `overseer brief` again.
+Then fill in the stubs and run `relayos overseer brief` again.
 
 ---
 
@@ -225,7 +225,7 @@ of this in one read.
 ## Summary: the loop
 
 ```
-overseer brief          → recover context
+relayos overseer brief  → recover context
 create handoff          → record the task
 relayos policy latest   → check the envelope
 relayos checkpoint create → snapshot state
@@ -233,7 +233,8 @@ $(relayos launch)       → run Codex
 relayos diff-risk       → classify the changes
 relayos report          → evidence snapshot
 relayos checkpoint restore latest --dry-run → plan rollback if needed
-overseer note / next    → record what happened
+relayos overseer note   → record what happened
+relayos overseer next   → set the next action
 ```
 
 Each step is an explicit operator action. Nothing runs automatically.
