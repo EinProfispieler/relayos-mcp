@@ -208,3 +208,7 @@ Current Core non-goals:
 ## Summary
 
 Roadmap direction is to keep Core simple and reliable while layering curated memory and scoped, human-supervised runtime capabilities in later tiers. Future features remain design targets until explicitly implemented and documented as shipped.
+
+Related policy:
+
+- [RELEASE_POLICY.md](./RELEASE_POLICY.md) — docs-only commits should not receive standalone GitHub releases; bundle into functional releases.
