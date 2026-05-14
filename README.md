@@ -198,6 +198,7 @@ Then talk to Claude normally. Claude files the handoff; switch to a Codex termin
 - [**docs/CHECKPOINTS.md**](docs/CHECKPOINTS.md) — `relayos checkpoint` reference
 - [**docs/DIFF_RISK.md**](docs/DIFF_RISK.md) — `relayos diff-risk` reference
 - [**docs/OVERSEER.md**](docs/OVERSEER.md) — `relayos overseer` reference
+- [**docs/OVERSEER_WORKFLOW.md**](docs/OVERSEER_WORKFLOW.md) — Overseer role, serial vs parallel mode, model selection, and safety rules
 - [**docs/SHELL_ALIASES.md**](docs/SHELL_ALIASES.md) — optional user-managed shell aliases
 - [**docs/REFERENCES.md**](docs/REFERENCES.md) — RelayOS vs OpenSpec and Superpowers; future interoperability ideas
 - [**docs/MODEL_STRATEGY.md**](docs/MODEL_STRATEGY.md) — role templates, model/provider selection, and the future model-role matrix
