@@ -26,6 +26,15 @@ Prints the current next action and the five most recent notes. If no state exist
 `--json` prints the same core status data as stable machine-readable JSON.
 
 ```
+OVERSEER STATUS
+──────────────
+NEXT ACTION
+  review PR #42 before merging
+
+RECENT NOTES
+  [2026-05-14T10:00:00.000Z] patch applied, tests green
+  [2026-05-14T09:45:00.000Z] blocked on schema migration review
+```
 
 ### `overseer recent`
 
@@ -40,15 +49,43 @@ Prints a compact read-only summary of current local overseer context for fast te
 
 Missing optional local files are shown as `not available` instead of failing.
 
-`--json` prints the same core summary as stable machine-readable JSON with top-level fields including `project`, `currentState`, `activeBranch`, `nextAction`, `mode`, `runtime`, and `warnings`. Missing optional values are returned as `null` or clear unavailable signals instead of failing.
-OVERSEER STATUS
-──────────────
-NEXT ACTION
-  review PR #42 before merging
+`--json` prints stable machine-readable output with top-level fields:
 
-RECENT NOTES
-  [2026-05-14T10:00:00.000Z] patch applied, tests green
-  [2026-05-14T09:45:00.000Z] blocked on schema migration review
+- `project`
+- `currentState`
+- `activeBranch`
+- `nextAction`
+- `mode`
+- `runtime`
+- `warnings` (always an array)
+
+Missing optional values degrade to `null` or clear unavailable values instead of crashing.
+
+Compact example:
+
+```json
+{
+  "project": "RelayOS is a local-first safety, audit, and handoff layer for AI-assisted development.",
+  "currentState": {
+    "anchor": "32ee222",
+    "raw": "# Current State\n..."
+  },
+  "activeBranch": "runtime activation dry-run safety gate — shipped 32ee222",
+  "nextAction": "Prepare the next safe Overseer control-plane slice...",
+  "mode": {
+    "current": "serial",
+    "default": "serial",
+    "writeTasks": "serial"
+  },
+  "runtime": {
+    "relayosRuntimeHomeSet": false,
+    "relayosRuntimeHome": null,
+    "runtimeWorkspaceSwitchingActive": false,
+    "currentRelayosResolution": "cwd",
+    "posture": "switching inactive; RELAYOS_RUNTIME_HOME not set (inspect-only)"
+  },
+  "warnings": []
+}
 ```
 
 ### `overseer note <text...>`

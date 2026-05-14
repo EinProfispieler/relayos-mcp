@@ -137,6 +137,16 @@ describe("relayos overseer status", () => {
 });
 
 describe("relayos overseer recent", () => {
+  const REQUIRED_RECENT_JSON_FIELDS = [
+    "project",
+    "currentState",
+    "activeBranch",
+    "nextAction",
+    "mode",
+    "runtime",
+    "warnings",
+  ] as const;
+
   it("prints a compact human-readable summary", async () => {
     chdir(tempDir());
     await runCli(["overseer", "next", "ship the patch"], captureIO().io);
@@ -179,13 +189,7 @@ describe("relayos overseer recent", () => {
 
     expect(code).toBe(0);
     const data = JSON.parse(cap.stdout) as Record<string, unknown>;
-    expect("project" in data).toBe(true);
-    expect("currentState" in data).toBe(true);
-    expect("activeBranch" in data).toBe(true);
-    expect("nextAction" in data).toBe(true);
-    expect("mode" in data).toBe(true);
-    expect("runtime" in data).toBe(true);
-    expect("warnings" in data).toBe(true);
+    for (const key of REQUIRED_RECENT_JSON_FIELDS) expect(key in data).toBe(true);
     expect(data.activeBranch).toBe("my-feature");
     expect(data.nextAction).toBe("ship the patch");
     expect((data.mode as Record<string, unknown>).current).toBe("serial");
@@ -202,6 +206,7 @@ describe("relayos overseer recent", () => {
 
     expect(code).toBe(0);
     const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    for (const key of REQUIRED_RECENT_JSON_FIELDS) expect(key in data).toBe(true);
     expect(data.project).toBeNull();
     expect((data.currentState as Record<string, unknown>).raw).toBeNull();
     expect(data.activeBranch).toBeNull();
