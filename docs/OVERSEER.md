@@ -160,9 +160,14 @@ Read-only activation safety check for a proposed runtime workspace path.
 
 - Requires `--dry-run` and `--path`.
 - `--source` defaults to the current working directory.
-- Reports allow/warn/block based on path safety checks.
+- Reports `allow` / `warn` / `block` based on path safety checks.
+- `block` when the proposed runtime path is inside the source repo.
+- `block` when the proposed runtime path appears git-tracked.
+- `warn` when the proposed runtime path does not exist.
+- `warn` when `RELAYOS_RUNTIME_HOME` is set and differs from `--path`.
 - Never activates runtime switching.
 - Never writes files, creates directories, moves state, or changes `.relayos/` resolution.
+- Human and JSON output both explicitly report that no files were written and runtime switching is not active.
 
 `--json` returns the same decision report in machine-readable form.
 
@@ -262,7 +267,7 @@ git check-ignore -v .relayos/overseer/timeline.jsonl
 
 When running RelayOS as a tool against a different project, operate from that project's directory. RelayOS resolves `.relayos/` relative to the current working directory, so coordination state stays in the target project, not in the RelayOS source tree.
 
-Production runtime state — coordination notes, sub-run outputs, generated reports, operational logs for non-RelayOS projects — belongs outside the source repo entirely. See [docs/OVERSEER_WORKFLOW.md](OVERSEER_WORKFLOW.md) § "Source repo vs. runtime workspace" for the full treatment, and [docs/OVERSEER_RUNTIME_PLAN.md](OVERSEER_RUNTIME_PLAN.md) for the staged migration plan toward a separate production runtime workspace, including the future `relayos overseer activate-runtime --dry-run` design (§ 8).
+Production runtime state — coordination notes, sub-run outputs, generated reports, operational logs for non-RelayOS projects — belongs outside the source repo entirely. See [docs/OVERSEER_WORKFLOW.md](OVERSEER_WORKFLOW.md) § "Source repo vs. runtime workspace" for the full treatment, and [docs/OVERSEER_RUNTIME_PLAN.md](OVERSEER_RUNTIME_PLAN.md) for the staged migration plan toward a separate production runtime workspace. `relayos overseer activate-runtime --dry-run` is implemented as a read-only safety check; real activation/switching remains future work.
 
 ## Non-goals
 
