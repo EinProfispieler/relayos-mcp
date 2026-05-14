@@ -184,6 +184,7 @@ Then talk to Claude normally. Claude files the handoff; switch to a Codex termin
 
 ## Walkthroughs
 
+- [**docs/WALKTHROUGH.md**](docs/WALKTHROUGH.md) — solo developer walkthrough: context recovery → handoff → checkpoint → diff-risk → report → rollback plan
 - [**docs/QUICK_DEMO.md**](docs/QUICK_DEMO.md) — 5-step Claude → RelayOS → Codex demo
 - [**docs/ROOKIE_MODE.md**](docs/ROOKIE_MODE.md) — chat-only workflow, including the risk gate
 - [**docs/LAUNCH.md**](docs/LAUNCH.md) — `relayos launch` reference
