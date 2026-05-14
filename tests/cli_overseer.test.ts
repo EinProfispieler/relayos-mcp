@@ -287,11 +287,63 @@ describe("relayos overseer env", () => {
     }
   });
 
-  it("exits 1 with usage on unexpected args", async () => {
+  it("prints stable JSON when RELAYOS_RUNTIME_HOME is unset", async () => {
+    chdir(tempDir());
+    const prev = process.env.RELAYOS_RUNTIME_HOME;
+    delete process.env.RELAYOS_RUNTIME_HOME;
+    const cap = captureIO();
+
+    try {
+      const code = await runCli(["overseer", "env", "--json"], cap.io);
+      expect(code).toBe(0);
+      const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+      expect(data.cwd).toBe(process.cwd());
+      expect(data.relayosRuntimeHomeSet).toBe(false);
+      expect(data.relayosRuntimeHome).toBeNull();
+      expect(data.runtimeWorkspaceConfigured).toBe(false);
+      expect(data.runtimeWorkspaceSwitchingActive).toBe(false);
+      expect(data.currentRelayosResolution).toBe("cwd");
+      expect(Array.isArray(data.notes)).toBe(true);
+      expect((data.notes as string[]).join(" ")).toContain("inspection only");
+      expect((data.notes as string[]).join(" ")).toContain("not active yet");
+      expect(cap.stderr).toBe("");
+    } finally {
+      if (prev === undefined) delete process.env.RELAYOS_RUNTIME_HOME;
+      else process.env.RELAYOS_RUNTIME_HOME = prev;
+    }
+  });
+
+  it("prints stable JSON when RELAYOS_RUNTIME_HOME is set", async () => {
+    chdir(tempDir());
+    const prev = process.env.RELAYOS_RUNTIME_HOME;
+    process.env.RELAYOS_RUNTIME_HOME = "/tmp/relayos-runtime";
+    const cap = captureIO();
+
+    try {
+      const code = await runCli(["overseer", "env", "--json"], cap.io);
+      expect(code).toBe(0);
+      const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+      expect(data.cwd).toBe(process.cwd());
+      expect(data.relayosRuntimeHomeSet).toBe(true);
+      expect(data.relayosRuntimeHome).toBe("/tmp/relayos-runtime");
+      expect(data.runtimeWorkspaceConfigured).toBe(true);
+      expect(data.runtimeWorkspaceSwitchingActive).toBe(false);
+      expect(data.currentRelayosResolution).toBe("cwd");
+      expect(Array.isArray(data.notes)).toBe(true);
+      expect((data.notes as string[]).join(" ")).toContain("inspection only");
+      expect((data.notes as string[]).join(" ")).toContain("not active yet");
+      expect(cap.stderr).toBe("");
+    } finally {
+      if (prev === undefined) delete process.env.RELAYOS_RUNTIME_HOME;
+      else process.env.RELAYOS_RUNTIME_HOME = prev;
+    }
+  });
+
+  it("exits 1 with usage on unsupported args", async () => {
     chdir(tempDir());
     const cap = captureIO();
 
-    const code = await runCli(["overseer", "env", "--json"], cap.io);
+    const code = await runCli(["overseer", "env", "--yaml"], cap.io);
 
     expect(code).toBe(1);
     expect(cap.stderr).toContain("usage: relayos overseer env");

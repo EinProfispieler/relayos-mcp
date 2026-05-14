@@ -838,23 +838,53 @@ async function runOverseerMode(args: string[], io: CliIO): Promise<number> {
 }
 
 async function runOverseerEnv(args: string[], io: CliIO): Promise<number> {
-  if (args.length > 0) {
+  const wantsJson = args.length === 1 && args[0] === "--json";
+  if (args.length > 1 || (args.length === 1 && !wantsJson)) {
     io.stderr.write("usage: relayos overseer env\n");
     return 1;
   }
 
   const cwd = process.cwd();
   const runtimeHome = process.env.RELAYOS_RUNTIME_HOME;
-  const runtimeHomeLine = runtimeHome
+  const runtimeHomeSet = runtimeHome !== undefined;
+  const runtimeHomeValue = runtimeHomeSet ? runtimeHome : null;
+  const runtimeWorkspaceConfigured = runtimeHomeSet;
+  const runtimeWorkspaceSwitchingActive = false;
+  const currentRelayosResolution = "cwd" as const;
+  const notes = [
+    "RELAYOS_RUNTIME_HOME is detected for inspection only in this release.",
+    "Runtime workspace switching is not active yet.",
+    "RelayOS still resolves `.relayos/` relative to the current working directory unless/until future runtime switching is explicitly implemented.",
+    "Production runtime state should stay outside the RelayOS source repo.",
+  ];
+
+  if (wantsJson) {
+    io.stdout.write(
+      `${JSON.stringify(
+        {
+          cwd,
+          relayosRuntimeHomeSet: runtimeHomeSet,
+          relayosRuntimeHome: runtimeHomeValue,
+          runtimeWorkspaceConfigured,
+          runtimeWorkspaceSwitchingActive,
+          currentRelayosResolution,
+          notes,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return 0;
+  }
+
+  const runtimeHomeLine = runtimeHomeSet
     ? `  RELAYOS_RUNTIME_HOME: configured (${runtimeHome})`
     : "  RELAYOS_RUNTIME_HOME: not set";
-  const runtimeWorkspaceLine = runtimeHome
+  const runtimeWorkspaceLine = runtimeWorkspaceConfigured
     ? "  Runtime workspace: value detected for inspection only."
     : "  Runtime workspace: not configured (RELAYOS_RUNTIME_HOME is not set).";
-  const switchingLine = runtimeHome
-    ? "  Runtime workspace switching: not active yet."
-    : "  Runtime workspace switching: not active yet.";
-  const behaviorLine = runtimeHome
+  const switchingLine = "  Runtime workspace switching: not active yet.";
+  const behaviorLine = runtimeHomeSet
     ? "  Current behavior: RelayOS still resolves `.relayos/` relative to the current working directory unless/until future runtime switching is explicitly implemented."
     : "  Current behavior: `.relayos/` paths resolve relative to the current working directory.";
 

@@ -143,6 +143,8 @@ It also explains current behavior and future intent:
 
 This command is read-only and does not create directories, write files, or change state.
 
+`--json` prints the same environment boundary information as stable machine-readable JSON.
+
 ### `overseer init-context`
 
 Creates missing context stub files under `.relayos/overseer/`. Skips any file that already exists — safe to run multiple times.
