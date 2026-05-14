@@ -258,6 +258,24 @@ Then talk to Claude normally. Claude files the handoff; switch to a Codex termin
 - [**docs/REFERENCES.md**](docs/REFERENCES.md) — RelayOS vs OpenSpec and Superpowers; future interoperability ideas
 - [**docs/MODEL_STRATEGY.md**](docs/MODEL_STRATEGY.md) — role templates, model/provider selection, and the future model-role matrix
 
+## Documentation map
+
+Current Core behavior (shipped, local-first, human-supervised):
+
+- [**docs/OVERSEER.md**](docs/OVERSEER.md) — overseer protocol, handshake/recent/context-pack/note flow
+- [**docs/ROOKIE_MODE.md**](docs/ROOKIE_MODE.md) — Claude/Codex MCP workflow and risk gate
+
+Future roadmap/design direction (not current runtime support):
+
+- [**docs/ROADMAP.md**](docs/ROADMAP.md) — product direction across Core/Pro/Business/Enterprise
+- [**docs/CURATED_MEMORY.md**](docs/CURATED_MEMORY.md) — curated continuity and context-pack design
+- [**docs/SCOPED_ROOKIE_RUNTIME.md**](docs/SCOPED_ROOKIE_RUNTIME.md) — bounded, human-supervised runtime concept
+- [**docs/ROOKIE_MODE_FUTURE.md**](docs/ROOKIE_MODE_FUTURE.md) — future Rookie Mode/routing direction
+- [**docs/OVERSEER_HIERARCHY.md**](docs/OVERSEER_HIERARCHY.md) — future multi-level overseer concept
+- [**docs/PROVIDER_ROUTING_PLAN.md**](docs/PROVIDER_ROUTING_PLAN.md) — provider routing direction
+
+RelayOS remains a local-first audit/control layer and does not currently ship daemon/autonomous agent runner/security sandbox behavior.
+
 ---
 
 ## Tools
