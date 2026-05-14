@@ -644,8 +644,66 @@ async function runReport(args: string[], io: CliIO): Promise<number> {
 
 const OVERSEER_SEP = "─".repeat(44);
 
-async function runOverseerStatus(_args: string[], io: CliIO): Promise<number> {
+async function runOverseerStatus(args: string[], io: CliIO): Promise<number> {
+  const wantsJson = args.length === 1 && args[0] === "--json";
+  if (args.length > 1 || (args.length === 1 && !wantsJson)) {
+    io.stderr.write("usage: relayos overseer status\n");
+    return 1;
+  }
+
   const layout = resolveOverseerLayout(process.cwd());
+
+  if (wantsJson) {
+    const cwd = process.cwd();
+    const [
+      project,
+      currentState,
+      nextAction,
+      activeBranch,
+      branchProgress,
+      recentNotes,
+      latestCommit,
+    ] = await Promise.all([
+      readOverseerTextFile(layout, "project_brief.md"),
+      readOverseerTextFile(layout, "current.md"),
+      readNextAction(layout),
+      readActiveBrief(layout),
+      readBranchProgress(layout),
+      readLatestNotes(layout, 5),
+      isGitRepo(cwd).then(async (isRepo) => {
+        if (!isRepo) return null;
+        const [head, branch] = await Promise.all([gitHead(cwd), gitBranch(cwd)]);
+        return head ? `${head.slice(0, 7)} @ ${branch ?? "(detached)"}` : null;
+      }),
+    ]);
+
+    const branchProgressEntries =
+      branchProgress === null
+        ? []
+        : branchProgress
+            .split("\n")
+            .map((l) => l.trim())
+            .filter((l) => l.length > 0);
+    const notes = recentNotes.map((n) => `[${n.ts}] ${n.text}`);
+
+    io.stdout.write(
+      `${JSON.stringify(
+        {
+          project,
+          currentState,
+          nextAction,
+          activeBranch,
+          branchProgress: branchProgressEntries,
+          latestCommit,
+          notes,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return 0;
+  }
+
   const lines: string[] = ["OVERSEER STATUS", OVERSEER_SEP];
 
   if (!hasOverseerState(layout)) {

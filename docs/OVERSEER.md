@@ -21,6 +21,8 @@ relayos overseer progress [text...]
 
 Prints the current next action and the five most recent notes. If no state exists yet, prints a setup prompt.
 
+`--json` prints the same core status data as stable machine-readable JSON.
+
 ```
 OVERSEER STATUS
 ──────────────
