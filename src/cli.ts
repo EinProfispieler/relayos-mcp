@@ -815,8 +815,26 @@ async function runOverseerStart(args: string[], io: CliIO): Promise<number> {
   io.stdout.write("OVERSEER STARTUP MODE\n");
   io.stdout.write(`${OVERSEER_SEP}\n`);
   io.stdout.write("  Serial mode is the default in this release.\n");
+  io.stdout.write("  Write tasks are processed one at a time.\n");
   io.stdout.write("  Parallel mode is future/opt-in and is not automatically enabled.\n\n");
   return runOverseerBrief([], io);
+}
+
+async function runOverseerMode(args: string[], io: CliIO): Promise<number> {
+  if (args.length > 0) {
+    io.stderr.write("usage: relayos overseer mode\n");
+    return 1;
+  }
+
+  const lines = [
+    "OVERSEER MODE",
+    OVERSEER_SEP,
+    "  Current/default mode: serial.",
+    "  Write tasks are processed one at a time.",
+    "  Parallel mode is future/opt-in and is not automatically enabled.",
+  ];
+  io.stdout.write(`${lines.join("\n")}\n`);
+  return 0;
 }
 
 async function runOverseerInitContext(_args: string[], io: CliIO): Promise<number> {
@@ -869,12 +887,13 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "note") return runOverseerNote(rest, io);
   if (sub === "next") return runOverseerNext(rest, io);
   if (sub === "start") return runOverseerStart(rest, io);
+  if (sub === "mode") return runOverseerMode(rest, io);
   if (sub === "brief") return runOverseerBrief(rest, io);
   if (sub === "init-context") return runOverseerInitContext(rest, io);
   if (sub === "branch") return runOverseerBranch(rest, io);
   if (sub === "progress") return runOverseerProgress(rest, io);
   io.stderr.write(
-    "usage: relayos overseer <status|note|next|start|brief|init-context|branch|progress> [args...]\n",
+    "usage: relayos overseer <status|note|next|start|mode|brief|init-context|branch|progress> [args...]\n",
   );
   return 1;
 }

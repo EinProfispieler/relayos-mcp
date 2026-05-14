@@ -197,6 +197,7 @@ describe("relayos overseer start", () => {
     expect(cap.stdout).toContain("Local-first safety, audit, and handoff layer");
     expect(cap.stdout).toContain("OVERSEER STARTUP MODE");
     expect(cap.stdout).toContain("Serial mode is the default");
+    expect(cap.stdout).toContain("Write tasks are processed one at a time.");
     expect(cap.stdout).toContain("Parallel mode is future/opt-in");
     expect(cap.stdout).toContain("RELAYOS OVERSEER BRIEF");
     expect(cap.stderr).toBe("");
@@ -210,6 +211,32 @@ describe("relayos overseer start", () => {
 
     expect(code).toBe(1);
     expect(cap.stderr).toContain("usage: relayos overseer start");
+  });
+});
+
+describe("relayos overseer mode", () => {
+  it("prints the current read-only execution mode guidance", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "mode"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("OVERSEER MODE");
+    expect(cap.stdout).toContain("Current/default mode: serial.");
+    expect(cap.stdout).toContain("Write tasks are processed one at a time.");
+    expect(cap.stdout).toContain("Parallel mode is future/opt-in");
+    expect(cap.stderr).toBe("");
+  });
+
+  it("exits 1 with usage on unexpected args", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "mode", "json"], cap.io);
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("usage: relayos overseer mode");
   });
 });
 
