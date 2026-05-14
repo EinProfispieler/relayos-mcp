@@ -190,6 +190,7 @@ Then talk to Claude normally. Claude files the handoff; switch to a Codex termin
 - [**docs/CHECKPOINTS.md**](docs/CHECKPOINTS.md) — `relayos checkpoint` reference
 - [**docs/DIFF_RISK.md**](docs/DIFF_RISK.md) — `relayos diff-risk` reference
 - [**docs/OVERSEER.md**](docs/OVERSEER.md) — `relayos overseer` reference
+- [**docs/REFERENCES.md**](docs/REFERENCES.md) — RelayOS vs OpenSpec and Superpowers; future interoperability ideas
 
 ---
 
