@@ -19,17 +19,19 @@ function captureIO() {
 }
 
 describe("relayos banner", () => {
-  it("prints a static RelayOS command banner", async () => {
+  it("prints a static RelayOS ASCII banner", async () => {
     const cap = captureIO();
 
     const code = await runCli(["banner"], cap.io);
 
     expect(code).toBe(0);
-    expect(cap.stdout).toContain("RELAYOS");
+    expect(cap.stdout).toContain("____  _____ _");
+    expect(cap.stdout).toContain("Local-first safety, audit, and handoff layer");
     expect(cap.stdout).toContain("relayos launch latest");
     expect(cap.stdout).toContain("relayos policy latest");
     expect(cap.stdout).toContain("relayos report");
     expect(cap.stdout).toContain("Optional shell aliases are user-managed");
+    expect(cap.stdout.split("\n").length).toBeGreaterThan(10);
     expect(cap.stderr).toBe("");
   });
 

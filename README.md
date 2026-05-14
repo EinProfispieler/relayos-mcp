@@ -139,7 +139,7 @@ See [MCP tools](#mcp-tools) for the full table.
 From any terminal in your project:
 
 ```bash
-# Print a compact RelayOS command banner
+# Print a RelayOS ASCII banner
 relayos banner
 
 # Print the launch command for the newest open handoff
@@ -233,7 +233,7 @@ Available from any terminal after `npm link` (or via `./bin/relayos`).
 
 | Command | Purpose |
 |---|---|
-| `relayos banner` | Print a compact local command banner for shell startup or manual reminders. |
+| `relayos banner` | Print a local RelayOS ASCII banner for shell startup or manual reminders. |
 | `relayos launch [id\|latest]` | Print the launch command for the newest open handoff. See [docs/LAUNCH.md](docs/LAUNCH.md). |
 | `relayos policy [id\|latest]` | Evaluate a handoff envelope as allow/warn/block. |
 | `relayos checkpoint <create\|list\|show\|restore>` | Snapshot HEAD + status + diff before risky handoffs. See [docs/CHECKPOINTS.md](docs/CHECKPOINTS.md). |

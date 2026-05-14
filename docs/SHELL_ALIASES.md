@@ -5,7 +5,7 @@ Codex CLI, your shell startup files, or any command aliases. Any aliases
 below are optional shortcuts that you add and own.
 
 ```bash
-# Print a compact RelayOS command reminder.
+# Print a RelayOS ASCII banner.
 alias rb='relayos banner'
 
 # Print-only handoff helpers.
@@ -41,7 +41,7 @@ Then read the printed command and run it yourself.
 
 ## Startup Banner
 
-If you want a small reminder in a terminal session, call the banner
+If you want a visible RelayOS banner in a terminal session, call it
 directly:
 
 ```bash

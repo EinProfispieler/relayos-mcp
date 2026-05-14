@@ -55,7 +55,14 @@ function checkpointUsage(): string {
 
 function formatRelayOSBanner(): string {
   return [
-    "RELAYOS",
+    " ____  _____ _        _ __   __ ___  ____  ",
+    "|  _ \\| ____| |      / \\\\ \\ / // _ \\/ ___| ",
+    "| |_) |  _| | |     / _ \\\\ V /| | | \\___ \\ ",
+    "|  _ <| |___| |___ / ___ \\| | | |_| |___) |",
+    "|_| \\_\\_____|_____/_/   \\_\\_|  \\___/|____/ ",
+    "",
+    "Local-first safety, audit, and handoff layer",
+    "",
     "  launch:     relayos launch latest",
     "  policy:     relayos policy latest",
     "  checkpoint: relayos checkpoint create",
