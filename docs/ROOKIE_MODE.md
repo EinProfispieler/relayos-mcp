@@ -309,3 +309,12 @@ nine-check health report and `inspect_config` for the resolved config —
 All three are documentation. Editing them does not change RelayOS
 behavior; they only change what Claude or Codex chooses to do at the
 prompt boundary.
+
+## Related docs
+
+Future roadmap/design notes (not current shipped runtime features):
+
+- [ROADMAP.md](./ROADMAP.md)
+- [ROOKIE_MODE_FUTURE.md](./ROOKIE_MODE_FUTURE.md)
+- [CURATED_MEMORY.md](./CURATED_MEMORY.md)
+- [SCOPED_ROOKIE_RUNTIME.md](./SCOPED_ROOKIE_RUNTIME.md)
