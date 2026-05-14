@@ -152,6 +152,9 @@ relayos checkpoint create
 relayos checkpoint list
 relayos checkpoint show latest
 
+# Preview a rollback plan (no mutation)
+relayos checkpoint restore latest --dry-run
+
 # Classify the working tree before git commit
 relayos diff-risk
 

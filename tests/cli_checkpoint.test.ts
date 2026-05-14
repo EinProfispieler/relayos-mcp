@@ -230,3 +230,103 @@ describe("relayos checkpoint usage", () => {
     expect(cap.stderr).toContain("usage: relayos checkpoint");
   });
 });
+
+describe("relayos checkpoint restore --dry-run", () => {
+  it("prints dry-run plan for a valid checkpoint", async () => {
+    await withLayout();
+    const repo = await tempGitRepo();
+    chdir(repo);
+    const create = captureIO();
+    await runCli(["checkpoint", "create"], create.io);
+    const id = create.stdout.match(/c_[0-9A-HJKMNP-TV-Z]{26}/)![0];
+
+    const cap = captureIO();
+    const code = await runCli(["checkpoint", "restore", id, "--dry-run"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stderr).toBe("");
+    expect(cap.stdout).toContain("CHECKPOINT RESTORE DRY-RUN");
+    expect(cap.stdout).toContain(`id:          ${id}`);
+    expect(cap.stdout).toContain("CAPTURED STATE");
+    expect(cap.stdout).toContain("WARNING: THIS IS A DRY-RUN");
+    expect(cap.stdout).toContain("--apply is not yet implemented");
+  });
+
+  it("resolves latest selector", async () => {
+    await withLayout();
+    const repo = await tempGitRepo();
+    chdir(repo);
+    const create = captureIO();
+    await runCli(["checkpoint", "create"], create.io);
+    const id = create.stdout.match(/c_[0-9A-HJKMNP-TV-Z]{26}/)![0];
+
+    const cap = captureIO();
+    const code = await runCli(["checkpoint", "restore", "latest", "--dry-run"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain(`id:          ${id}`);
+  });
+
+  it("resolves numeric selector", async () => {
+    await withLayout();
+    const repo = await tempGitRepo();
+    chdir(repo);
+    await runCli(["checkpoint", "create"], captureIO().io);
+
+    const cap = captureIO();
+    const code = await runCli(["checkpoint", "restore", "1", "--dry-run"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("CHECKPOINT RESTORE DRY-RUN");
+  });
+
+  it("exits 1 with refusal when --dry-run is missing", async () => {
+    await withLayout();
+    const repo = await tempGitRepo();
+    chdir(repo);
+    await runCli(["checkpoint", "create"], captureIO().io);
+
+    const cap = captureIO();
+    const code = await runCli(["checkpoint", "restore", "latest"], cap.io);
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("--dry-run is required");
+    expect(cap.stderr).toContain("--apply is not yet implemented");
+    expect(cap.stdout).toBe("");
+  });
+
+  it("exits 1 with relayos checkpoint: prefix for unknown id", async () => {
+    await withLayout();
+    const cap = captureIO();
+
+    const code = await runCli(
+      ["checkpoint", "restore", "c_DOES_NOT_EXIST", "--dry-run"],
+      cap.io,
+    );
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("relayos checkpoint:");
+    expect(cap.stderr).toContain("was not found");
+    expect(cap.stdout).toBe("");
+  });
+
+  it("exits 1 with usage for unknown flags", async () => {
+    await withLayout();
+    const cap = captureIO();
+
+    const code = await runCli(["checkpoint", "restore", "--unknown"], cap.io);
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("usage: relayos checkpoint restore");
+  });
+
+  it("exits 1 with refusal when no args given (no selector, no --dry-run)", async () => {
+    await withLayout();
+    const cap = captureIO();
+
+    const code = await runCli(["checkpoint", "restore"], cap.io);
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("--dry-run is required");
+  });
+});

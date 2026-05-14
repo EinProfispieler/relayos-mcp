@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import {
   CheckpointResolutionError,
@@ -49,7 +50,7 @@ function usage(): string {
 }
 
 function checkpointUsage(): string {
-  return "usage: relayos checkpoint <create|list|show> [args...]\n";
+  return "usage: relayos checkpoint <create|list|show|restore> [args...]\n";
 }
 
 function isLaunchResolutionError(err: unknown): err is LaunchResolutionError {
@@ -297,11 +298,101 @@ async function runCheckpointShow(
   }
 }
 
+function parseCheckpointRestoreArgs(
+  rest: string[],
+): { selector: string | undefined; dryRun: boolean } | null {
+  let selector: string | undefined;
+  let dryRun = false;
+  for (const arg of rest) {
+    if (arg === "--dry-run") {
+      dryRun = true;
+    } else if (!selector && !arg.startsWith("--")) {
+      selector = arg;
+    } else {
+      return null;
+    }
+  }
+  return { selector, dryRun };
+}
+
+function formatCheckpointRestoreDryRun(c: Checkpoint): string {
+  const sep = "─".repeat(44);
+  const diffFileExists = existsSync(c.files.diff_path);
+  const diffNote =
+    c.counts.diff_bytes > 0
+      ? `${c.counts.diff_bytes.toLocaleString()} bytes — patch available`
+      : "0 bytes — no diff captured (tree was clean or not a git repo)";
+  const diffTruncatedNote = c.counts.diff_truncated ? " [truncated]" : "";
+  const untrackedNote =
+    c.counts.untracked_lines > 0
+      ? `${c.counts.untracked_lines} file(s) captured`
+      : "none captured";
+
+  const lines = [
+    "CHECKPOINT RESTORE DRY-RUN",
+    sep,
+    `id:          ${c.id}`,
+    `created_at:  ${c.created_at}`,
+    `cwd:         ${c.cwd}`,
+    `branch:      ${c.git.branch ?? "-"}`,
+    `head:        ${c.git.head ?? "-"}`,
+    `message:     ${c.message ?? "-"}`,
+    "",
+    "CAPTURED STATE",
+    sep,
+    `  status:    ${c.counts.status_lines} line(s)`,
+    `  diff:      ${diffNote}${diffTruncatedNote}`,
+    `  untracked: ${untrackedNote}`,
+    `  diff file: ${diffFileExists ? c.files.diff_path : "(not found on disk)"}`,
+    "",
+    "WARNING: THIS IS A DRY-RUN — NO FILES HAVE BEEN MODIFIED",
+    sep,
+    "  --apply is not yet implemented; restore is plan-only.",
+    "  To inspect the captured diff:",
+    `    cat ${c.files.diff_path} | less`,
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+async function runCheckpointRestore(
+  rest: string[],
+  io: CliIO,
+): Promise<number> {
+  const parsed = parseCheckpointRestoreArgs(rest);
+  if (!parsed) {
+    io.stderr.write("usage: relayos checkpoint restore <id|latest|N> --dry-run\n");
+    return 1;
+  }
+  if (!parsed.dryRun) {
+    io.stderr.write(
+      "relayos checkpoint restore: --dry-run is required; --apply is not yet implemented.\n" +
+        "Run with --dry-run to preview the rollback plan without modifying any files.\n",
+    );
+    return 1;
+  }
+  const layout = resolveStorageLayout();
+  await ensureStorage(layout);
+  try {
+    const checkpoint = await resolveCheckpoint(layout, parsed.selector);
+    io.stdout.write(formatCheckpointRestoreDryRun(checkpoint));
+    return 0;
+  } catch (err) {
+    const message = isCheckpointResolutionError(err)
+      ? err.message
+      : err instanceof Error
+        ? err.message
+        : String(err);
+    io.stderr.write(`relayos checkpoint: ${message}\n`);
+    return 1;
+  }
+}
+
 async function runCheckpoint(args: string[], io: CliIO): Promise<number> {
   const [sub, ...rest] = args;
   if (sub === "create") return runCheckpointCreate(rest, io);
   if (sub === "list") return runCheckpointList(rest, io);
   if (sub === "show") return runCheckpointShow(rest, io);
+  if (sub === "restore") return runCheckpointRestore(rest, io);
   io.stderr.write(checkpointUsage());
   return 1;
 }

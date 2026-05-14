@@ -8,12 +8,14 @@ inspect snapshots later. Restore is intentionally **not** implemented in
 this release — only its safety design is documented (see below).
 
 ```bash
-relayos checkpoint create                   # snapshot the current tree
+relayos checkpoint create                              # snapshot the current tree
 relayos checkpoint create --message "pre-codex review"
-relayos checkpoint list                     # newest-first table
-relayos checkpoint show latest              # metadata for the newest
-relayos checkpoint show c_01HR…             # by id
-relayos checkpoint show 2                   # by 1-based index
+relayos checkpoint list                                # newest-first table
+relayos checkpoint show latest                         # metadata for the newest
+relayos checkpoint show c_01HR…                        # by id
+relayos checkpoint show 2                              # by 1-based index
+relayos checkpoint restore latest --dry-run            # rollback plan, no mutation
+relayos checkpoint restore c_01HR… --dry-run
 ```
 
 Checkpoint creation is **read-only against the working tree**: no
@@ -217,35 +219,59 @@ megabytes. The hint shows you the path to `cat`/`less` it yourself.
 | `1`       | No checkpoint with that id               | `relayos checkpoint: checkpoint <id> was not found`             |
 | `1`       | `N` is past the end of the list          | `relayos checkpoint: checkpoint selection N is out of range; …` |
 | `0`       | `list` called with empty storage         | note on stderr (`relayos checkpoint: no checkpoints found`) — not an error |
-| `1`       | Unknown subcommand or flag               | `usage: relayos checkpoint <create|list|show> [args...]`        |
+| `1`       | `restore` called without `--dry-run`     | `relayos checkpoint restore: --dry-run is required; …`          |
+| `1`       | Unknown subcommand or flag               | `usage: relayos checkpoint <create|list|show|restore> [args…]`  |
 
 ---
 
-## Designed restore semantics (not implemented in this release)
+### `checkpoint restore <id|latest|N> --dry-run`
 
-`relayos checkpoint restore <id>` is reserved as a future command. The
-shape is documented now so the on-disk format is forward-compatible and
-so it is clear what restore will and will not do when it ships.
+Reads an existing checkpoint and prints a rollback plan. **Does not
+modify the working tree.** No `git apply`, no file overwrites, no
+deletes — pure read-only inspection of what was captured.
 
-**Restore will be dry-run by default.** With no flags, `restore` will
-print exactly which files would change and which untracked files would
-be removed, and exit `0` without touching the working tree. That output
-is the same kind of artifact as the original capture: a deterministic,
-inspectable preview.
+```
+CHECKPOINT RESTORE DRY-RUN
+────────────────────────────────────────────
+id:          c_01HR…
+created_at:  2026-05-14T10:14:22Z
+cwd:         /Users/you/your-repo
+branch:      main
+head:        dc80449
+message:     pre-codex review
 
-**Explicit flags will be required to mutate.** Two separate gates:
+CAPTURED STATE
+────────────────────────────────────────────
+  status:    7 line(s)
+  diff:      12,834 bytes — patch available
+  untracked: 2 file(s) captured
+  diff file: /Users/.../.claude/handoff/checkpoints/c_01HR….diff
 
-- `--apply` — actually mutate the working tree. Without it, restore is
-  print-only.
-- `--allow-dirty` — required if the current working tree has
-  uncommitted changes that conflict with the restore. Without it,
-  restore refuses and exits non-zero, so you do not accidentally
-  overwrite in-progress work.
+WARNING: THIS IS A DRY-RUN — NO FILES HAVE BEEN MODIFIED
+────────────────────────────────────────────
+  --apply is not yet implemented; restore is plan-only.
+  To inspect the captured diff:
+    cat /Users/.../.claude/handoff/checkpoints/c_01HR….diff | less
+```
 
-Restore is being deferred to a follow-up release on purpose: this
-release is scoped entirely to capture and record. The blast radius of
-"we wrote bad files to your repo" is exactly zero while restore is
-absent.
+`--dry-run` is **required**. Running `relayos checkpoint restore
+<selector>` without it exits `1` with a clear message explaining that
+`--apply` is not yet implemented. This gate ensures restore is never
+accidentally mutating.
+
+**`--apply` is not implemented in this release.** The flag is reserved;
+when it ships it will actually apply the captured diff to the working
+tree. Until then, the dry-run plan is the full output — use it to
+review what the restore would do, then apply manually if appropriate.
+
+Exit codes:
+
+| Code | Condition |
+|---|---|
+| `0` | Dry-run plan printed successfully. |
+| `1` | `--dry-run` flag missing (refusal message on stderr). |
+| `1` | Unknown flag or bad argument. |
+| `1` | Selector resolves to no checkpoint (same error shape as `show`). |
 
 ---
 
