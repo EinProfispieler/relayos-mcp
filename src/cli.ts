@@ -41,7 +41,7 @@ import type { Envelope } from "./schema.js";
 import { ensureStorage, resolveStorageLayout } from "./storage.js";
 
 interface CliIO {
-  stdout: { write: (chunk: string) => unknown };
+  stdout: { write: (chunk: string) => unknown; isTTY?: boolean };
   stderr: { write: (chunk: string) => unknown };
 }
 
@@ -53,25 +53,62 @@ function checkpointUsage(): string {
   return "usage: relayos checkpoint <create|list|show|restore> [args...]\n";
 }
 
-function formatRelayOSBanner(): string {
-  return [
-    " ____  _____ _        _ __   __ ___  ____  ",
-    "|  _ \\| ____| |      / \\\\ \\ / // _ \\/ ___| ",
-    "| |_) |  _| | |     / _ \\\\ V /| | | \\___ \\ ",
-    "|  _ <| |___| |___ / ___ \\| | | |_| |___) |",
-    "|_| \\_\\_____|_____/_/   \\_\\_|  \\___/|____/ ",
-    "",
-    "Local-first safety, audit, and handoff layer",
-    "",
-    "  launch:     relayos launch latest",
-    "  policy:     relayos policy latest",
-    "  checkpoint: relayos checkpoint create",
-    "  diff-risk:  relayos diff-risk",
-    "  report:     relayos report",
-    "  overseer:   relayos overseer brief",
-    "",
-    "Optional shell aliases are user-managed; see docs/SHELL_ALIASES.md.",
-  ].join("\n");
+const RELAYOS_LOGO_LINES = [
+  "██████╗ ███████╗██╗      █████╗ ██╗   ██╗ ██████╗ ███████╗",
+  "██╔══██╗██╔════╝██║     ██╔══██╗╚██╗ ██╔╝██╔═══██╗██╔════╝",
+  "██████╔╝█████╗  ██║     ███████║ ╚████╔╝ ██║   ██║███████╗",
+  "██╔══██╗██╔══╝  ██║     ██╔══██║  ╚██╔╝  ██║   ██║╚════██║",
+  "██║  ██║███████╗███████╗██║  ██║   ██║   ╚██████╔╝███████║",
+  "╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝   ╚═╝    ╚═════╝ ╚══════╝",
+] as const;
+
+const RELAYOS_TAGLINE = "Local-first safety, audit, and handoff layer";
+
+const RELAYOS_COMMANDS = [
+  ["launch:", "relayos launch latest"],
+  ["policy:", "relayos policy latest"],
+  ["checkpoint:", "relayos checkpoint create"],
+  ["diff-risk:", "relayos diff-risk"],
+  ["report:", "relayos report"],
+  ["overseer:", "relayos overseer brief"],
+] as const;
+
+function displayWidth(text: string): number {
+  return Array.from(text).length;
+}
+
+function centerText(text: string, width: number): string {
+  const padding = Math.max(0, Math.floor((width - displayWidth(text)) / 2));
+  return `${" ".repeat(padding)}${text}`;
+}
+
+function colorize(enabled: boolean, code: string, text: string): string {
+  return enabled ? `\u001B[${code}m${text}\u001B[0m` : text;
+}
+
+function shouldColorizeBanner(io: CliIO): boolean {
+  return Boolean(io.stdout.isTTY) && !process.env.NO_COLOR && !process.env.CI;
+}
+
+function formatRelayOSBanner(io: CliIO): string {
+  const color = shouldColorizeBanner(io);
+  const logoWidth = RELAYOS_LOGO_LINES.reduce(
+    (max, line) => Math.max(max, displayWidth(line)),
+    0,
+  );
+
+  const lines: string[] = [];
+  const logoCodes = ["94", "96", "94", "96", "94", "96"];
+  for (let i = 0; i < RELAYOS_LOGO_LINES.length; i++) {
+    lines.push(colorize(color, logoCodes[i]!, RELAYOS_LOGO_LINES[i]!));
+  }
+  lines.push("");
+  lines.push(colorize(color, "1;97", centerText(RELAYOS_TAGLINE, logoWidth)));
+  lines.push("");
+  for (const [name, value] of RELAYOS_COMMANDS) {
+    lines.push(`${colorize(color, "1;36", name.padEnd(11, " "))} ${value}`);
+  }
+  return lines.join("\n");
 }
 
 async function runBanner(args: string[], io: CliIO): Promise<number> {
@@ -79,7 +116,7 @@ async function runBanner(args: string[], io: CliIO): Promise<number> {
     io.stderr.write("usage: relayos banner\n");
     return 1;
   }
-  io.stdout.write(`${formatRelayOSBanner()}\n`);
+  io.stdout.write(`${formatRelayOSBanner(io)}\n`);
   return 0;
 }
 
@@ -832,6 +869,8 @@ export async function runCli(
   io: CliIO = { stdout: process.stdout, stderr: process.stderr },
 ): Promise<number> {
   const [command, ...rest] = argv;
+
+  if (command === undefined) return runBanner([], io);
 
   if (command === "--help" || command === "-h") {
     io.stdout.write(usage());
