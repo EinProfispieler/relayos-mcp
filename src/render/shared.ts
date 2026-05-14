@@ -69,6 +69,16 @@ export function buildPromptPrefix(h: RenderableHandoff): string {
     lines.push("");
   }
 
+  lines.push("RelayOS Overseer MCP bootstrap (when RelayOS MCP tools are available):");
+  lines.push("  1) read_overseer_bootstrap_prompt");
+  lines.push("  2) read_overseer_handshake");
+  lines.push("  3) read_overseer_context_pack");
+  lines.push("  4) read_overseer_recent");
+  lines.push(
+    "Use the returned session contract/context pack as execution context. Do not edit files before execution unless user-approved scoped work is explicitly authorized by this handoff.",
+  );
+  lines.push("");
+
   lines.push("Expected output:");
   if (h.expected_output.length === 1) {
     lines.push(h.expected_output[0]!);

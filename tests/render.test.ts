@@ -43,6 +43,18 @@ describe("renderCodexTarget", () => {
     expect(i).toBeGreaterThan(-1);
     expect(r.suggested_argv[i + 1]).toBe("/tmp/work");
   });
+
+  it("includes RelayOS overseer MCP bootstrap reminder in prompt", () => {
+    const input = HandoffInput.parse(sampleInput({ target_agent: "codex" }));
+    const r = renderCodexTarget(input);
+    expect(r.prompt).toContain("RelayOS Overseer MCP bootstrap");
+    expect(r.prompt).toContain("read_overseer_bootstrap_prompt");
+    expect(r.prompt).toContain("read_overseer_handshake");
+    expect(r.prompt).toContain("read_overseer_context_pack");
+    expect(r.prompt).toContain("read_overseer_recent");
+    expect(r.prompt).toContain("before execution");
+    expect(r.prompt).toContain("Do not edit files");
+  });
 });
 
 describe("renderClaudeTarget", () => {
@@ -78,6 +90,20 @@ describe("renderClaudeTarget", () => {
     );
     const r = renderClaudeTarget(input);
     expect(r.advisory_notes.join(" ")).toMatch(/no native effort flag/);
+  });
+
+  it("includes RelayOS overseer MCP bootstrap reminder in prompt", () => {
+    const input = HandoffInput.parse(
+      sampleInput({ target_agent: "claude", model: "claude-opus-4-7" }),
+    );
+    const r = renderClaudeTarget(input);
+    expect(r.prompt).toContain("RelayOS Overseer MCP bootstrap");
+    expect(r.prompt).toContain("read_overseer_bootstrap_prompt");
+    expect(r.prompt).toContain("read_overseer_handshake");
+    expect(r.prompt).toContain("read_overseer_context_pack");
+    expect(r.prompt).toContain("read_overseer_recent");
+    expect(r.prompt).toContain("before execution");
+    expect(r.prompt).toContain("Do not edit files");
   });
 });
 
