@@ -356,6 +356,7 @@ Production runtime state — coordination notes, sub-run outputs, generated repo
 
 - [`docs/OVERSEER_WORKFLOW.md`](OVERSEER_WORKFLOW.md) — Overseer role, serial vs parallel mode, model selection, safety rules, and source/runtime separation.
 - [`docs/OVERSEER_RUNTIME_PLAN.md`](OVERSEER_RUNTIME_PLAN.md) — staged migration plan for moving to a separate production runtime workspace.
+- [`docs/OVERSEER_HIERARCHY.md`](OVERSEER_HIERARCHY.md) — future multi-level overseer design direction (not current implementation).
 - [`docs/CHECKPOINTS.md`](CHECKPOINTS.md) — captures full git state before risky handoffs.
 - [`docs/DIFF_RISK.md`](DIFF_RISK.md) — classifies the working tree before `git commit`.
 - [`docs/LAUNCH.md`](LAUNCH.md) — prints the `codex exec` command for the newest open handoff.
