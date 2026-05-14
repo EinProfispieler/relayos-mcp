@@ -1,8 +1,8 @@
 # RelayOS
 
-A RhythmLag project.
 
 <p align="center">
+A RhythmLag project.    <br>
   <img src="docs/assets/relayos-social-preview.png" width="720" alt="RelayOS by RhythmLag" />
 </p>
 
