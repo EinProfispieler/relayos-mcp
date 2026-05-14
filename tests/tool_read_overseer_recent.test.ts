@@ -75,6 +75,25 @@ describe("read_overseer_recent", () => {
     ]);
   });
 
+  it("returns empty notes when workspace exists but timeline.jsonl is missing", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    const dir = join(cwd, ".relayos", "overseer");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "NEXT_ACTION.md"), "review tests\n", "utf8");
+    writeFileSync(join(dir, "CURRENT_STATE.md"), "As of 2026-05-14: stable.\n", "utf8");
+
+    const result = await readOverseerRecent({});
+
+    expect(Array.isArray(result.recent_notes)).toBe(true);
+    expect(result.recent_notes).toEqual([]);
+    expect(result.notes_count).toBe(0);
+    expect(result.limit).toBe(5);
+    expect(typeof result.workspace_path).toBe("string");
+    expect(result.next_action).toBe("review tests");
+    expect(result.current_state).toBe("As of 2026-05-14: stable.");
+  });
+
   it("reads compact next_action and current_state values", async () => {
     const cwd = tempDir();
     chdir(cwd);
