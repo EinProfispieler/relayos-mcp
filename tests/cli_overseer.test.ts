@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -455,6 +455,28 @@ describe("relayos overseer note", () => {
 
     expect(code).toBe(1);
     expect(cap.stderr).toContain("usage: relayos overseer note");
+  });
+
+  it("appends JSONL entries with ts/text shape and preserves order", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+
+    await runCli(["overseer", "note", "first note"], captureIO().io);
+    await runCli(["overseer", "note", "second note"], captureIO().io);
+
+    const timelinePath = join(cwd, ".relayos", "overseer", "timeline.jsonl");
+    const lines = readFileSync(timelinePath, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { ts: string; text: string });
+
+    expect(lines).toHaveLength(2);
+    expect(Object.keys(lines[0] ?? {}).sort()).toEqual(["text", "ts"]);
+    expect(Object.keys(lines[1] ?? {}).sort()).toEqual(["text", "ts"]);
+    expect(typeof lines[0]?.ts).toBe("string");
+    expect(lines[0]?.ts.length).toBeGreaterThan(0);
+    expect(lines[0]?.text).toBe("first note");
+    expect(lines[1]?.text).toBe("second note");
   });
 });
 

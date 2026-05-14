@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { runCli } from "../src/cli.js";
 import { writeOverseerNote } from "../src/tools/write_overseer_note.js";
 
 const cleanups: Array<() => void> = [];
@@ -54,8 +55,33 @@ describe("write_overseer_note", () => {
     expect(lines).toHaveLength(2);
     expect(lines[0]?.text).toBe("first note");
     expect(lines[1]?.text).toBe("second note");
+    expect(Object.keys(lines[0] ?? {}).sort()).toEqual(["text", "ts"]);
+    expect(Object.keys(lines[1] ?? {}).sort()).toEqual(["text", "ts"]);
     expect(typeof lines[0]?.ts).toBe("string");
     expect(lines[0]?.ts.length).toBeGreaterThan(0);
+  });
+
+  it("matches CLI timeline entry field names and append semantics", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+
+    await runCli(
+      ["overseer", "note", "from cli"],
+      { stdout: { write: () => {} }, stderr: { write: () => {} } },
+    );
+    await writeOverseerNote({ text: "from mcp" });
+
+    const timelinePath = join(cwd, ".relayos", "overseer", "timeline.jsonl");
+    const lines = readFileSync(timelinePath, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+    expect(lines).toHaveLength(2);
+    expect(Object.keys(lines[0] ?? {}).sort()).toEqual(["text", "ts"]);
+    expect(Object.keys(lines[1] ?? {}).sort()).toEqual(["text", "ts"]);
+    expect(lines[0]?.text).toBe("from cli");
+    expect(lines[1]?.text).toBe("from mcp");
   });
 
   it("rejects missing text", async () => {
