@@ -23,9 +23,9 @@ export interface PolicyDecision {
   findings: PolicyFinding[];
 }
 
-const DESTRUCTIVE_HARD: Array<{ pattern: RegExp; label: string }> = [
+export const DESTRUCTIVE_HARD: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /\brm\s+-rf\b/i, label: "rm -rf" },
-  { pattern: /\bgit\s+push\s+(?:--force|-f)\b/i, label: "git push --force" },
+  { pattern: /\bgit\s+push\b[^\n]*?\s(?:--force\b|-f\b)/i, label: "git push --force" },
   { pattern: /--no-verify\b/i, label: "--no-verify" },
   { pattern: /\bgit\s+reset\s+--hard\b/i, label: "git reset --hard" },
   { pattern: /\bdrop\s+table\b/i, label: "drop table" },
@@ -40,11 +40,11 @@ const DESTRUCTIVE_SOFT_KEYWORDS = ["delete", "destroy", "wipe", "purge"] as cons
 const SOFT_PATH_HINT =
   /\b(?:table|database|tables|databases|directory|folder|file|files|index|indexes|repo|repository|branch|branches)\b|\/[A-Za-z._-]/;
 
-const RELEASE_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+export const RELEASE_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /\bnpm\s+publish\b/i, label: "npm publish" },
   { pattern: /\bgh\s+release\b/i, label: "gh release" },
   { pattern: /\bgit\s+tag\b/i, label: "git tag" },
-  { pattern: /\bgit\s+push\s+--tags\b/i, label: "git push --tags" },
+  { pattern: /\bgit\s+push\b[^\n]*?\s--tags\b/i, label: "git push --tags" },
   { pattern: /\bcargo\s+publish\b/i, label: "cargo publish" },
   { pattern: /\btwine\s+upload\b/i, label: "twine upload" },
   { pattern: /\bpypi\b/i, label: "pypi" },
@@ -67,7 +67,7 @@ const NETWORK_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /\bbrew\s+install\b/i, label: "brew install" },
 ];
 
-const SECRET_PATH_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+export const SECRET_PATH_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /(?:^|[\s,;"'`(\/])\.env(?:\.[A-Za-z0-9_-]+)?(?=[\s,;"'`)\/]|$)/i, label: ".env" },
   { pattern: /(?:^|[\s,;"'`(\/])secrets\/[A-Za-z0-9_*.\/-]*/i, label: "secrets/" },
   { pattern: /\bid_rsa\b/i, label: "id_rsa" },

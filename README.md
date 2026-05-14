@@ -95,10 +95,11 @@ Start here if you are new to the project:
 - [**docs/ROOKIE_MODE.md**](docs/ROOKIE_MODE.md) — the supported chat-only workflow, including the risk gate.
 - [**docs/LAUNCH.md**](docs/LAUNCH.md) — the `relayos launch` CLI helper for printing the exact command to run the target.
 - [**docs/CHECKPOINTS.md**](docs/CHECKPOINTS.md) — `relayos checkpoint` snapshots HEAD + status + diff + untracked files before risky handoffs.
+- [**docs/DIFF_RISK.md**](docs/DIFF_RISK.md) — `relayos diff-risk` classifies the current working tree before `git commit`.
 
 ## What you get
 
-Fourteen MCP tools, plus a small CLI helper:
+Fourteen MCP tools, plus CLI helpers:
 
 - **Creating handoffs.** `create_quick_handoff`,
   `create_handoff_from_template`, `create_handoff` — from one-shot to fully
@@ -115,7 +116,10 @@ Fourteen MCP tools, plus a small CLI helper:
   newest open handoff (or a specific id). Print-only, never spawns.
   See [`docs/LAUNCH.md`](docs/LAUNCH.md). `relayos checkpoint` — captures
   HEAD + status + diff + untracked files before a risky handoff. See
-  [`docs/CHECKPOINTS.md`](docs/CHECKPOINTS.md).
+  [`docs/CHECKPOINTS.md`](docs/CHECKPOINTS.md). `relayos diff-risk` —
+  classifies the current working tree (status + diff + untracked) as
+  `allow`/`warn`/`block` before `git commit`. See
+  [`docs/DIFF_RISK.md`](docs/DIFF_RISK.md).
 
 Full table with descriptions: see [Tools](#tools) below.
 
@@ -210,6 +214,7 @@ Override storage path via the `HANDOFF_DIR` env var (default `~/.claude/handoff/
 | `inspect_config`       | Show the effective RelayOS config (source, storage dir, templates, warnings). |
 | `doctor`               | Run health checks; never throws on broken state. |
 | `relayos checkpoint` *(CLI)* | Snapshot HEAD + status + diff + untracked files before risky handoffs. See [`docs/CHECKPOINTS.md`](docs/CHECKPOINTS.md). |
+| `relayos diff-risk` *(CLI)*  | Classify the current working tree as `allow`/`warn`/`block` before `git commit`. See [`docs/DIFF_RISK.md`](docs/DIFF_RISK.md). |
 
 ### Diagnostics
 

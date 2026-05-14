@@ -134,6 +134,9 @@ issue rather than reaching into the CLI.
 
 - [`docs/LAUNCH.md`](./LAUNCH.md) — selectors, exit codes, and the
   print-only rationale that the policy gate extends.
+- [`docs/DIFF_RISK.md`](./DIFF_RISK.md) — the working-tree-level
+  sibling: same severity model, but applied to `git diff HEAD`
+  instead of an envelope.
 - [`docs/ROOKIE_MODE_RISK_POLICY.md`](./ROOKIE_MODE_RISK_POLICY.md) — the
   upstream 4-tier classification Claude applies before calling
   `create_quick_handoff`.

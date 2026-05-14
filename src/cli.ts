@@ -11,6 +11,13 @@ import {
   LaunchResolutionError,
   resolveHandoff,
 } from "./launch.js";
+import { evaluateDiffRisk, formatDiffRisk } from "./diff_risk.js";
+import {
+  gitDiff,
+  gitListUntracked,
+  gitStatusShort,
+  isGitRepo,
+} from "./git.js";
 import { evaluatePolicy, formatBannerLines } from "./policy.js";
 import type { Envelope } from "./schema.js";
 import { ensureStorage, resolveStorageLayout } from "./storage.js";
@@ -21,7 +28,7 @@ interface CliIO {
 }
 
 function usage(): string {
-  return "usage: relayos [launch|policy|checkpoint] [--force] [args...]\n";
+  return "usage: relayos [launch|policy|checkpoint|diff-risk] [--force] [args...]\n";
 }
 
 function checkpointUsage(): string {
@@ -282,6 +289,43 @@ async function runCheckpoint(args: string[], io: CliIO): Promise<number> {
   return 1;
 }
 
+async function runDiffRisk(args: string[], io: CliIO): Promise<number> {
+  if (args.length > 0) {
+    io.stderr.write("usage: relayos diff-risk\n");
+    return 1;
+  }
+  const cwd = process.cwd();
+  const repo = await isGitRepo(cwd);
+  if (!repo) {
+    io.stderr.write(
+      `# note: ${cwd} is not inside a git working tree; diff-risk is a no-op\n`,
+    );
+    const decision = evaluateDiffRisk({
+      statusLines: [],
+      diffText: "",
+      untracked: [],
+    });
+    io.stdout.write(formatDiffRisk(decision));
+    return 0;
+  }
+  const [statusRaw, diff, untracked] = await Promise.all([
+    gitStatusShort(cwd),
+    gitDiff(cwd),
+    gitListUntracked(cwd),
+  ]);
+  const statusLines = statusRaw
+    .split("\n")
+    .map((l) => l.replace(/\r$/, ""))
+    .filter((l) => l.length > 0);
+  const decision = evaluateDiffRisk({
+    statusLines,
+    diffText: diff.text,
+    untracked,
+  });
+  io.stdout.write(formatDiffRisk(decision));
+  return 0;
+}
+
 export async function runCli(
   argv = process.argv.slice(2),
   io: CliIO = { stdout: process.stdout, stderr: process.stderr },
@@ -296,6 +340,7 @@ export async function runCli(
   if (command === "launch") return runLaunch(rest, io);
   if (command === "policy") return runPolicy(rest, io);
   if (command === "checkpoint") return runCheckpoint(rest, io);
+  if (command === "diff-risk") return runDiffRisk(rest, io);
 
   io.stderr.write(usage());
   return 1;

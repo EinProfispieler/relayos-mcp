@@ -270,5 +270,6 @@ absent.
 
 - [`docs/LAUNCH.md`](./LAUNCH.md) — print the launch command for a queued handoff.
 - [`docs/POLICY.md`](./POLICY.md) — the policy gate that runs on every `relayos launch`.
+- [`docs/DIFF_RISK.md`](./DIFF_RISK.md) — classify the working tree before `git commit`; complements `checkpoint`, which records it.
 - [`docs/ROOKIE_MODE.md`](./ROOKIE_MODE.md) — the supported chat-only handoff workflow.
 - [`README.md`](../README.md) — install, MCP wiring, full tools table.
