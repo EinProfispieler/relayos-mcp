@@ -75,6 +75,7 @@ Print a compact evidence snapshot in four sections: latest handoff, latest check
 Local coordination workspace stored under `.relayos/overseer/` (gitignored). Append timestamped notes, set and read a current next action. Survives terminal closes and context resets. See [`docs/OVERSEER.md`](docs/OVERSEER.md).
 Use `relayos overseer recent` for a compact current overseer summary.
 Use `relayos overseer recent --json` for automation-friendly JSON output.
+Use `relayos overseer runtime-check` as a read-only alias for `relayos overseer activate-runtime --dry-run`.
 
 ## Safety model
 
