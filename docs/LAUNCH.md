@@ -106,7 +106,7 @@ behavior as `auto_spawn` and as the source agent's printed
 | `1`       | No open handoffs                             | `relayos launch: no open handoffs found`                       |
 | `1`       | `N` is past the end of the open list         | `relayos launch: handoff selection N is out of range; …`       |
 | `1`       | `h_…` id does not exist                      | `relayos launch: handoff <id> was not found`                   |
-| `1`       | Unknown subcommand or bad flag combo         | `usage: relayos [launch|policy|checkpoint|diff-risk] [--force] [args...]` |
+| `1`       | Unknown subcommand or bad flag combo         | `usage: relayos [banner|launch|policy|checkpoint|diff-risk|report|overseer] [--force] [args...]` |
 | `2`       | Policy evaluator returned `block` (no `--force`) | `# RelayOS policy: BLOCK …` lines on stderr, no stdout       |
 
 The CLI never deletes, mutates, or writes anything. The worst it can do
@@ -170,6 +170,7 @@ That keeps the decision to actually run in your shell, not in RelayOS.
 
 ## See also
 
+- [`docs/SHELL_ALIASES.md`](./SHELL_ALIASES.md) — optional user-managed aliases for RelayOS commands.
 - [`docs/POLICY.md`](./POLICY.md) — the rule list and severity model used by the launch policy gate.
 - [`docs/CHECKPOINTS.md`](./CHECKPOINTS.md) — snapshot the working tree before kicking off a risky handoff.
 - [`docs/DIFF_RISK.md`](./DIFF_RISK.md) — classify the working tree before `git commit` using the same severity model.

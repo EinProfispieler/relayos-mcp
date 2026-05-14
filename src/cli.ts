@@ -46,11 +46,34 @@ interface CliIO {
 }
 
 function usage(): string {
-  return "usage: relayos [launch|policy|checkpoint|diff-risk|report|overseer] [--force] [args...]\n";
+  return "usage: relayos [banner|launch|policy|checkpoint|diff-risk|report|overseer] [--force] [args...]\n";
 }
 
 function checkpointUsage(): string {
   return "usage: relayos checkpoint <create|list|show|restore> [args...]\n";
+}
+
+function formatRelayOSBanner(): string {
+  return [
+    "RELAYOS",
+    "  launch:     relayos launch latest",
+    "  policy:     relayos policy latest",
+    "  checkpoint: relayos checkpoint create",
+    "  diff-risk:  relayos diff-risk",
+    "  report:     relayos report",
+    "  overseer:   relayos overseer brief",
+    "",
+    "Optional shell aliases are user-managed; see docs/SHELL_ALIASES.md.",
+  ].join("\n");
+}
+
+async function runBanner(args: string[], io: CliIO): Promise<number> {
+  if (args.length > 0) {
+    io.stderr.write("usage: relayos banner\n");
+    return 1;
+  }
+  io.stdout.write(`${formatRelayOSBanner()}\n`);
+  return 0;
 }
 
 function isLaunchResolutionError(err: unknown): err is LaunchResolutionError {
@@ -808,6 +831,7 @@ export async function runCli(
     return 0;
   }
 
+  if (command === "banner") return runBanner(rest, io);
   if (command === "launch") return runLaunch(rest, io);
   if (command === "policy") return runPolicy(rest, io);
   if (command === "checkpoint") return runCheckpoint(rest, io);

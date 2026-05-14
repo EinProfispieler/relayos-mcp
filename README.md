@@ -139,6 +139,9 @@ See [MCP tools](#mcp-tools) for the full table.
 From any terminal in your project:
 
 ```bash
+# Print a compact RelayOS command banner
+relayos banner
+
 # Print the launch command for the newest open handoff
 relayos launch latest
 
@@ -173,6 +176,10 @@ relayos overseer progress "tests passing, moving to review"
 relayos overseer brief
 ```
 
+Shell aliases are optional and user-managed. RelayOS does not modify
+Claude/Codex binaries and does not install aliases automatically; see
+[`docs/SHELL_ALIASES.md`](docs/SHELL_ALIASES.md) for copy-paste examples.
+
 ## Rookie Mode
 
 The quickest path to a working multi-agent setup. Drop two files in place:
@@ -191,6 +198,7 @@ Then talk to Claude normally. Claude files the handoff; switch to a Codex termin
 - [**docs/CHECKPOINTS.md**](docs/CHECKPOINTS.md) — `relayos checkpoint` reference
 - [**docs/DIFF_RISK.md**](docs/DIFF_RISK.md) — `relayos diff-risk` reference
 - [**docs/OVERSEER.md**](docs/OVERSEER.md) — `relayos overseer` reference
+- [**docs/SHELL_ALIASES.md**](docs/SHELL_ALIASES.md) — optional user-managed shell aliases
 - [**docs/REFERENCES.md**](docs/REFERENCES.md) — RelayOS vs OpenSpec and Superpowers; future interoperability ideas
 - [**docs/MODEL_STRATEGY.md**](docs/MODEL_STRATEGY.md) — role templates, model/provider selection, and the future model-role matrix
 
@@ -225,6 +233,7 @@ Available from any terminal after `npm link` (or via `./bin/relayos`).
 
 | Command | Purpose |
 |---|---|
+| `relayos banner` | Print a compact local command banner for shell startup or manual reminders. |
 | `relayos launch [id\|latest]` | Print the launch command for the newest open handoff. See [docs/LAUNCH.md](docs/LAUNCH.md). |
 | `relayos policy [id\|latest]` | Evaluate a handoff envelope as allow/warn/block. |
 | `relayos checkpoint <create\|list\|show\|restore>` | Snapshot HEAD + status + diff before risky handoffs. See [docs/CHECKPOINTS.md](docs/CHECKPOINTS.md). |
