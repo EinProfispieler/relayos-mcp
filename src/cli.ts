@@ -691,6 +691,23 @@ interface OverseerActivateRuntimeArgs {
   source: string;
 }
 
+const OVERSEER_CONTEXT_CANONICAL_FILES = [
+  "PROJECT_BRIEF.md",
+  "CURRENT_STATE.md",
+  "OPERATING_POLICY.md",
+  "NEXT_ACTION.md",
+  "FORBIDDEN_ACTIONS.md",
+  "MODEL_POLICY.md",
+  "timeline.jsonl",
+] as const;
+
+async function readGitIgnoredStatus(path: string): Promise<boolean | null> {
+  const cwd = process.cwd();
+  if (!(await isGitRepo(cwd))) return null;
+  const check = await runGitCommand(cwd, ["check-ignore", "-q", "--", path]);
+  return check.ok;
+}
+
 function parseOverseerActivateRuntimeArgs(
   args: string[],
 ): OverseerActivateRuntimeArgs | null {
@@ -945,6 +962,58 @@ async function runOverseerStatus(args: string[], io: CliIO): Promise<number> {
     }
   }
 
+  io.stdout.write(`${lines.join("\n")}\n`);
+  return 0;
+}
+
+async function runOverseerContext(args: string[], io: CliIO): Promise<number> {
+  const wantsJson = args.length === 1 && args[0] === "--json";
+  if (args.length > 1 || (args.length === 1 && !wantsJson)) {
+    io.stderr.write("usage: relayos overseer context\n");
+    return 1;
+  }
+
+  const cwd = process.cwd();
+  const workspacePath = join(cwd, ".relayos", "overseer");
+  const files = OVERSEER_CONTEXT_CANONICAL_FILES.map((name) => ({
+    name,
+    exists: existsSync(join(workspacePath, name)),
+  }));
+  const missing = files.filter((f) => !f.exists).map((f) => f.name);
+  const ok = missing.length === 0;
+  const gitignored = await readGitIgnoredStatus(".relayos/overseer/");
+
+  if (wantsJson) {
+    io.stdout.write(
+      `${JSON.stringify(
+        {
+          ok,
+          workspace_path: workspacePath,
+          files,
+          missing,
+          gitignored,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return 0;
+  }
+
+  const lines = [
+    "OVERSEER CONTEXT",
+    OVERSEER_SEP,
+    `  workspace: ${workspacePath}`,
+    `  status: ${ok ? "complete" : "incomplete"}`,
+    `  gitignored: ${gitignored === null ? "unknown (not a git repo)" : gitignored ? "yes" : "no"}`,
+    "",
+    "CANONICAL FILES",
+    OVERSEER_SEP,
+    ...files.map((f) => `  ${f.exists ? "[x]" : "[ ]"} ${f.name}`),
+  ];
+  if (missing.length > 0) {
+    lines.push("", "MISSING", OVERSEER_SEP, ...missing.map((m) => `  - ${m}`));
+  }
   io.stdout.write(`${lines.join("\n")}\n`);
   return 0;
 }
@@ -1396,6 +1465,7 @@ async function runOverseerProgress(args: string[], io: CliIO): Promise<number> {
 async function runOverseer(args: string[], io: CliIO): Promise<number> {
   const [sub, ...rest] = args;
   if (sub === "status") return runOverseerStatus(rest, io);
+  if (sub === "context") return runOverseerContext(rest, io);
   if (sub === "recent") return runOverseerRecent(rest, io);
   if (sub === "note") return runOverseerNote(rest, io);
   if (sub === "next") return runOverseerNext(rest, io);
@@ -1411,7 +1481,7 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "branch") return runOverseerBranch(rest, io);
   if (sub === "progress") return runOverseerProgress(rest, io);
   io.stderr.write(
-    "usage: relayos overseer <status|recent|note|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
+    "usage: relayos overseer <status|context|recent|note|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
   );
   return 1;
 }

@@ -6,6 +6,7 @@ A gitignored local coordination workspace. Stores a running notes timeline and a
 
 ```
 relayos overseer status
+relayos overseer context
 relayos overseer recent
 relayos overseer note <text...>
 relayos overseer next [text...]
@@ -27,6 +28,14 @@ Prints the current next action and the five most recent notes. If no state exist
 `--json` prints the same core status data as stable machine-readable JSON.
 
 ```
+
+### `overseer context`
+
+Read-only context availability check for local `.relayos/overseer/` canonical files.
+
+- `relayos overseer context` prints a compact file-availability summary.
+- `relayos overseer context --json` returns `{ ok, workspace_path, files, missing, gitignored }`.
+- Missing files are reported, not treated as fatal.
 OVERSEER STATUS
 ──────────────
 NEXT ACTION

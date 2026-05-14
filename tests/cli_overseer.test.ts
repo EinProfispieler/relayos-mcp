@@ -261,6 +261,83 @@ describe("relayos overseer recent", () => {
   });
 });
 
+describe("relayos overseer context", () => {
+  const REQUIRED_CONTEXT_JSON_FIELDS = [
+    "ok",
+    "workspace_path",
+    "files",
+    "missing",
+    "gitignored",
+  ] as const;
+
+  it("prints compact human-readable context availability", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "context"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("OVERSEER CONTEXT");
+    expect(cap.stdout).toContain("workspace:");
+    expect(cap.stdout).toContain("CANONICAL FILES");
+    expect(cap.stdout).toContain("[ ] PROJECT_BRIEF.md");
+    expect(cap.stdout).toContain("MISSING");
+    expect(cap.stderr).toBe("");
+  });
+
+  it("prints stable JSON context output", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "context", "--json"], cap.io);
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    for (const key of REQUIRED_CONTEXT_JSON_FIELDS) expect(key in data).toBe(true);
+    expect(typeof data.ok).toBe("boolean");
+    expect(typeof data.workspace_path).toBe("string");
+    expect(Array.isArray(data.files)).toBe(true);
+    expect(Array.isArray(data.missing)).toBe(true);
+    expect(
+      data.gitignored === null ||
+        typeof data.gitignored === "boolean",
+    ).toBe(true);
+    expect(cap.stderr).toBe("");
+  });
+
+  it("does not create overseer directories or files", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "context"], cap.io);
+
+    expect(code).toBe(0);
+    expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
+  });
+
+  it("reports gitignored=true from repo root", async () => {
+    chdir(REPO_ROOT);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "context", "--json"], cap.io);
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect(data.gitignored).toBe(true);
+  });
+
+  it("exits 1 with usage on unsupported flag", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "context", "--yaml"], cap.io);
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("usage: relayos overseer context");
+  });
+});
+
 describe("relayos overseer note", () => {
   it("records a note and exits 0", async () => {
     chdir(tempDir());
