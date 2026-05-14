@@ -27,6 +27,7 @@ import { listHandoffs } from "./tools/list_handoffs.js";
 import { readHandoff } from "./tools/read_handoff.js";
 import { readLatestHandoff } from "./tools/read_latest_handoff.js";
 import { readOverseerHandshake } from "./tools/read_overseer_handshake.js";
+import { readOverseerBootstrapPrompt } from "./tools/read_overseer_bootstrap_prompt.js";
 import { readOverseerRecent } from "./tools/read_overseer_recent.js";
 import { writeOverseerNote } from "./tools/write_overseer_note.js";
 import { inspectConfig } from "./tools/inspect_config.js";
@@ -325,6 +326,22 @@ export async function buildServer() {
     },
     async (args) => {
       const result = await readOverseerHandshake(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "read_overseer_bootstrap_prompt",
+    {
+      title: "Read overseer bootstrap prompt",
+      description:
+        "Read-only startup prompt for overseer-bound MCP sessions. Returns a ready-to-use protocol " +
+        "bootstrap instruction block plus recommended first calls (handshake, then recent). " +
+        "No files are created or modified.",
+      inputSchema: {},
+    },
+    async (args) => {
+      const result = await readOverseerBootstrapPrompt(args);
       return jsonResult(result);
     },
   );

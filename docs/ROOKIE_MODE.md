@@ -84,6 +84,7 @@ For overseer-bound sessions, start by calling
 tool for overseer session binding.
 Current overseer MCP surface for this flow:
 
+- `read_overseer_bootstrap_prompt` (optional ready-to-use startup prompt helper)
 - `read_overseer_handshake` (canonical bootstrap)
 - `write_overseer_note` (optional local progress note append)
 - `read_overseer_recent` (optional read-only compact session readback)
@@ -91,6 +92,8 @@ Current overseer MCP surface for this flow:
 - A separate `read_overseer_context` MCP tool is intentionally not
   needed; handshake already includes context completeness and required
   files.
+- Optionally call `read_overseer_bootstrap_prompt` to retrieve a
+  read-only startup prompt and recommended first calls.
 - If `ok` or `context_complete` is false, report missing files and ask
   the user whether to proceed before acting.
 - Treat `must_read`, `next_action_source`, `forbidden_actions`, and
