@@ -145,6 +145,7 @@ Current overseer MCP surface for this flow:
 
 - `read_overseer_handshake` (canonical bootstrap)
 - `write_overseer_note` (optional local progress note append)
+- `read_overseer_recent` (optional read-only compact session readback)
 
 - No separate `read_overseer_context` MCP tool is needed; handshake
   already includes context completeness (`ok`, `context_complete`),
@@ -155,8 +156,10 @@ Current overseer MCP surface for this flow:
   `requires_explicit_user_approval_for` as the session contract.
 - After handshake, use `write_overseer_note` only when you need to
   append a progress note to local gitignored overseer timeline state.
+- After handshake, use `read_overseer_recent` when you need a read-only
+  compact view of current local overseer state and recent notes.
 - RelayOS overseer is not a daemon, autonomous agent, or hard security
-  sandbox; keep the human in control.
+  sandbox, runtime activator, or automatic orchestrator; keep the human in control.
 - Do not perform forbidden actions without explicit user approval.
 
 Minimal session bootstrap prompt:
