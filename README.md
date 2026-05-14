@@ -227,6 +227,7 @@ Available inside any MCP-capable agent session once the server is registered.
 | `list_handoffs` | List envelopes (newest first), filter by source/target/status. |
 | `read_handoff` | Return one envelope + all its audit events. |
 | `read_latest_handoff` | Return the most recent open handoff (filter by `assigned_to`). |
+| `read_overseer_handshake` | Return a read-only overseer session handshake snapshot for MCP clients. |
 | `list_open_handoffs` | List open handoff summaries — no full envelope leak. |
 | `inspect_config` | Show the effective RelayOS config: storage dir, templates, warnings. |
 | `doctor` | Run health checks; never throws on broken state. |

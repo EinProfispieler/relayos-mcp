@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { execFile } from "node:child_process";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -64,6 +65,119 @@ export async function readNextAction(layout: OverseerLayout): Promise<string | n
 
 export function hasOverseerState(layout: OverseerLayout): boolean {
   return existsSync(layout.timelinePath) || existsSync(layout.nextActionPath);
+}
+
+export const OVERSEER_CONTEXT_CANONICAL_FILES = [
+  "PROJECT_BRIEF.md",
+  "CURRENT_STATE.md",
+  "OPERATING_POLICY.md",
+  "NEXT_ACTION.md",
+  "FORBIDDEN_ACTIONS.md",
+  "MODEL_POLICY.md",
+  "timeline.jsonl",
+] as const;
+
+export interface OverseerContextFileStatus {
+  name: string;
+  exists: boolean;
+}
+
+export interface OverseerContextSnapshot {
+  ok: boolean;
+  workspace_path: string;
+  files: OverseerContextFileStatus[];
+  missing: string[];
+  gitignored: boolean | null;
+}
+
+export interface OverseerHandshakeSnapshot {
+  ok: boolean;
+  protocol: "relayos-overseer-session-v1";
+  session_role: "overseer_client";
+  repo_path: string;
+  workspace_path: string;
+  context_complete: boolean;
+  files: OverseerContextFileStatus[];
+  missing: string[];
+  must_read: string[];
+  next_action_source: string;
+  forbidden_actions: string[];
+  requires_explicit_user_approval_for: string[];
+  notes: string[];
+}
+
+async function runGitCommand(
+  cwd: string,
+  args: string[],
+): Promise<{ ok: boolean; stdout: string }> {
+  return new Promise((resolveRun) => {
+    execFile("git", args, { cwd, windowsHide: true }, (error, stdout) => {
+      if (error) {
+        resolveRun({ ok: false, stdout: "" });
+        return;
+      }
+      resolveRun({ ok: true, stdout });
+    });
+  });
+}
+
+async function readGitIgnoredStatus(cwd: string, path: string): Promise<boolean | null> {
+  const isRepo = await runGitCommand(cwd, ["rev-parse", "--is-inside-work-tree"]);
+  if (!isRepo.ok) return null;
+  const check = await runGitCommand(cwd, ["check-ignore", "-q", "--", path]);
+  return check.ok;
+}
+
+export async function readOverseerContextSnapshot(cwd: string): Promise<OverseerContextSnapshot> {
+  const workspacePath = join(cwd, ".relayos", "overseer");
+  const files = OVERSEER_CONTEXT_CANONICAL_FILES.map((name) => ({
+    name,
+    exists: existsSync(join(workspacePath, name)),
+  }));
+  const missing = files.filter((f) => !f.exists).map((f) => f.name);
+  const ok = missing.length === 0;
+  const gitignored = await readGitIgnoredStatus(cwd, ".relayos/overseer/");
+  return {
+    ok,
+    workspace_path: workspacePath,
+    files,
+    missing,
+    gitignored,
+  };
+}
+
+export async function readOverseerHandshakeSnapshot(
+  cwd: string,
+): Promise<OverseerHandshakeSnapshot> {
+  const context = await readOverseerContextSnapshot(cwd);
+  const workspacePath = context.workspace_path;
+  return {
+    ok: context.ok,
+    protocol: "relayos-overseer-session-v1",
+    session_role: "overseer_client",
+    repo_path: cwd,
+    workspace_path: workspacePath,
+    context_complete: context.ok,
+    files: context.files,
+    missing: context.missing,
+    must_read: OVERSEER_CONTEXT_CANONICAL_FILES.map((name) => join(workspacePath, name)),
+    next_action_source: join(workspacePath, "NEXT_ACTION.md"),
+    forbidden_actions: [
+      "No runtime activation/switching or migration.",
+      "No daemon/background agent behavior.",
+      "No parallel mode, queue runner, or sub-run orchestration.",
+      "No storage/envelope/audit format changes.",
+    ],
+    requires_explicit_user_approval_for: [
+      "Tags or releases.",
+      "Force push, amend published commits, or --no-verify.",
+      "Any write-path beyond approved read-only commands.",
+    ],
+    notes: [
+      "Human-supervised local-first overseer protocol, not a daemon or security sandbox.",
+      "Missing context files are reported; this command never creates files.",
+    ],
+  };
 }
 
 export async function readOverseerTextFile(

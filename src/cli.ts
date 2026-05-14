@@ -29,6 +29,8 @@ import {
   appendNote,
   hasOverseerState,
   initContextFiles,
+  readOverseerContextSnapshot,
+  readOverseerHandshakeSnapshot,
   readActiveBrief,
   readBranchProgress,
   readLatestNotes,
@@ -691,23 +693,6 @@ interface OverseerActivateRuntimeArgs {
   source: string;
 }
 
-const OVERSEER_CONTEXT_CANONICAL_FILES = [
-  "PROJECT_BRIEF.md",
-  "CURRENT_STATE.md",
-  "OPERATING_POLICY.md",
-  "NEXT_ACTION.md",
-  "FORBIDDEN_ACTIONS.md",
-  "MODEL_POLICY.md",
-  "timeline.jsonl",
-] as const;
-
-async function readGitIgnoredStatus(path: string): Promise<boolean | null> {
-  const cwd = process.cwd();
-  if (!(await isGitRepo(cwd))) return null;
-  const check = await runGitCommand(cwd, ["check-ignore", "-q", "--", path]);
-  return check.ok;
-}
-
 function parseOverseerActivateRuntimeArgs(
   args: string[],
 ): OverseerActivateRuntimeArgs | null {
@@ -973,25 +958,13 @@ async function runOverseerContext(args: string[], io: CliIO): Promise<number> {
     return 1;
   }
 
-  const cwd = process.cwd();
-  const workspacePath = join(cwd, ".relayos", "overseer");
-  const files = OVERSEER_CONTEXT_CANONICAL_FILES.map((name) => ({
-    name,
-    exists: existsSync(join(workspacePath, name)),
-  }));
-  const missing = files.filter((f) => !f.exists).map((f) => f.name);
-  const ok = missing.length === 0;
-  const gitignored = await readGitIgnoredStatus(".relayos/overseer/");
+  const context = await readOverseerContextSnapshot(process.cwd());
 
   if (wantsJson) {
     io.stdout.write(
       `${JSON.stringify(
         {
-          ok,
-          workspace_path: workspacePath,
-          files,
-          missing,
-          gitignored,
+          ...context,
         },
         null,
         2,
@@ -1003,16 +976,16 @@ async function runOverseerContext(args: string[], io: CliIO): Promise<number> {
   const lines = [
     "OVERSEER CONTEXT",
     OVERSEER_SEP,
-    `  workspace: ${workspacePath}`,
-    `  status: ${ok ? "complete" : "incomplete"}`,
-    `  gitignored: ${gitignored === null ? "unknown (not a git repo)" : gitignored ? "yes" : "no"}`,
+    `  workspace: ${context.workspace_path}`,
+    `  status: ${context.ok ? "complete" : "incomplete"}`,
+    `  gitignored: ${context.gitignored === null ? "unknown (not a git repo)" : context.gitignored ? "yes" : "no"}`,
     "",
     "CANONICAL FILES",
     OVERSEER_SEP,
-    ...files.map((f) => `  ${f.exists ? "[x]" : "[ ]"} ${f.name}`),
+    ...context.files.map((f) => `  ${f.exists ? "[x]" : "[ ]"} ${f.name}`),
   ];
-  if (missing.length > 0) {
-    lines.push("", "MISSING", OVERSEER_SEP, ...missing.map((m) => `  - ${m}`));
+  if (context.missing.length > 0) {
+    lines.push("", "MISSING", OVERSEER_SEP, ...context.missing.map((m) => `  - ${m}`));
   }
   io.stdout.write(`${lines.join("\n")}\n`);
   return 0;
@@ -1025,76 +998,29 @@ async function runOverseerHandshake(args: string[], io: CliIO): Promise<number> 
     return 1;
   }
 
-  const protocol = "relayos-overseer-session-v1" as const;
-  const sessionRole = "overseer_client" as const;
-  const repoPath = process.cwd();
-  const workspacePath = join(repoPath, ".relayos", "overseer");
-  const files = OVERSEER_CONTEXT_CANONICAL_FILES.map((name) => ({
-    name,
-    exists: existsSync(join(workspacePath, name)),
-  }));
-  const missing = files.filter((f) => !f.exists).map((f) => f.name);
-  const contextComplete = missing.length === 0;
-  const mustRead = OVERSEER_CONTEXT_CANONICAL_FILES.map((name) => join(workspacePath, name));
-  const nextActionSource = join(workspacePath, "NEXT_ACTION.md");
-  const forbiddenActions = [
-    "No runtime activation/switching or migration.",
-    "No daemon/background agent behavior.",
-    "No parallel mode, queue runner, or sub-run orchestration.",
-    "No storage/envelope/audit format changes.",
-  ];
-  const requiresExplicitUserApprovalFor = [
-    "Tags or releases.",
-    "Force push, amend published commits, or --no-verify.",
-    "Any write-path beyond approved read-only commands.",
-  ];
-  const notes = [
-    "Human-supervised local-first overseer protocol, not a daemon or security sandbox.",
-    "Missing context files are reported; this command never creates files.",
-  ];
-  const ok = contextComplete;
+  const handshake = await readOverseerHandshakeSnapshot(process.cwd());
 
   if (wantsJson) {
-    io.stdout.write(
-      `${JSON.stringify(
-        {
-          ok,
-          protocol,
-          session_role: sessionRole,
-          repo_path: repoPath,
-          workspace_path: workspacePath,
-          context_complete: contextComplete,
-          files,
-          missing,
-          must_read: mustRead,
-          next_action_source: nextActionSource,
-          forbidden_actions: forbiddenActions,
-          requires_explicit_user_approval_for: requiresExplicitUserApprovalFor,
-          notes,
-        },
-        null,
-        2,
-      )}\n`,
-    );
+    io.stdout.write(`${JSON.stringify(handshake, null, 2)}\n`);
     return 0;
   }
 
   const lines = [
     "OVERSEER HANDSHAKE",
     OVERSEER_SEP,
-    `  protocol: ${protocol}`,
-    `  session_role: ${sessionRole}`,
-    `  repo path: ${repoPath}`,
-    `  workspace path: ${workspacePath}`,
-    `  context status: ${contextComplete ? "complete" : "incomplete"}`,
+    `  protocol: ${handshake.protocol}`,
+    `  session_role: ${handshake.session_role}`,
+    `  repo path: ${handshake.repo_path}`,
+    `  workspace path: ${handshake.workspace_path}`,
+    `  context status: ${handshake.context_complete ? "complete" : "incomplete"}`,
     "  must-read files:",
-    ...mustRead.map((p) => `    - ${p}`),
-    `  next action source: ${nextActionSource}`,
+    ...handshake.must_read.map((p) => `    - ${p}`),
+    `  next action source: ${handshake.next_action_source}`,
     "  forbidden actions: no runtime activation/migration; no daemon; no parallel/queue/sub-runs; no schema changes.",
     "  reminder: this is a human-supervised local-first overseer protocol, not a daemon or security sandbox.",
   ];
-  if (missing.length > 0) {
-    lines.push("  missing:", ...missing.map((m) => `    - ${m}`));
+  if (handshake.missing.length > 0) {
+    lines.push("  missing:", ...handshake.missing.map((m) => `    - ${m}`));
   }
   io.stdout.write(`${lines.join("\n")}\n`);
   return 0;

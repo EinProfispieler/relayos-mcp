@@ -26,6 +26,7 @@ import { writeAuditLog } from "./tools/write_audit_log.js";
 import { listHandoffs } from "./tools/list_handoffs.js";
 import { readHandoff } from "./tools/read_handoff.js";
 import { readLatestHandoff } from "./tools/read_latest_handoff.js";
+import { readOverseerHandshake } from "./tools/read_overseer_handshake.js";
 import { inspectConfig } from "./tools/inspect_config.js";
 import { doctor } from "./tools/doctor.js";
 import { listOpenHandoffs } from "./tools/list_open_handoffs.js";
@@ -306,6 +307,22 @@ export async function buildServer() {
     },
     async (args) => {
       const result = await readLatestHandoff(args, { layout, audit });
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "read_overseer_handshake",
+    {
+      title: "Read overseer handshake",
+      description:
+        "Read-only overseer session handshake snapshot for MCP clients. Returns protocol/session role, " +
+        "repo/workspace paths, canonical context file availability, must-read file paths, next-action source, " +
+        "and safety reminders. No files are created or modified.",
+      inputSchema: {},
+    },
+    async (args) => {
+      const result = await readOverseerHandshake(args);
       return jsonResult(result);
     },
   );
