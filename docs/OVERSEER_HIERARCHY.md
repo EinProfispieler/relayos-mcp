@@ -83,3 +83,20 @@ Not in scope now:
 ## 8. Summary
 
 RelayOS Core remains local-first and single-overseer by design. Multi-level overseer hierarchy is preserved here as future direction so migration planning can reference a stable concept later, without expanding current implementation scope.
+
+## 9. Future direction: higher-level API-backed advisory overseers
+
+In future tiers, RelayOS may allow higher-level overseer review to be delegated to stronger/latest external model APIs as advisory layers above project/task overseers.
+
+Examples:
+
+- A high-capability model (for example GPT-5.5 or the latest capable OpenAI model) may be used for architecture, release, security-risk, and cross-agent governance review.
+- A long-context model (for example Gemini or equivalent) may be used for legal/compliance/copyright/policy/documentation consistency and external-facing risk review.
+
+Guardrails for this direction:
+
+- Human approval remains required for decisions and actions.
+- Model outputs are advisory audit evidence only, not legal advice, compliance certification, or security enforcement.
+- Provider/model choice should be configurable in future implementations.
+- Local-first Core must not depend on these APIs.
+- No current implementation exists in RelayOS Core.
