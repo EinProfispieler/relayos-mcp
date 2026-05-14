@@ -605,6 +605,34 @@ describe("relayos overseer activate-runtime --dry-run", () => {
     expect(code).toBe(2);
     expect(cap.stdout).toContain("decision: BLOCK");
     expect(cap.stdout).toContain("appears git-tracked");
+    expect(cap.stdout).toContain("runtime path appears git-tracked: yes");
+  });
+
+  it("reports runtimePathGitTracked=true in JSON when runtime path is git-tracked", async () => {
+    chdir(tempDir());
+    const runtime = join(REPO_ROOT, "README.md");
+    const cap = captureIO();
+
+    const code = await runCli(
+      [
+        "overseer",
+        "activate-runtime",
+        "--dry-run",
+        "--source",
+        REPO_ROOT,
+        "--path",
+        runtime,
+        "--json",
+      ],
+      cap.io,
+    );
+
+    expect(code).toBe(2);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect(data.decision).toBe("block");
+    expect(data.runtimePathGitTracked).toBe(true);
+    expect(Array.isArray(data.blocks)).toBe(true);
+    expect((data.blocks as string[]).some((b) => b.includes("git-tracked"))).toBe(true);
   });
 
   it("prints stable JSON for allow path", async () => {
@@ -648,6 +676,33 @@ describe("relayos overseer activate-runtime --dry-run", () => {
     expect((data.blocks as unknown[]).length).toBe(0);
     expect(Array.isArray(data.notes)).toBe(true);
     expect(cap.stderr).toBe("");
+  });
+
+  it("does not block for git-tracked reasons on an external non-tracked runtime path", async () => {
+    chdir(tempDir());
+    const runtime = tempDir();
+    const cap = captureIO();
+
+    const code = await runCli(
+      [
+        "overseer",
+        "activate-runtime",
+        "--dry-run",
+        "--source",
+        REPO_ROOT,
+        "--path",
+        runtime,
+        "--json",
+      ],
+      cap.io,
+    );
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect(data.runtimePathGitTracked).toBe(false);
+    expect(data.decision).toBe("allow");
+    expect(Array.isArray(data.blocks)).toBe(true);
+    expect((data.blocks as unknown[]).length).toBe(0);
   });
 
   it("uses provided --source for inside-source JSON checks when cwd differs", async () => {
