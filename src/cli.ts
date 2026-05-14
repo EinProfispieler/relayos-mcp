@@ -27,6 +27,7 @@ import { listEnvelopes } from "./envelope.js";
 import {
   appendBranchProgress,
   appendNote,
+  buildOverseerContextPack,
   hasOverseerState,
   initContextFiles,
   readOverseerContextSnapshot,
@@ -1120,6 +1121,73 @@ async function runOverseerRecent(args: string[], io: CliIO): Promise<number> {
   return 0;
 }
 
+function parseOverseerContextPackArgs(
+  args: string[],
+): { wantsJson: boolean; limit: number } | null {
+  let wantsJson = false;
+  let limit = 8;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "--json") {
+      wantsJson = true;
+      continue;
+    }
+    if (arg === "--limit") {
+      const raw = args[i + 1];
+      if (!raw) return null;
+      const parsed = Number(raw);
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 20) return null;
+      limit = parsed;
+      i++;
+      continue;
+    }
+    return null;
+  }
+  return { wantsJson, limit };
+}
+
+async function runOverseerContextPack(args: string[], io: CliIO): Promise<number> {
+  const parsed = parseOverseerContextPackArgs(args);
+  if (!parsed) {
+    io.stderr.write("usage: relayos overseer context-pack [--json] [--limit <1-20>]\n");
+    return 1;
+  }
+
+  const pack = await buildOverseerContextPack(process.cwd(), parsed.limit);
+
+  if (parsed.wantsJson) {
+    io.stdout.write(`${JSON.stringify(pack, null, 2)}\n`);
+    return 0;
+  }
+
+  const lines = [
+    "OVERSEER CONTEXT PACK",
+    OVERSEER_SEP,
+    `  protocol: ${pack.protocol}`,
+    `  context status: ${pack.context_complete ? "complete" : "incomplete"}`,
+    `  workspace: ${pack.workspace_path}`,
+    `  project summary: ${pack.project_summary ?? "not available"}`,
+    `  current state: ${pack.current_state ?? "not available"}`,
+    `  next action: ${pack.next_action ?? "not available"}`,
+    `  model policy: ${pack.model_policy ?? "not available"}`,
+    `  recent notes (${pack.notes_count}/${pack.limit}):`,
+    ...(pack.recent_notes.length > 0
+      ? pack.recent_notes.map((n) => `    - [${n.ts}] ${n.text}`)
+      : ["    - (none)"]),
+    "  forbidden actions:",
+    ...pack.forbidden_actions.map((a) => `    - ${a}`),
+    "  recommended prompt:",
+    `    ${pack.recommended_prompt}`,
+    "  evidence links:",
+    ...pack.evidence_links.map((p) => `    - ${p}`),
+  ];
+  if (pack.missing.length > 0) {
+    lines.push("  missing:", ...pack.missing.map((m) => `    - ${m}`));
+  }
+  io.stdout.write(`${lines.join("\n")}\n`);
+  return 0;
+}
+
 async function runOverseerNote(args: string[], io: CliIO): Promise<number> {
   if (args.length === 0) {
     io.stderr.write("usage: relayos overseer note <text>\n");
@@ -1480,6 +1548,7 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "context") return runOverseerContext(rest, io);
   if (sub === "handshake") return runOverseerHandshake(rest, io);
   if (sub === "recent") return runOverseerRecent(rest, io);
+  if (sub === "context-pack") return runOverseerContextPack(rest, io);
   if (sub === "note") return runOverseerNote(rest, io);
   if (sub === "next") return runOverseerNext(rest, io);
   if (sub === "start") return runOverseerStart(rest, io);
@@ -1494,7 +1563,7 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "branch") return runOverseerBranch(rest, io);
   if (sub === "progress") return runOverseerProgress(rest, io);
   io.stderr.write(
-    "usage: relayos overseer <status|context|handshake|recent|note|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
+    "usage: relayos overseer <status|context|handshake|recent|context-pack|note|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
   );
   return 1;
 }

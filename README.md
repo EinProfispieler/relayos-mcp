@@ -75,6 +75,8 @@ Print a compact evidence snapshot in four sections: latest handoff, latest check
 Local coordination workspace stored under `.relayos/overseer/` (gitignored). Append timestamped notes, set and read a current next action. Survives terminal closes and context resets. See [`docs/OVERSEER.md`](docs/OVERSEER.md).
 Use `relayos overseer recent` for a compact current overseer summary.
 Use `relayos overseer recent --json` for automation-friendly JSON output.
+Use `relayos overseer context-pack` for a compact curated continuity pack.
+Use `relayos overseer context-pack --json` for MCP-aligned JSON payload output.
 Use `relayos overseer runtime-check` as a read-only alias for `relayos overseer activate-runtime --dry-run`.
 
 ## Safety model
@@ -229,6 +231,8 @@ relayos overseer init-context
 relayos overseer branch "add auth middleware"
 relayos overseer progress "tests passing, moving to review"
 relayos overseer brief
+relayos overseer context-pack
+relayos overseer context-pack --json --limit 8
 ```
 
 Shell aliases are optional and user-managed. RelayOS does not modify

@@ -9,6 +9,7 @@ relayos overseer status
 relayos overseer context
 relayos overseer handshake
 relayos overseer recent
+relayos overseer context-pack [--json] [--limit <1-20>]
 relayos overseer note <text...>
 relayos overseer next [text...]
 relayos overseer start
@@ -158,6 +159,19 @@ Compact example:
   "warnings": []
 }
 ```
+
+### `overseer context-pack`
+
+Read-only curated continuity snapshot for non-MCP CLI workflows.
+
+- `relayos overseer context-pack` prints a compact summary:
+  project/current/next status, recent notes, boundaries, model policy,
+  recommended prompt, and evidence links.
+- `relayos overseer context-pack --json` returns the same context-pack
+  payload shape used by `read_overseer_context_pack`.
+- `--limit <1-20>` bounds `recent_notes` (default `8`, max `20`).
+- Missing local files are reported in `missing`; command remains read-only.
+- No raw full chat transcript is returned.
 
 ### `overseer note <text...>`
 

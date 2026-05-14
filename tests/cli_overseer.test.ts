@@ -434,6 +434,73 @@ describe("relayos overseer handshake", () => {
   });
 });
 
+describe("relayos overseer context-pack", () => {
+  it("prints compact human-readable context pack output", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "context-pack"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("OVERSEER CONTEXT PACK");
+    expect(cap.stdout).toContain("protocol: relayos-overseer-session-v1");
+    expect(cap.stdout).toContain("recent notes (0/8):");
+    expect(cap.stdout).toContain("recommended prompt:");
+    expect(cap.stdout).toContain("evidence links:");
+    expect(cap.stderr).toBe("");
+  });
+
+  it("prints stable JSON and honors --limit", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    const dir = join(cwd, ".relayos", "overseer");
+    rmSync(dir, { recursive: true, force: true });
+    await runCli(["overseer", "note", "one"], captureIO().io);
+    await runCli(["overseer", "note", "two"], captureIO().io);
+    await runCli(["overseer", "note", "three"], captureIO().io);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "context-pack", "--json", "--limit", "2"], cap.io);
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect(data.tool).toBe("read_overseer_context_pack");
+    expect(data.protocol).toBe("relayos-overseer-session-v1");
+    expect(data.limit).toBe(2);
+    expect(data.notes_count).toBe(2);
+    expect(Array.isArray(data.recent_notes)).toBe(true);
+    expect((data.recent_notes as Array<Record<string, string>>).map((n) => n.text)).toEqual([
+      "two",
+      "three",
+    ]);
+    expect(cap.stderr).toBe("");
+  });
+
+  it("stays read-only when context is missing", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "context-pack"], cap.io);
+
+    expect(code).toBe(0);
+    expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
+  });
+
+  it("exits 1 with usage on invalid flags or invalid limit", async () => {
+    chdir(tempDir());
+    const capFlag = captureIO();
+    const codeFlag = await runCli(["overseer", "context-pack", "--yaml"], capFlag.io);
+    expect(codeFlag).toBe(1);
+    expect(capFlag.stderr).toContain("usage: relayos overseer context-pack");
+
+    const capLimit = captureIO();
+    const codeLimit = await runCli(["overseer", "context-pack", "--limit", "21"], capLimit.io);
+    expect(codeLimit).toBe(1);
+    expect(capLimit.stderr).toContain("usage: relayos overseer context-pack");
+  });
+});
+
 describe("relayos overseer note", () => {
   it("records a note and exits 0", async () => {
     chdir(tempDir());
