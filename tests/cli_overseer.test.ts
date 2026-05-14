@@ -460,6 +460,25 @@ describe("relayos overseer env", () => {
 });
 
 describe("relayos overseer activate-runtime --dry-run", () => {
+  const REQUIRED_JSON_FIELDS = [
+    "decision",
+    "sourceRepo",
+    "runtimePath",
+    "runtimePathExists",
+    "runtimePathInsideSourceRepo",
+    "runtimePathGitTracked",
+    "sourceOverseerStateExists",
+    "relayosRuntimeHomeSet",
+    "relayosRuntimeHome",
+    "relayosRuntimeHomeMatchesPath",
+    "runtimeWorkspaceSwitchingActive",
+    "wroteFiles",
+    "createdDirectories",
+    "warnings",
+    "blocks",
+    "notes",
+  ] as const;
+
   it("exits 1 with usage when no args are provided", async () => {
     chdir(tempDir());
     const cap = captureIO();
@@ -675,6 +694,7 @@ describe("relayos overseer activate-runtime --dry-run", () => {
     expect(Array.isArray(data.blocks)).toBe(true);
     expect((data.blocks as unknown[]).length).toBe(0);
     expect(Array.isArray(data.notes)).toBe(true);
+    for (const key of REQUIRED_JSON_FIELDS) expect(key in data).toBe(true);
     expect(cap.stderr).toBe("");
   });
 
@@ -767,6 +787,77 @@ describe("relayos overseer activate-runtime --dry-run", () => {
       expect((data.warnings as string[]).some((w) => w.includes("does not match --path"))).toBe(
         true,
       );
+      expect((data.blocks as unknown[]).length).toBe(0);
+    } finally {
+      if (prev === undefined) delete process.env.RELAYOS_RUNTIME_HOME;
+      else process.env.RELAYOS_RUNTIME_HOME = prev;
+    }
+  });
+
+  it("keeps decision=block when inside-source block and warnings both apply", async () => {
+    chdir(tempDir());
+    const source = tempDir();
+    const runtime = join(source, ".relayos-runtime");
+    const cap = captureIO();
+
+    const code = await runCli(
+      [
+        "overseer",
+        "activate-runtime",
+        "--dry-run",
+        "--source",
+        source,
+        "--path",
+        runtime,
+        "--json",
+      ],
+      cap.io,
+    );
+
+    expect(code).toBe(2);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect(data.decision).toBe("block");
+    expect(data.runtimePathInsideSourceRepo).toBe(true);
+    expect(Array.isArray(data.warnings)).toBe(true);
+    expect((data.warnings as unknown[]).length).toBeGreaterThan(0);
+    expect(Array.isArray(data.blocks)).toBe(true);
+    expect((data.blocks as unknown[]).length).toBeGreaterThan(0);
+  });
+
+  it("keeps decision=block when git-tracked block and env-mismatch warning both apply", async () => {
+    chdir(tempDir());
+    const runtime = join(REPO_ROOT, "README.md");
+    const prev = process.env.RELAYOS_RUNTIME_HOME;
+    process.env.RELAYOS_RUNTIME_HOME = "/tmp/relayos-other";
+    const cap = captureIO();
+
+    try {
+      const code = await runCli(
+        [
+          "overseer",
+          "activate-runtime",
+          "--dry-run",
+          "--source",
+          REPO_ROOT,
+          "--path",
+          runtime,
+          "--json",
+        ],
+        cap.io,
+      );
+
+      expect(code).toBe(2);
+      const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+      expect(data.decision).toBe("block");
+      expect(data.runtimePathGitTracked).toBe(true);
+      expect(data.relayosRuntimeHomeSet).toBe(true);
+      expect(data.relayosRuntimeHomeMatchesPath).toBe(false);
+      expect(Array.isArray(data.warnings)).toBe(true);
+      expect((data.warnings as string[]).some((w) => w.includes("does not match --path"))).toBe(
+        true,
+      );
+      expect(Array.isArray(data.blocks)).toBe(true);
+      expect((data.blocks as string[]).some((b) => b.includes("git-tracked"))).toBe(true);
     } finally {
       if (prev === undefined) delete process.env.RELAYOS_RUNTIME_HOME;
       else process.env.RELAYOS_RUNTIME_HOME = prev;
