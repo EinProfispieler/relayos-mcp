@@ -131,6 +131,32 @@ export interface OverseerContextPack {
   notes: string[];
 }
 
+export interface OverseerRunPreflightCheck {
+  name:
+    | "context_complete"
+    | "has_next_action"
+    | "has_current_state"
+    | "has_model_policy"
+    | "has_forbidden_actions";
+  status: "pass" | "warn";
+  detail: string;
+}
+
+export interface OverseerRunPreflight {
+  ok: boolean;
+  tool: "run-preflight";
+  workspace_path: string;
+  context_complete: boolean;
+  missing: string[];
+  checks: OverseerRunPreflightCheck[];
+  recent_notes_count: number;
+  runtime_active: false;
+  runner_active: false;
+  queue_active: false;
+  ready_for_future_run: boolean;
+  notes: string[];
+}
+
 async function runGitCommand(
   cwd: string,
   args: string[],
@@ -295,6 +321,90 @@ export async function buildOverseerContextPack(
       "Curated context pack is compact by design; no raw full chat transcript sync.",
       "Read-only tool: does not create, modify, or delete .relayos/overseer files.",
       "Use write_overseer_note after approved tasks to keep local progress timeline current.",
+    ],
+  };
+}
+
+export async function buildOverseerRunPreflight(
+  cwd: string,
+): Promise<OverseerRunPreflight> {
+  const layout = resolveOverseerLayout(cwd);
+  const [context, nextAction, currentState, modelPolicy, forbiddenActions, notes] =
+    await Promise.all([
+      readOverseerContextSnapshot(cwd),
+      readOverseerTextFile(layout, "NEXT_ACTION.md"),
+      readOverseerTextFile(layout, "CURRENT_STATE.md"),
+      readOverseerTextFile(layout, "MODEL_POLICY.md"),
+      readOverseerTextFile(layout, "FORBIDDEN_ACTIONS.md"),
+      readLatestNotes(layout, 20),
+    ]);
+
+  const hasNextAction = Boolean(nextAction);
+  const hasCurrentState = Boolean(currentState);
+  const hasModelPolicy = Boolean(modelPolicy);
+  const hasForbiddenActions = Boolean(forbiddenActions);
+  const readyForFutureRun =
+    context.ok &&
+    hasNextAction &&
+    hasCurrentState &&
+    hasModelPolicy &&
+    hasForbiddenActions;
+
+  const checks: OverseerRunPreflightCheck[] = [
+    {
+      name: "context_complete",
+      status: context.ok ? "pass" : "warn",
+      detail: context.ok
+        ? "canonical overseer context files are present"
+        : "missing canonical overseer files",
+    },
+    {
+      name: "has_next_action",
+      status: hasNextAction ? "pass" : "warn",
+      detail: hasNextAction
+        ? "NEXT_ACTION.md is present and non-empty"
+        : "NEXT_ACTION.md is missing or empty",
+    },
+    {
+      name: "has_current_state",
+      status: hasCurrentState ? "pass" : "warn",
+      detail: hasCurrentState
+        ? "CURRENT_STATE.md is present and non-empty"
+        : "CURRENT_STATE.md is missing or empty",
+    },
+    {
+      name: "has_model_policy",
+      status: hasModelPolicy ? "pass" : "warn",
+      detail: hasModelPolicy
+        ? "MODEL_POLICY.md is present and non-empty"
+        : "MODEL_POLICY.md is missing or empty",
+    },
+    {
+      name: "has_forbidden_actions",
+      status: hasForbiddenActions ? "pass" : "warn",
+      detail: hasForbiddenActions
+        ? "FORBIDDEN_ACTIONS.md is present and non-empty"
+        : "FORBIDDEN_ACTIONS.md is missing or empty",
+    },
+  ];
+
+  return {
+    ok: true,
+    tool: "run-preflight",
+    workspace_path: context.workspace_path,
+    context_complete: context.ok,
+    missing: context.missing,
+    checks,
+    recent_notes_count: notes.length,
+    runtime_active: false,
+    runner_active: false,
+    queue_active: false,
+    ready_for_future_run: readyForFutureRun,
+    notes: [
+      "Preflight only: no run was created.",
+      "No agent process was started.",
+      "Runner/queue/runtime activation are not active in current Core.",
+      "High-risk actions still require explicit human approval (commit/push/tag/release/deletion/schema/runtime/provider).",
     ],
   };
 }

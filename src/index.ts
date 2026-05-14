@@ -30,6 +30,7 @@ import { readOverseerHandshake } from "./tools/read_overseer_handshake.js";
 import { readOverseerBootstrapPrompt } from "./tools/read_overseer_bootstrap_prompt.js";
 import { readOverseerContextPack } from "./tools/read_overseer_context_pack.js";
 import { readOverseerRecent } from "./tools/read_overseer_recent.js";
+import { readOverseerRunPreflight } from "./tools/read_overseer_run_preflight.js";
 import { writeOverseerNote } from "./tools/write_overseer_note.js";
 import { inspectConfig } from "./tools/inspect_config.js";
 import { doctor } from "./tools/doctor.js";
@@ -361,6 +362,22 @@ export async function buildServer() {
     },
     async (args) => {
       const result = await readOverseerContextPack(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "read_overseer_run_preflight",
+    {
+      title: "Read overseer run preflight",
+      description:
+        "Read-only future-run readiness preflight for scoped Rookie/handoff workflows. " +
+        "Returns context completeness, prerequisite checks, readiness status, and safety reminders. " +
+        "Preflight only: no run is created and no agent is started.",
+      inputSchema: {},
+    },
+    async (args) => {
+      const result = await readOverseerRunPreflight(args);
       return jsonResult(result);
     },
   );
