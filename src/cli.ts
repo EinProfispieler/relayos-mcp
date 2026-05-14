@@ -806,9 +806,39 @@ async function runOverseerBrief(args: string[], io: CliIO): Promise<number> {
 }
 
 async function runOverseerStart(args: string[], io: CliIO): Promise<number> {
-  if (args.length > 0) {
+  const wantsJson = args.length === 1 && args[0] === "--json";
+  if (args.length > 1 || (args.length === 1 && !wantsJson)) {
     io.stderr.write("usage: relayos overseer start\n");
     return 1;
+  }
+
+  const notes = [
+    "Serial mode is the current/default mode.",
+    "Parallel mode is future/opt-in and is not automatically enabled.",
+    "Overseer start does not launch Codex/Claude sub-runs.",
+    "Runtime workspace switching is not active yet.",
+  ];
+
+  if (wantsJson) {
+    io.stdout.write(
+      `${JSON.stringify(
+        {
+          startupMode: "overseer",
+          currentMode: "serial",
+          defaultMode: "serial",
+          parallelModeAvailable: false,
+          parallelModeEnabled: false,
+          runtimeWorkspaceSwitchingActive: false,
+          startsSubruns: false,
+          createsBranchesOrWorktrees: false,
+          writesRuntimeState: false,
+          notes,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return 0;
   }
 
   io.stdout.write(`${formatRelayOSBanner(io)}\n\n`);

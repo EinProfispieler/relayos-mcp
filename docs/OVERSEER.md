@@ -116,6 +116,8 @@ Prints the RelayOS banner, prints the current overseer brief, and emits explicit
 
 This command is intentionally safe and read-only for orchestration: it does not launch Codex/Claude sub-runs, does not create branches/worktrees, and does not execute queue or parallel runners.
 
+`--json` prints the same startup safety/mode state as stable machine-readable JSON.
+
 ### `overseer mode`
 
 Prints the current execution mode guidance for overseer orchestration:
