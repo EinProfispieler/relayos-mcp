@@ -215,6 +215,7 @@ None of these change the current storage format, envelope schema, or audit log f
 ## See also
 
 - [`docs/OVERSEER.md`](OVERSEER.md) — `relayos overseer` command reference
+- [`docs/OVERSEER_RUNTIME_PLAN.md`](OVERSEER_RUNTIME_PLAN.md) — staged migration plan for moving to a separate production runtime workspace
 - [`docs/MODEL_STRATEGY.md`](MODEL_STRATEGY.md) — model selection framework and the future model-role matrix
 - [`docs/CHECKPOINTS.md`](CHECKPOINTS.md) — `relayos checkpoint` reference
 - [`docs/DIFF_RISK.md`](DIFF_RISK.md) — `relayos diff-risk` reference

@@ -238,7 +238,7 @@ git check-ignore -v .relayos/overseer/timeline.jsonl
 
 When running RelayOS as a tool against a different project, operate from that project's directory. RelayOS resolves `.relayos/` relative to the current working directory, so coordination state stays in the target project, not in the RelayOS source tree.
 
-Production runtime state — coordination notes, sub-run outputs, generated reports, operational logs for non-RelayOS projects — belongs outside the source repo entirely. See [docs/OVERSEER_WORKFLOW.md](OVERSEER_WORKFLOW.md) § "Source repo vs. runtime workspace" for the full treatment, including the planned `RELAYOS_RUNTIME_HOME` direction.
+Production runtime state — coordination notes, sub-run outputs, generated reports, operational logs for non-RelayOS projects — belongs outside the source repo entirely. See [docs/OVERSEER_WORKFLOW.md](OVERSEER_WORKFLOW.md) § "Source repo vs. runtime workspace" for the full treatment, and [docs/OVERSEER_RUNTIME_PLAN.md](OVERSEER_RUNTIME_PLAN.md) for the staged migration plan toward a separate production runtime workspace.
 
 ## Non-goals
 
@@ -250,6 +250,7 @@ Production runtime state — coordination notes, sub-run outputs, generated repo
 ## See also
 
 - [`docs/OVERSEER_WORKFLOW.md`](OVERSEER_WORKFLOW.md) — Overseer role, serial vs parallel mode, model selection, safety rules, and source/runtime separation.
+- [`docs/OVERSEER_RUNTIME_PLAN.md`](OVERSEER_RUNTIME_PLAN.md) — staged migration plan for moving to a separate production runtime workspace.
 - [`docs/CHECKPOINTS.md`](CHECKPOINTS.md) — captures full git state before risky handoffs.
 - [`docs/DIFF_RISK.md`](DIFF_RISK.md) — classifies the working tree before `git commit`.
 - [`docs/LAUNCH.md`](LAUNCH.md) — prints the `codex exec` command for the newest open handoff.
