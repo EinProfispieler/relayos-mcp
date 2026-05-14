@@ -100,3 +100,27 @@ Guardrails for this direction:
 - Provider/model choice should be configurable in future implementations.
 - Local-first Core must not depend on these APIs.
 - No current implementation exists in RelayOS Core.
+
+## 10. Future direction: Team/Enterprise admin assignment of overseer profiles
+
+Future Team/Enterprise editions may expose a backend/admin panel, web UI, or app UI for governance configuration.
+
+Possible direction:
+
+- Admins assign each employee, coder, project, or department an overseer type/profile.
+- Admins assign which agent/model/provider backs that overseer profile.
+
+Example overseer profiles:
+
+- coder overseer
+- project overseer
+- release overseer
+- compliance/copyright overseer
+- department audit overseer
+- enterprise governance overseer
+
+This is configuration/governance direction only.
+
+- Human approval and audit trails remain required.
+- Local-first Core must not depend on this panel.
+- No current implementation exists.
