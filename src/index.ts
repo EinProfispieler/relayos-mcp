@@ -27,6 +27,7 @@ import { listHandoffs } from "./tools/list_handoffs.js";
 import { readHandoff } from "./tools/read_handoff.js";
 import { readLatestHandoff } from "./tools/read_latest_handoff.js";
 import { readOverseerHandshake } from "./tools/read_overseer_handshake.js";
+import { writeOverseerNote } from "./tools/write_overseer_note.js";
 import { inspectConfig } from "./tools/inspect_config.js";
 import { doctor } from "./tools/doctor.js";
 import { listOpenHandoffs } from "./tools/list_open_handoffs.js";
@@ -323,6 +324,23 @@ export async function buildServer() {
     },
     async (args) => {
       const result = await readOverseerHandshake(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "write_overseer_note",
+    {
+      title: "Write overseer note",
+      description:
+        "Append a local overseer note to .relayos/overseer/timeline.jsonl for session progress tracking. " +
+        "Local-only. Creates .relayos/overseer/ if needed. Rejects empty/whitespace note text.",
+      inputSchema: {
+        text: z.string().min(1),
+      },
+    },
+    async (args) => {
+      const result = await writeOverseerNote(args);
       return jsonResult(result);
     },
   );
