@@ -1,5 +1,8 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Support guide
+    url: https://github.com/EinProfispieler/relayos/blob/main/SUPPORT.md
+    about: Where to ask questions, report bugs, and follow public/private data guidance.
   - name: Security policy
     url: https://github.com/EinProfispieler/relayos/blob/main/SECURITY.md
     about: Read security posture and responsible disclosure guidance before filing.
