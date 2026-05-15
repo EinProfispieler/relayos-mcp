@@ -10,17 +10,18 @@ Preserve RelayOS product direction before daily overseer workflows move into MCP
 
 RelayOS Core today is a local-first control, audit, and handoff layer.
 
-Current MCP session loop already available:
+Current overseer MCP/CLI surface already available:
 
-- `read_overseer_handshake`
-- `read_overseer_recent`
-- `write_overseer_note`
+- `read_overseer_bootstrap_prompt` (bootstrap prompt helper)
+- `read_overseer_handshake` / `relayos overseer handshake`
+- `read_overseer_recent` / `relayos overseer recent`
+- `write_overseer_note` / `relayos overseer note <text...>`
+- `read_overseer_context_pack` / `relayos overseer context-pack [--json] [--limit <1-20>]`
+- `read_overseer_summary` / `relayos overseer summary [--json] [--limit <1-20>]`
+- `read_overseer_run_preflight` / `relayos overseer run-preflight [--json]`
+- `write_overseer_decision` + `read_overseer_decisions` / `relayos overseer decision add <text>` + `relayos overseer decisions [--json] [--limit <1-20>]`
 
-Current CLI curated-memory loop also available:
-
-- `relayos overseer context-pack`
-- `relayos overseer decision add <text>`
-- `relayos overseer decisions [--json] [--limit <1-20>]`
+Rendered handoffs also include overseer bootstrap/summary guidance (`read_overseer_bootstrap_prompt` -> `read_overseer_handshake` -> `read_overseer_summary` -> `read_overseer_context_pack` -> `read_overseer_recent`).
 
 Codex and Claude can connect through RelayOS MCP and share local overseer state through these local interfaces.
 

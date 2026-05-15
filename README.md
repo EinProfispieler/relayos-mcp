@@ -139,7 +139,7 @@ Restart both CLIs after registering so they pick up the tool list.
 
 ### 3. MCP tools (inside an AI agent session)
 
-Once registered, 22 MCP tools are available from within any MCP-capable agent session (Claude Code, Codex CLI, or others). Common ones:
+Once registered, 23 MCP tools are available from within any MCP-capable agent session (Claude Code, Codex CLI, or others). Common ones:
 
 - `list_templates` — discover built-in and project templates
 - `create_quick_handoff` — one-shot handoff from a task description

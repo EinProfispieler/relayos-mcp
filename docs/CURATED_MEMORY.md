@@ -47,14 +47,23 @@ This structure emphasizes retrievability and audit over full-log replay.
 Currently shipped local-first curated-memory commands:
 
 - `relayos overseer context-pack`
+- `relayos overseer summary`
 - `relayos overseer decision add <text>`
 - `relayos overseer decisions [--json] [--limit <1-20>]`
 
-Current context packs now include bounded `recent_notes` and `recent_decisions` summaries for compact continuity.
+Current shipped curated-memory primitives include:
+
+- context packs with bounded `recent_notes` and `recent_decisions`
+- deterministic read-only session summaries (`relayos overseer summary`)
+- decision records (write/read via CLI and MCP)
+- local timeline notes and compact recent-state readback
 
 Current MCP curated-memory tools:
 
+- `read_overseer_summary`
 - `read_overseer_context_pack`
+- `read_overseer_decisions`
+- `write_overseer_decision`
 - `read_overseer_recent`
 - `write_overseer_note`
 
