@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildHandoffInputFromPending,
   decideApproveAction,
+  resolveRunHandoffId,
   type PendingActionProposal,
 } from "../src/chat.js";
 
@@ -83,5 +84,17 @@ describe("chat /approve helpers", () => {
     expect(built.task_description).toContain("Original user message:");
     expect(built.task_description).toContain("AI plan summary:");
     expect(built.task_description).toContain("Action proposal:");
+  });
+
+  it("refuses /run when no handoff was created in this session", () => {
+    const resolved = resolveRunHandoffId(null);
+    expect(resolved.handoffId).toBeNull();
+    expect(resolved.errorMessage).toBe("No handoff created in this session. Use /approve first.");
+  });
+
+  it("uses the session-created handoff id for /run", () => {
+    const resolved = resolveRunHandoffId("h_01JSESSION123");
+    expect(resolved.errorMessage).toBeNull();
+    expect(resolved.handoffId).toBe("h_01JSESSION123");
   });
 });
