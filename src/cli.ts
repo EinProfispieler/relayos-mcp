@@ -1767,7 +1767,7 @@ function parseOverseerExecuteHandoffArgs(
   return { handoffId: handoffId.trim(), dryRun };
 }
 
-function splitLaunchCommand(command: string): string[] {
+function parseArgv(command: string): string[] {
   const argv: string[] = [];
   let current = "";
   let quote: "'" | "\"" | null = null;
@@ -1837,7 +1837,14 @@ async function runOverseerExecuteHandoff(args: string[], io: CliIO): Promise<num
     return 0;
   }
 
-  const detection = await detectCli(envelope.target_agent);
+  let detection: Awaited<ReturnType<typeof detectCli>>;
+  try {
+    detection = await detectCli(envelope.target_agent);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    io.stderr.write(`Failed to detect CLI for "${envelope.target_agent}": ${errMsg}\n`);
+    return 1;
+  }
   if (!detection.found || !detection.resolved_path) {
     io.stderr.write(`CLI binary for "${envelope.target_agent}" not found. Is it installed and on PATH?\n`);
     return 1;
@@ -1850,7 +1857,7 @@ async function runOverseerExecuteHandoff(args: string[], io: CliIO): Promise<num
   };
   writeFileSync(envelopePath, `${JSON.stringify(spawningEnvelope, null, 2)}\n`, "utf8");
 
-  const argv = splitLaunchCommand(envelope.launch_command);
+  const argv = parseArgv(envelope.launch_command);
   let result: SpawnResult;
   try {
     result = await runTarget({
@@ -1861,16 +1868,21 @@ async function runOverseerExecuteHandoff(args: string[], io: CliIO): Promise<num
       workingDir: envelope.working_dir,
     });
   } catch (err) {
-    const now = new Date().toISOString();
-    const message = err instanceof Error ? err.message : String(err);
-    result = {
-      started_at: now,
-      finished_at: now,
-      exit_code: 1,
-      duration_ms: 0,
-      stdout_tail: "",
-      stderr_tail: message,
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const failedEnvelope: Envelope = {
+      ...spawningEnvelope,
+      status: "failed",
+      updated_at: new Date().toISOString(),
     };
+    writeFileSync(envelopePath, `${JSON.stringify(failedEnvelope, null, 2)}\n`, "utf8");
+    const overseerLayout = resolveOverseerLayout(process.cwd());
+    await appendHandoffResult(overseerLayout, {
+      run_id: parsed.handoffId,
+      status: "failed",
+      summary: `Codex execution failed for handoff ${parsed.handoffId}: ${errMsg}`,
+    });
+    io.stderr.write(`Failed to execute handoff: ${errMsg}\n`);
+    return 1;
   }
   const finalStatus = result.exit_code === 0 ? "completed" : "failed";
 

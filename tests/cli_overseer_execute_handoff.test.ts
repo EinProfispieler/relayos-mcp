@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chdir, cwd } from "node:process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 let testRoot = "";
 let envelopesDir = "";
+let prevCwd = "";
 
 const { detectCliMock, runTargetMock } = vi.hoisted(() => ({
   detectCliMock: vi.fn(),
@@ -27,6 +29,7 @@ vi.mock("../src/storage.js", () => ({
 }));
 
 import { runCli } from "../src/cli.js";
+import { resolveOverseerLayout } from "../src/overseer.js";
 
 function captureIO() {
   let stdout = "";
@@ -50,14 +53,17 @@ function writeEnvelope(id: string, payload: Record<string, unknown>) {
 }
 
 beforeEach(() => {
+  prevCwd = cwd();
   testRoot = mkdtempSync(join(tmpdir(), "relayos-cli-exec-handoff-"));
   envelopesDir = join(testRoot, "envelopes");
   mkdirSync(envelopesDir, { recursive: true });
+  chdir(testRoot);
   detectCliMock.mockReset();
   runTargetMock.mockReset();
 });
 
 afterEach(() => {
+  chdir(prevCwd);
   if (testRoot) rmSync(testRoot, { recursive: true, force: true });
 });
 
@@ -178,9 +184,10 @@ describe("relayos overseer execute-handoff", () => {
     detectCliMock.mockRejectedValue(new Error("boom"));
 
     const cap = captureIO();
-    await expect(runCli(["overseer", "execute-handoff", "h_detect_throw"], cap.io)).rejects.toThrow(
-      "boom",
-    );
+    const code = await runCli(["overseer", "execute-handoff", "h_detect_throw"], cap.io);
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("Failed to detect CLI");
+    expect(cap.stderr).toContain("boom");
   });
 
   it("marks handoff failed when runTarget throws", async () => {
@@ -202,16 +209,24 @@ describe("relayos overseer execute-handoff", () => {
     const code = await runCli(["overseer", "execute-handoff", "h_run_throw"], cap.io);
 
     expect(code).toBe(1);
-    expect(cap.stdout).toContain("Status:  failed");
-    expect(cap.stdout).toContain("Exit code: 1");
-    expect(cap.stdout).toContain("spawn failed");
+    expect(cap.stderr).toContain("Failed to execute handoff");
+    expect(cap.stderr).toContain("spawn failed");
 
     const envelope = JSON.parse(
       readFileSync(join(envelopesDir, "h_run_throw.json"), "utf8"),
     ) as { status?: string; spawn?: { exit_code?: number; stderr_tail?: string } };
     expect(envelope.status).toBe("failed");
-    expect(envelope.spawn?.exit_code).toBe(1);
-    expect(envelope.spawn?.stderr_tail).toContain("spawn failed");
+    expect(envelope.spawn).toBeUndefined();
+
+    const overseerLayout = resolveOverseerLayout(testRoot);
+    const results = readFileSync(overseerLayout.handoffResultsPath, "utf8")
+      .trim()
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line) as { run_id?: string; status?: string });
+    const record = results.find((entry) => entry.run_id === "h_run_throw");
+    expect(record).toBeDefined();
+    expect(record?.status).toBe("failed");
   });
 
   it("calls runTarget with correct SpawnOptions shape on success", async () => {
