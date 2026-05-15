@@ -340,6 +340,22 @@ describe("relayos overseer context", () => {
 });
 
 describe("relayos overseer handshake", () => {
+  function seedCanonicalContext(cwd: string): void {
+    const dir = join(cwd, ".relayos", "overseer");
+    mkdirSync(dir, { recursive: true });
+    for (const file of [
+      "PROJECT_BRIEF.md",
+      "CURRENT_STATE.md",
+      "OPERATING_POLICY.md",
+      "NEXT_ACTION.md",
+      "FORBIDDEN_ACTIONS.md",
+      "MODEL_POLICY.md",
+      "timeline.jsonl",
+    ]) {
+      writeFileSync(join(dir, file), "ok\n", "utf8");
+    }
+  }
+
   const REQUIRED_HANDSHAKE_JSON_FIELDS = [
     "ok",
     "protocol",
@@ -402,7 +418,9 @@ describe("relayos overseer handshake", () => {
   });
 
   it("reports complete context in JSON when canonical files exist", async () => {
-    chdir(REPO_ROOT);
+    const cwd = tempDir();
+    seedCanonicalContext(cwd);
+    chdir(cwd);
     const cap = captureIO();
 
     const code = await runCli(["overseer", "handshake", "--json"], cap.io);

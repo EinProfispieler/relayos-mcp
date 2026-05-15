@@ -148,6 +148,17 @@ export const AuditEvent = z
   .strict();
 export type AuditEvent = z.infer<typeof AuditEvent>;
 
+export const ChatSessionRecord = z
+  .object({
+    session_id: z.string().min(1),
+    started_at: z.string().datetime(),
+    ended_at: z.string().datetime(),
+    message_count: z.number().int().nonnegative(),
+    exit_reason: z.enum(["user_exit", "eof", "sigint"]),
+  })
+  .strict();
+export type ChatSessionRecord = z.infer<typeof ChatSessionRecord>;
+
 // ---------- v0.2.0 templates ----------
 
 export const TemplateOverrides = z
