@@ -1269,6 +1269,10 @@ async function runOverseerSummary(args: string[], io: CliIO): Promise<number> {
     ...(summary.recent_decisions.length > 0
       ? summary.recent_decisions.map((d) => `    - [${d.ts}] ${d.text}`)
       : ["    - (none)"]),
+    `  Recent handoff results (${summary.handoff_results_count}/${summary.limit}):`,
+    ...(summary.recent_handoff_results.length > 0
+      ? summary.recent_handoff_results.map((r) => `    - [${r.ts}] ${r.run_id} ${r.status}: ${r.summary}`)
+      : ["    - (none)"]),
     `  Recent notes (${summary.notes_count}/${summary.limit}):`,
     ...(summary.recent_notes.length > 0
       ? summary.recent_notes.map((n) => `    - [${n.ts}] ${n.text}`)
