@@ -55,6 +55,7 @@ import {
   writeActiveBrief,
   writeNextAction,
 } from "./overseer.js";
+import { runChat } from "./chat.js";
 import { detectCli, runTarget } from "./spawn/index.js";
 import { evaluatePolicy, formatBannerLines } from "./policy.js";
 import type { Envelope, SpawnResult } from "./schema.js";
@@ -66,7 +67,7 @@ interface CliIO {
 }
 
 function usage(): string {
-  return "usage: relayos [banner|launch|policy|checkpoint|diff-risk|report|overseer] [--force] [args...]\n";
+  return "usage: relayos [banner|launch|policy|checkpoint|diff-risk|report|overseer|chat] [--force] [args...]\n";
 }
 
 function checkpointUsage(): string {
@@ -2458,6 +2459,7 @@ export async function runCli(
   if (command === "diff-risk") return runDiffRisk(rest, io);
   if (command === "report") return runReport(rest, io);
   if (command === "overseer") return runOverseer(rest, io);
+  if (command === "chat") return runChat(rest);
 
   io.stderr.write(usage());
   return 1;

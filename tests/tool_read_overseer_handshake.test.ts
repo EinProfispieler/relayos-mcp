@@ -1,4 +1,4 @@
-import { mkdtempSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -6,8 +6,6 @@ import { readOverseerHandshake } from "../src/tools/read_overseer_handshake.js";
 
 const cleanups: Array<() => void> = [];
 let previousCwd: string | undefined;
-const REPO_ROOT = process.cwd();
-
 afterEach(() => {
   if (previousCwd) {
     process.chdir(previousCwd);
@@ -28,6 +26,22 @@ function chdir(dir: string) {
 }
 
 describe("read_overseer_handshake", () => {
+  function seedCanonicalContext(cwd: string): void {
+    const dir = join(cwd, ".relayos", "overseer");
+    mkdirSync(dir, { recursive: true });
+    for (const file of [
+      "PROJECT_BRIEF.md",
+      "CURRENT_STATE.md",
+      "OPERATING_POLICY.md",
+      "NEXT_ACTION.md",
+      "FORBIDDEN_ACTIONS.md",
+      "MODEL_POLICY.md",
+      "timeline.jsonl",
+    ]) {
+      writeFileSync(join(dir, file), "ok\n", "utf8");
+    }
+  }
+
   it("returns incomplete handshake when canonical context files are missing", async () => {
     chdir(tempDir());
 
@@ -47,16 +61,19 @@ describe("read_overseer_handshake", () => {
     expect(Array.isArray(result.notes)).toBe(true);
   });
 
-  it("returns complete handshake at repo root", async () => {
-    chdir(REPO_ROOT);
+  it("returns complete handshake when canonical context files exist", async () => {
+    const cwd = tempDir();
+    seedCanonicalContext(cwd);
+    chdir(cwd);
 
     const result = await readOverseerHandshake({});
 
     expect(result.ok).toBe(true);
     expect(result.context_complete).toBe(true);
     expect(result.missing).toEqual([]);
-    expect(result.next_action_source).toBe(
-      join(REPO_ROOT, ".relayos", "overseer", "NEXT_ACTION.md"),
+    const normalizeTmpPrefix = (value: string) => value.replace(/^\/private/, "");
+    expect(normalizeTmpPrefix(result.next_action_source)).toBe(
+      normalizeTmpPrefix(join(cwd, ".relayos", "overseer", "NEXT_ACTION.md")),
     );
     expect(result.files.every((f) => typeof f.name === "string" && typeof f.exists === "boolean")).toBe(true);
   });
