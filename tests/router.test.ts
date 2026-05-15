@@ -50,7 +50,14 @@ describe("classifyMessage", () => {
 
   it("first-match wins for overlapping keywords", () => {
     const decision = classifyMessage("please review and then implement fix");
-    expect(decision.target).toBe("codex");
-    expect(decision.mode).toBe("implementation");
+    expect(decision.target).toBe("claude-reviewer");
+    expect(decision.mode).toBe("read_only");
+  });
+
+  it("does not match implementation keyword by substring inside another word", () => {
+    const decision = classifyMessage("please review the latest patch");
+    expect(decision.target).toBe("claude-reviewer");
+    expect(decision.mode).toBe("read_only");
+    expect(decision.reason).toBe("matched keyword: review");
   });
 });
