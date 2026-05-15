@@ -1,6 +1,6 @@
 {
   "name": "relayos-mcp",
-  "version": "0.4.1",
+  "version": "0.6.0",
   "description": "RelayOS — MCP server for structured, audited Claude ↔ Codex task handoffs.",
   "license": "MIT",
   "author": "Randy",
