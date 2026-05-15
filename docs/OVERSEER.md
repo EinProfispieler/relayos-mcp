@@ -59,6 +59,7 @@ Current overseer MCP surface for this bootstrap flow:
 - `read_overseer_context_pack` (optional curated continuity pack)
 - `read_overseer_summary` (optional deterministic read-only session summary)
 - `read_overseer_run_preflight` (optional read-only future-run readiness check)
+- `read_overseer_doctor` (optional read-only overseer readiness diagnostics)
 - `write_overseer_decision` (optional local decision record append)
 - `read_overseer_decisions` (optional read-only decision record readback)
 - `write_overseer_note` (optional local progress note append)

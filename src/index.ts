@@ -30,6 +30,7 @@ import { readOverseerHandshake } from "./tools/read_overseer_handshake.js";
 import { readOverseerBootstrapPrompt } from "./tools/read_overseer_bootstrap_prompt.js";
 import { readOverseerContextPack } from "./tools/read_overseer_context_pack.js";
 import { readOverseerDecisions } from "./tools/read_overseer_decisions.js";
+import { readOverseerDoctor } from "./tools/read_overseer_doctor.js";
 import { readOverseerRecent } from "./tools/read_overseer_recent.js";
 import { readOverseerRunPreflight } from "./tools/read_overseer_run_preflight.js";
 import { readOverseerSummary } from "./tools/read_overseer_summary.js";
@@ -450,6 +451,22 @@ export async function buildServer() {
     },
     async (args) => {
       const result = await writeOverseerNote(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "read_overseer_doctor",
+    {
+      title: "Read overseer doctor",
+      description:
+        "Read-only overseer readiness diagnostics for MCP clients. Returns package/cwd/workspace context status, " +
+        "recent notes/decisions counts, context-pack/summary/run-preflight readiness, tracked local overseer state files, " +
+        "possible stale dist build indicator, and one recommended next action. No files are created or modified.",
+      inputSchema: {},
+    },
+    async (args) => {
+      const result = await readOverseerDoctor(args);
       return jsonResult(result);
     },
   );

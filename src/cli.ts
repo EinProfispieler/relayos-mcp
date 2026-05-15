@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -29,6 +29,7 @@ import {
   appendDecision,
   appendNote,
   buildOverseerContextPack,
+  buildOverseerDoctor,
   buildOverseerSummary,
   buildOverseerRunPreflight,
   hasOverseerState,
@@ -52,33 +53,6 @@ import { ensureStorage, resolveStorageLayout } from "./storage.js";
 interface CliIO {
   stdout: { write: (chunk: string) => unknown; isTTY?: boolean };
   stderr: { write: (chunk: string) => unknown };
-}
-
-interface OverseerDoctorCheck {
-  name: string;
-  status: "pass" | "warn" | "fail";
-  detail: string;
-}
-
-interface OverseerDoctorResult {
-  ok: boolean;
-  tool: "overseer-doctor";
-  workspace_path: string;
-  version: string;
-  context_complete: boolean;
-  missing: string[];
-  recent_notes_count: number;
-  recent_decisions_count: number;
-  run_preflight_ready: boolean;
-  tracked_local_state_files: string[];
-  stale_build_possible: boolean;
-  checks: OverseerDoctorCheck[];
-  recommended_next_action:
-    | "ready"
-    | "run npm run build"
-    | "initialize/fix local overseer context"
-    | "inspect missing files";
-  notes: string[];
 }
 
 function usage(): string {
@@ -700,36 +674,6 @@ async function runGitCommand(
   });
 }
 
-function readPackageVersionFromCwd(cwd: string): string | null {
-  try {
-    const raw = readFileSync(join(cwd, "package.json"), "utf8");
-    const parsed = JSON.parse(raw) as { version?: unknown };
-    return typeof parsed.version === "string" && parsed.version.length > 0 ? parsed.version : null;
-  } catch {
-    return null;
-  }
-}
-
-async function listTrackedOverseerStateFiles(cwd: string): Promise<string[]> {
-  const result = await runGitCommand(cwd, ["ls-files", "--", ".relayos/overseer"]);
-  if (!result.ok) return [];
-  return result.stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-}
-
-function detectStaleCliBuild(cwd: string): boolean {
-  const srcPath = join(cwd, "src", "cli.ts");
-  const distPath = join(cwd, "dist", "cli.js");
-  if (!existsSync(srcPath) || !existsSync(distPath)) return true;
-  try {
-    return statSync(srcPath).mtimeMs > statSync(distPath).mtimeMs;
-  } catch {
-    return true;
-  }
-}
-
 async function appearsGitTrackedInSourceRepo(
   sourceRepoAbs: string,
   runtimePathAbs: string,
@@ -1348,101 +1292,7 @@ async function runOverseerDoctor(args: string[], io: CliIO): Promise<number> {
   }
 
   const cwd = process.cwd();
-  const layout = resolveOverseerLayout(cwd);
-  const version = readPackageVersionFromCwd(cwd) ?? "unknown";
-  const [context, pack, summary, preflight, trackedFiles] = await Promise.all([
-    readOverseerContextSnapshot(cwd),
-    buildOverseerContextPack(cwd, 8),
-    buildOverseerSummary(cwd, 8),
-    buildOverseerRunPreflight(cwd),
-    listTrackedOverseerStateFiles(cwd),
-  ]);
-  const staleBuildPossible = detectStaleCliBuild(cwd);
-
-  const checks: OverseerDoctorCheck[] = [
-    {
-      name: "package_version_visible",
-      status: version === "unknown" ? "warn" : "pass",
-      detail:
-        version === "unknown"
-          ? "Could not read package.json version from current working directory."
-          : `package.json version is ${version}.`,
-    },
-    {
-      name: "context_complete",
-      status: context.ok ? "pass" : "warn",
-      detail: context.ok
-        ? "Required local overseer files are present."
-        : `Missing required overseer files: ${context.missing.join(", ")}.`,
-    },
-    {
-      name: "context_pack_available",
-      status: pack.ok ? "pass" : "warn",
-      detail: pack.ok
-        ? "Context-pack builder returned deterministic read-only output."
-        : "Context-pack builder reported incomplete local context.",
-    },
-    {
-      name: "summary_available",
-      status: summary.ok ? "pass" : "warn",
-      detail: summary.ok
-        ? "Summary builder returned deterministic read-only output."
-        : "Summary builder reported incomplete local context.",
-    },
-    {
-      name: "run_preflight_ready",
-      status: preflight.ready_for_future_run ? "pass" : "warn",
-      detail: preflight.ready_for_future_run
-        ? "Run-preflight reports ready_for_future_run=yes."
-        : "Run-preflight reports ready_for_future_run=no.",
-    },
-    {
-      name: "tracked_local_state_files",
-      status: trackedFiles.length === 0 ? "pass" : "fail",
-      detail:
-        trackedFiles.length === 0
-          ? "No tracked .relayos/overseer files detected."
-          : `Tracked .relayos/overseer files detected (${trackedFiles.length}).`,
-    },
-    {
-      name: "dist_cli_freshness",
-      status: staleBuildPossible ? "warn" : "pass",
-      detail: staleBuildPossible
-        ? "dist/cli.js may be stale relative to src/cli.ts (or missing)."
-        : "dist/cli.js is not older than src/cli.ts.",
-    },
-  ];
-
-  let recommendedNextAction: OverseerDoctorResult["recommended_next_action"] = "ready";
-  if (staleBuildPossible) {
-    recommendedNextAction = "run npm run build";
-  } else if (context.missing.length > 0) {
-    recommendedNextAction =
-      context.missing.length > 2
-        ? "initialize/fix local overseer context"
-        : "inspect missing files";
-  }
-
-  const result: OverseerDoctorResult = {
-    ok: checks.every((c) => c.status === "pass"),
-    tool: "overseer-doctor",
-    workspace_path: layout.dir,
-    version,
-    context_complete: context.ok,
-    missing: context.missing,
-    recent_notes_count: summary.notes_count,
-    recent_decisions_count: summary.decisions_count,
-    run_preflight_ready: preflight.ready_for_future_run,
-    tracked_local_state_files: trackedFiles,
-    stale_build_possible: staleBuildPossible,
-    checks,
-    recommended_next_action: recommendedNextAction,
-    notes: [
-      "Read-only diagnostics only; no overseer files are created or modified.",
-      "Uses existing context, context-pack, summary, and run-preflight builders.",
-      "No runtime activation, runner, queue, daemon, or provider integration is performed.",
-    ],
-  };
+  const result = await buildOverseerDoctor(cwd);
 
   if (wantsJson) {
     io.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
