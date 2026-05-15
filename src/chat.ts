@@ -10,7 +10,6 @@ import { buildActionProposal, type ActionProposal } from "./action_dispatch.js";
 import { resolveStorageLayout, ensureStorage } from "./storage.js";
 import { createAuditWriter } from "./audit.js";
 import { createHandoff } from "./tools/create_handoff.js";
-import { runOverseerExecuteHandoffById } from "./overseer_execute_handoff.js";
 
 type ExitReason = "user_exit" | "eof" | "sigint";
 
@@ -172,6 +171,14 @@ function askLine(rl: Interface): Promise<string | null> {
   });
 }
 
+async function runExecuteHandoffFromCli(
+  handoffId: string,
+  io: { stdout: { write: (chunk: string) => unknown }; stderr: { write: (chunk: string) => unknown } },
+): Promise<number> {
+  const mod = await import("./cli.js");
+  return mod.runOverseerExecuteHandoffById(handoffId, io);
+}
+
 export async function runChat(args: string[], options: ChatRuntimeOptions = {}): Promise<number> {
   if (args.length > 0) {
     process.stderr.write(CHAT_USAGE);
@@ -264,7 +271,7 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
         continue;
       }
       output.write(`Executing session handoff: ${runTarget.handoffId}\n`);
-      const exitCode = await runOverseerExecuteHandoffById(
+      const exitCode = await runExecuteHandoffFromCli(
         runTarget.handoffId,
         { stdout: output, stderr: output },
       );

@@ -1911,6 +1911,13 @@ async function runOverseerExecuteHandoff(args: string[], io: CliIO): Promise<num
   return result.exit_code === 0 ? 0 : 1;
 }
 
+export async function runOverseerExecuteHandoffById(
+  handoffId: string,
+  io: { stdout: { write: (chunk: string) => unknown }; stderr: { write: (chunk: string) => unknown } },
+): Promise<number> {
+  return runOverseerExecuteHandoff([handoffId], io);
+}
+
 async function runOverseerHandoffResult(args: string[], io: CliIO): Promise<number> {
   const [sub, ...rest] = args;
   if (sub === "add") {
