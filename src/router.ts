@@ -14,6 +14,16 @@ interface RoutingRule {
 
 const ROUTING_RULES: readonly RoutingRule[] = [
   {
+    keywords: ["commit", "push", "tag", "release", "merge", "publish"],
+    decision: {
+      target: "approval",
+      model: "current-session",
+      effort: "medium",
+      mode: "release_control",
+      approval_required: true,
+    },
+  },
+  {
     keywords: ["review", "audit", "check", "inspect"],
     decision: {
       target: "claude-reviewer",
@@ -24,7 +34,7 @@ const ROUTING_RULES: readonly RoutingRule[] = [
     },
   },
   {
-    keywords: ["implement", "test", "cli", "mcp", "patch", "fix", "code", "change"],
+    keywords: ["implement", "test", "tests", "cli", "mcp", "patch", "fix", "code", "change"],
     decision: {
       target: "codex",
       model: "gpt-5.3-codex",
@@ -41,16 +51,6 @@ const ROUTING_RULES: readonly RoutingRule[] = [
       effort: "medium",
       mode: "plan",
       approval_required: false,
-    },
-  },
-  {
-    keywords: ["commit", "push", "tag", "release"],
-    decision: {
-      target: "release-control",
-      model: "n/a",
-      effort: "low",
-      mode: "release-control",
-      approval_required: true,
     },
   },
 ];
