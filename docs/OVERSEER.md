@@ -31,8 +31,6 @@ Prints the current next action and the five most recent notes. If no state exist
 
 `--json` prints the same core status data as stable machine-readable JSON.
 
-```
-
 ### `overseer context`
 
 Read-only context availability check for local `.relayos/overseer/` canonical files.
@@ -439,7 +437,8 @@ Production runtime state — coordination notes, sub-run outputs, generated repo
 
 ## Non-goals
 
-- No cloud sync, no MCP tool surface, no background runner.
+- No cloud sync and no cloud/server-side MCP surface.
+- No background runner, daemon, or autonomous runtime.
 - No structured query, search, or pagination of notes.
 - No multi-project or cross-repo scope — storage is always project-local.
 - No encryption or access control — treat as local scratch space.
