@@ -54,8 +54,11 @@ describe("renderCodexTarget", () => {
     expect(r.prompt).toContain("read_overseer_summary");
     expect(r.prompt).toContain("read_overseer_context_pack");
     expect(r.prompt).toContain("read_overseer_recent");
+    expect(r.prompt).toContain("write_handoff_result");
+    expect(r.prompt).toContain("structured result evidence");
     expect(r.prompt).toContain("before execution");
     expect(r.prompt).toContain("Do not edit files");
+    expect(r.prompt).toContain("Do not commit/push/tag/release");
   });
 });
 
@@ -106,8 +109,11 @@ describe("renderClaudeTarget", () => {
     expect(r.prompt).toContain("read_overseer_summary");
     expect(r.prompt).toContain("read_overseer_context_pack");
     expect(r.prompt).toContain("read_overseer_recent");
+    expect(r.prompt).toContain("write_handoff_result");
+    expect(r.prompt).toContain("structured result evidence");
     expect(r.prompt).toContain("before execution");
     expect(r.prompt).toContain("Do not edit files");
+    expect(r.prompt).toContain("Do not commit/push/tag/release");
   });
 });
 

@@ -79,6 +79,10 @@ export function buildPromptPrefix(h: RenderableHandoff): string {
   lines.push(
     "Use the returned session contract/summary/context as execution context. Do not edit files before execution unless user-approved scoped work is explicitly authorized by this handoff.",
   );
+  lines.push(
+    "After execution, submit structured result evidence with write_handoff_result (run_id, status, summary, and tests/blockers/review flags when applicable), then optionally append a timeline note via write_overseer_note.",
+  );
+  lines.push("Do not commit/push/tag/release unless explicitly user-approved.");
   lines.push("");
 
   lines.push("Expected output:");

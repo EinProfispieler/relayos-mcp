@@ -346,6 +346,7 @@ Available inside any MCP-capable agent session once the server is registered.
 | `doctor` | Run health checks; never throws on broken state. |
 
 Rendered handoff prompts now include a RelayOS overseer MCP bootstrap reminder (`read_overseer_bootstrap_prompt` → `read_overseer_doctor` → `read_overseer_handshake` → `read_overseer_summary` → `read_overseer_context_pack` → `read_overseer_recent`) for RelayOS-aware clients. This is prompt guidance only, not automatic execution, not daemon behavior, and not a security sandbox.
+Rendered prompts also guide agents to submit structured completion evidence via `write_handoff_result` after approved scoped execution. This remains guidance only, not automatic execution.
 
 ### CLI commands
 

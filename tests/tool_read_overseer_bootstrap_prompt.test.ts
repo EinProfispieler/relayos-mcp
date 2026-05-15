@@ -42,6 +42,10 @@ describe("read_overseer_bootstrap_prompt", () => {
     expect(result.prompt).toContain('read_overseer_summary {"limit":8}');
     expect(result.prompt).toContain('read_overseer_context_pack {"limit":8}');
     expect(result.prompt).toContain('read_overseer_recent {"limit":8}');
+    expect(result.prompt).toContain("write_handoff_result");
+    expect(result.prompt).toContain("run_id, status, summary");
+    expect(result.prompt).toContain("tests_run/test_result");
+    expect(result.prompt).toContain("needs_review/requires_user_approval");
     expect(result.prompt).toContain("Do not commit/push/tag/release without explicit user approval.");
     expect(result.prompt).toContain("Recommend exactly one next safe action");
     expect(result.recommended_first_calls).toEqual([
@@ -53,6 +57,7 @@ describe("read_overseer_bootstrap_prompt", () => {
     ]);
     expect(Array.isArray(result.safety_boundaries)).toBe(true);
     expect(Array.isArray(result.notes)).toBe(true);
+    expect(result.notes.join(" ")).toContain("write_handoff_result");
     expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
   });
 

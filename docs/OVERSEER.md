@@ -85,6 +85,8 @@ Current overseer MCP surface for this bootstrap flow:
   `requires_explicit_user_approval_for` as the session contract.
 - Use `write_overseer_note` only after handshake when you need to append
   local gitignored timeline notes; it is optional.
+- After approved scoped handoff execution, use `write_handoff_result` to append
+  structured completion evidence (`run_id`, `status`, `summary`, and optional test/blocker/review fields).
 - Use `read_overseer_recent` only after handshake when you need a
   read-only compact view of local overseer state and recent notes.
 - Do not assume RelayOS is a daemon, autonomous agent, or hard security

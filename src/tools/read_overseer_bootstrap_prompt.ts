@@ -37,7 +37,8 @@ function buildPrompt(): string {
     "10) Recommend exactly one next safe action based on handshake + summary state.",
     "11) Do not free-form \"Implement {feature}\" without explicit user-scoped approval.",
     "12) Do not commit/push/tag/release without explicit user approval.",
-    "13) After completing approved work, call write_overseer_note to record progress.",
+    "13) After completing approved scoped handoff work, call write_handoff_result with run_id, status, summary, tests_run/test_result when applicable, blockers when applicable, and needs_review/requires_user_approval flags as needed.",
+    "14) After completing approved work, call write_overseer_note to record progress.",
   ].join("\n");
 }
 
@@ -66,6 +67,7 @@ export async function readOverseerBootstrapPrompt(
     notes: [
       ...handshake.notes,
       "Bootstrap prompt is read-only and does not create or modify local files.",
+      "Use write_handoff_result after approved scoped handoff execution to append structured result evidence.",
       "Use write_overseer_note after approved tasks to keep local progress timeline current.",
     ],
   };
