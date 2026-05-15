@@ -268,6 +268,18 @@ export interface OverseerRunPreflight {
   notes: string[];
 }
 
+export interface OverseerCapabilities {
+  ok: boolean;
+  tool: "read_overseer_capabilities";
+  workspace_path: string;
+  capability_policy_version: "2026-05-15.static-v1";
+  allowed_by_default: string[];
+  requires_explicit_approval: string[];
+  forbidden: string[];
+  detected_surfaces: string[];
+  notes: string[];
+}
+
 export interface OverseerSummary {
   ok: boolean;
   protocol: "relayos-overseer-session-v1";
@@ -606,6 +618,74 @@ export async function buildOverseerRunPreflight(
       "No agent process was started.",
       "Runner/queue/runtime activation are not active in current Core.",
       "High-risk actions still require explicit human approval (commit/push/tag/release/deletion/schema/runtime/provider).",
+    ],
+  };
+}
+
+export async function buildOverseerCapabilities(
+  cwd: string,
+): Promise<OverseerCapabilities> {
+  const layout = resolveOverseerLayout(cwd);
+  return {
+    ok: true,
+    tool: "read_overseer_capabilities",
+    workspace_path: layout.dir,
+    capability_policy_version: "2026-05-15.static-v1",
+    allowed_by_default: [
+      "Read repository files.",
+      "Read RelayOS context, summary, doctor, preflight, and capability surfaces.",
+      "Write overseer notes, decisions, and handoff results only after approved scoped work.",
+      "Use known RelayOS MCP read surfaces for local continuity recovery.",
+    ],
+    requires_explicit_approval: [
+      "Edit scoped files.",
+      "Run build/tests if not already part of the approved task.",
+      "Install or update packages.",
+      "Use network access.",
+      "Commit, push, tag, or release.",
+      "Run outside a failed sandbox for environment recovery.",
+      "Modify shell profiles or global npm, git, proxy, or system configuration.",
+    ],
+    forbidden: [
+      "Runner, queue, daemon, or autonomous runtime activation.",
+      "Provider/API/cloud/telemetry integration.",
+      "Raw full chat sync.",
+      "Secret inspection or exfiltration.",
+      "Vector DB or memory index service.",
+      "UI, server, account, or billing features.",
+      "Storage, envelope, or audit schema changes unless explicitly approved.",
+      "Automatic Claude/Codex switching.",
+    ],
+    detected_surfaces: [
+      "CLI: relayos overseer context",
+      "CLI: relayos overseer handshake",
+      "CLI: relayos overseer recent",
+      "CLI: relayos overseer context-pack",
+      "CLI: relayos overseer run-preflight",
+      "CLI: relayos overseer summary",
+      "CLI: relayos overseer doctor",
+      "CLI: relayos overseer capabilities",
+      "CLI: relayos overseer note",
+      "CLI: relayos overseer decision/decisions",
+      "CLI: relayos overseer handoff-result/handoff-results",
+      "MCP: read_overseer_bootstrap_prompt",
+      "MCP: read_overseer_handshake",
+      "MCP: read_overseer_context_pack",
+      "MCP: read_overseer_run_preflight",
+      "MCP: read_overseer_summary",
+      "MCP: read_overseer_doctor",
+      "MCP: read_overseer_capabilities",
+      "MCP: read_overseer_recent",
+      "MCP: read_overseer_decisions",
+      "MCP: read_handoff_result/read_handoff_results",
+      "MCP: write_overseer_note",
+      "MCP: write_overseer_decision",
+      "MCP: write_handoff_result",
+    ],
+    notes: [
+      "Static read-only capability policy snapshot; no external tool discovery is performed.",
+      "No secrets, network services, system settings, runtime activation, runner, queue, daemon, provider, cloud, telemetry, or schema changes are inspected or modified.",
+      "This snapshot describes RelayOS overseer/session policy posture before handoff or runtime-adjacent work proceeds.",
     ],
   };
 }

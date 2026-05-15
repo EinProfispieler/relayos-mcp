@@ -28,6 +28,7 @@ import { readHandoff } from "./tools/read_handoff.js";
 import { readLatestHandoff } from "./tools/read_latest_handoff.js";
 import { readOverseerHandshake } from "./tools/read_overseer_handshake.js";
 import { readOverseerBootstrapPrompt } from "./tools/read_overseer_bootstrap_prompt.js";
+import { readOverseerCapabilities } from "./tools/read_overseer_capabilities.js";
 import { readOverseerContextPack } from "./tools/read_overseer_context_pack.js";
 import { readOverseerDecisions } from "./tools/read_overseer_decisions.js";
 import { readOverseerDoctor } from "./tools/read_overseer_doctor.js";
@@ -385,6 +386,22 @@ export async function buildServer() {
     },
     async (args) => {
       const result = await readOverseerRunPreflight(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "read_overseer_capabilities",
+    {
+      title: "Read overseer capabilities",
+      description:
+        "Read-only static RelayOS overseer capability policy snapshot. Reports allowed-by-default actions, " +
+        "actions requiring explicit approval, forbidden actions, and known RelayOS CLI/MCP surfaces. " +
+        "No files are created or modified; no external tools, secrets, network services, or runtime state are inspected.",
+      inputSchema: {},
+    },
+    async (args) => {
+      const result = await readOverseerCapabilities(args);
       return jsonResult(result);
     },
   );

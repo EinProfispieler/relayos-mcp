@@ -29,6 +29,7 @@ import {
   appendDecision,
   appendHandoffResult,
   appendNote,
+  buildOverseerCapabilities,
   buildOverseerContextPack,
   buildOverseerDoctor,
   buildOverseerSummary,
@@ -1243,6 +1244,40 @@ async function runOverseerRunPreflight(args: string[], io: CliIO): Promise<numbe
   return 0;
 }
 
+async function runOverseerCapabilities(args: string[], io: CliIO): Promise<number> {
+  const wantsJson = args.length === 1 && args[0] === "--json";
+  if (args.length > 1 || (args.length === 1 && !wantsJson)) {
+    io.stderr.write("usage: relayos overseer capabilities [--json]\n");
+    return 1;
+  }
+
+  const capabilities = await buildOverseerCapabilities(process.cwd());
+
+  if (wantsJson) {
+    io.stdout.write(`${JSON.stringify(capabilities, null, 2)}\n`);
+    return 0;
+  }
+
+  const lines = [
+    "OVERSEER CAPABILITIES",
+    OVERSEER_SEP,
+    `  workspace: ${capabilities.workspace_path}`,
+    `  policy version: ${capabilities.capability_policy_version}`,
+    "  allowed by default:",
+    ...capabilities.allowed_by_default.map((item) => `    - ${item}`),
+    "  requires explicit approval:",
+    ...capabilities.requires_explicit_approval.map((item) => `    - ${item}`),
+    "  forbidden:",
+    ...capabilities.forbidden.map((item) => `    - ${item}`),
+    "  detected surfaces:",
+    ...capabilities.detected_surfaces.map((item) => `    - ${item}`),
+    "  notes:",
+    ...capabilities.notes.map((item) => `    - ${item}`),
+  ];
+  io.stdout.write(`${lines.join("\n")}\n`);
+  return 0;
+}
+
 async function runOverseerSummary(args: string[], io: CliIO): Promise<number> {
   const parsed = parseOverseerContextPackArgs(args);
   if (!parsed) {
@@ -2044,6 +2079,7 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "recent") return runOverseerRecent(rest, io);
   if (sub === "context-pack") return runOverseerContextPack(rest, io);
   if (sub === "run-preflight") return runOverseerRunPreflight(rest, io);
+  if (sub === "capabilities") return runOverseerCapabilities(rest, io);
   if (sub === "summary") return runOverseerSummary(rest, io);
   if (sub === "doctor") return runOverseerDoctor(rest, io);
   if (sub === "note") return runOverseerNote(rest, io);
@@ -2064,7 +2100,7 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "branch") return runOverseerBranch(rest, io);
   if (sub === "progress") return runOverseerProgress(rest, io);
   io.stderr.write(
-    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|summary|doctor|note|decision|decisions|handoff-result|handoff-results|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
+    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|capabilities|summary|doctor|note|decision|decisions|handoff-result|handoff-results|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
   );
   return 1;
 }

@@ -606,6 +606,66 @@ describe("relayos overseer run-preflight", () => {
   });
 });
 
+describe("relayos overseer capabilities", () => {
+  it("prints compact human-readable capability policy output", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "capabilities"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("OVERSEER CAPABILITIES");
+    expect(cap.stdout).toContain("allowed by default:");
+    expect(cap.stdout).toContain("requires explicit approval:");
+    expect(cap.stdout).toContain("forbidden:");
+    expect(cap.stdout).toContain("detected surfaces:");
+    expect(cap.stdout).toContain("read_overseer_capabilities");
+    expect(cap.stderr).toBe("");
+  });
+
+  it("prints stable JSON output", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "capabilities", "--json"], cap.io);
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect(data.ok).toBe(true);
+    expect(data.tool).toBe("read_overseer_capabilities");
+    expect(typeof data.workspace_path).toBe("string");
+    expect(typeof data.capability_policy_version).toBe("string");
+    expect(Array.isArray(data.allowed_by_default)).toBe(true);
+    expect(Array.isArray(data.requires_explicit_approval)).toBe(true);
+    expect(Array.isArray(data.forbidden)).toBe(true);
+    expect(Array.isArray(data.detected_surfaces)).toBe(true);
+    expect(Array.isArray(data.notes)).toBe(true);
+    expect((data.detected_surfaces as string[])).toContain("CLI: relayos overseer capabilities");
+    expect(cap.stderr).toBe("");
+  });
+
+  it("does not create .relayos/overseer state", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "capabilities"], cap.io);
+
+    expect(code).toBe(0);
+    expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
+  });
+
+  it("exits 1 with usage on unsupported flags", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "capabilities", "--yaml"], cap.io);
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("usage: relayos overseer capabilities");
+  });
+});
+
 describe("relayos overseer summary", () => {
   it("prints compact deterministic human-readable summary output", async () => {
     chdir(tempDir());
