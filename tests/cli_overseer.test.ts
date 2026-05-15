@@ -2337,3 +2337,54 @@ describe("relayos overseer progress", () => {
     expect(cap.stdout).toContain("no branch progress recorded");
   });
 });
+
+describe("relayos overseer memory-index", () => {
+  it("prints human-readable memory index output", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "memory-index"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("OVERSEER MEMORY INDEX");
+    expect(cap.stdout).toContain("retrieval priority:");
+    expect(cap.stdout).toContain("categories:");
+    expect(cap.stderr).toBe("");
+  });
+
+  it("prints stable JSON output", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "memory-index", "--json"], cap.io);
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect(data.tool).toBe("read_overseer_memory_index");
+    expect(data.generated_live).toBe(true);
+    expect(data.persisted).toBe(false);
+    expect(typeof data.record_counts).toBe("object");
+    expect(typeof data.categories).toBe("object");
+  });
+
+  it("follows usage behavior on unsupported flags", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "memory-index", "--yaml"], cap.io);
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("usage: relayos overseer memory-index");
+  });
+
+  it("is read-only and does not create .relayos/overseer", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "memory-index", "--json"], cap.io);
+
+    expect(code).toBe(0);
+    expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
+  });
+});

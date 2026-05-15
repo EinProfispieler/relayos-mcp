@@ -332,6 +332,50 @@ export interface OverseerDoctor {
   notes: string[];
 }
 
+export type OverseerMemoryIndexCategory =
+  | "project_state"
+  | "current_version_release_state"
+  | "workflow_rules"
+  | "product_decisions"
+  | "implementation_notes"
+  | "handoff_results"
+  | "blockers"
+  | "environment_recovery_policy"
+  | "capability_policy"
+  | "docs_backlog"
+  | "next_actions"
+  | "forbidden_actions";
+
+export interface OverseerMemoryIndexItem {
+  source: string;
+  priority: number;
+  ts: string | null;
+  text: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface OverseerMemoryIndexStaleness {
+  stale_build_possible: boolean;
+  release_info_stale: boolean | null;
+  note: string;
+}
+
+export interface OverseerMemoryIndex {
+  ok: boolean;
+  tool: "read_overseer_memory_index";
+  workspace_path: string;
+  memory_index_version: "2026-05-15.live-v1";
+  generated_live: true;
+  persisted: false;
+  current_head: string | null;
+  package_version: string | null;
+  record_counts: Record<string, number>;
+  retrieval_priority: string[];
+  categories: Record<OverseerMemoryIndexCategory, OverseerMemoryIndexItem[]>;
+  staleness: OverseerMemoryIndexStaleness;
+  notes: string[];
+}
+
 async function runGitCommand(
   cwd: string,
   args: string[],
@@ -345,6 +389,19 @@ async function runGitCommand(
       resolveRun({ ok: true, stdout });
     });
   });
+}
+
+function compactOneLine(value: string): string {
+  const line = value.replace(/\s+/g, " ").trim();
+  return line.length <= 280 ? line : `${line.slice(0, 277)}...`;
+}
+
+function pushIndexItem(
+  categories: Record<OverseerMemoryIndexCategory, OverseerMemoryIndexItem[]>,
+  category: OverseerMemoryIndexCategory,
+  item: OverseerMemoryIndexItem,
+) {
+  categories[category].push(item);
 }
 
 function readPackageVersionFromCwd(cwd: string): string | null {
@@ -825,6 +882,220 @@ export async function buildOverseerDoctor(cwd: string): Promise<OverseerDoctor> 
       "Read-only diagnostics only; no overseer files are created or modified.",
       "Uses existing context, context-pack, summary, and run-preflight builders.",
       "No runtime activation, runner, queue, daemon, or provider integration is performed.",
+    ],
+  };
+}
+
+export async function buildOverseerMemoryIndex(
+  cwd: string,
+  limit = 8,
+): Promise<OverseerMemoryIndex> {
+  const safeLimit = Number.isInteger(limit) && limit >= 1 && limit <= 20 ? limit : 8;
+  const layout = resolveOverseerLayout(cwd);
+  const packageVersion = readPackageVersionFromCwd(cwd);
+  const [headResult, summary, capabilities, doctor, decisions, handoffResults, notes] =
+    await Promise.all([
+      runGitCommand(cwd, ["rev-parse", "HEAD"]),
+      buildOverseerSummary(cwd, safeLimit),
+      buildOverseerCapabilities(cwd),
+      buildOverseerDoctor(cwd),
+      readLatestDecisions(layout, safeLimit),
+      readLatestHandoffResults(layout, safeLimit),
+      readLatestNotes(layout, safeLimit),
+    ]);
+
+  const docsBacklogSignals: OverseerMemoryIndexItem[] = [];
+  for (const path of summary.evidence_links.filter((p) => p.includes("/docs/"))) {
+    if (!existsSync(path)) continue;
+    const content = readFileSync(path, "utf8").trim();
+    if (!content) continue;
+    const first = compactText(content) ?? compactOneLine(content);
+    docsBacklogSignals.push({
+      source: "docs_backlog",
+      priority: 6,
+      ts: null,
+      text: first,
+      metadata: { path: path.replace(`${cwd}/`, "") },
+    });
+  }
+
+  const categories: Record<OverseerMemoryIndexCategory, OverseerMemoryIndexItem[]> = {
+    project_state: [],
+    current_version_release_state: [],
+    workflow_rules: [],
+    product_decisions: [],
+    implementation_notes: [],
+    handoff_results: [],
+    blockers: [],
+    environment_recovery_policy: [],
+    capability_policy: [],
+    docs_backlog: [],
+    next_actions: [],
+    forbidden_actions: [],
+  };
+
+  if (summary.project_summary) {
+    pushIndexItem(categories, "project_state", {
+      source: "summary",
+      priority: 2,
+      ts: null,
+      text: summary.project_summary,
+      metadata: { field: "project_summary" },
+    });
+  }
+  if (summary.current_state) {
+    pushIndexItem(categories, "project_state", {
+      source: "summary",
+      priority: 2,
+      ts: null,
+      text: summary.current_state,
+      metadata: { field: "current_state" },
+    });
+  }
+  if (summary.next_action) {
+    pushIndexItem(categories, "next_actions", {
+      source: "summary",
+      priority: 2,
+      ts: null,
+      text: summary.next_action,
+      metadata: { field: "next_action" },
+    });
+  }
+
+  for (const decision of decisions) {
+    pushIndexItem(categories, "product_decisions", {
+      source: "decisions",
+      priority: 1,
+      ts: decision.ts,
+      text: compactOneLine(decision.text),
+      metadata: {},
+    });
+  }
+
+  for (const result of handoffResults) {
+    pushIndexItem(categories, "handoff_results", {
+      source: "handoff_results",
+      priority: 3,
+      ts: result.ts,
+      text: `${result.run_id} ${result.status}: ${compactOneLine(result.summary)}`,
+      metadata: { run_id: result.run_id, status: result.status },
+    });
+    if (
+      result.status === "blocked" ||
+      result.status === "failed" ||
+      result.status === "needs_review"
+    ) {
+      pushIndexItem(categories, "blockers", {
+        source: "handoff_results",
+        priority: 3,
+        ts: result.ts,
+        text: `${result.run_id} ${result.status}: ${compactOneLine(result.summary)}`,
+        metadata: {
+          run_id: result.run_id,
+          status: result.status,
+          blockers: result.blockers ?? [],
+        },
+      });
+    }
+  }
+
+  for (const note of notes) {
+    pushIndexItem(categories, "implementation_notes", {
+      source: "recent_notes",
+      priority: 5,
+      ts: note.ts,
+      text: compactOneLine(note.text),
+      metadata: {},
+    });
+  }
+
+  for (const item of capabilities.requires_explicit_approval) {
+    pushIndexItem(categories, "workflow_rules", {
+      source: "capabilities",
+      priority: 4,
+      ts: null,
+      text: item,
+      metadata: { approval: true },
+    });
+  }
+  for (const item of capabilities.forbidden) {
+    pushIndexItem(categories, "forbidden_actions", {
+      source: "capabilities",
+      priority: 4,
+      ts: null,
+      text: item,
+      metadata: {},
+    });
+  }
+  for (const item of capabilities.allowed_by_default) {
+    pushIndexItem(categories, "capability_policy", {
+      source: "capabilities",
+      priority: 4,
+      ts: null,
+      text: item,
+      metadata: {},
+    });
+  }
+
+  pushIndexItem(categories, "environment_recovery_policy", {
+    source: "doctor",
+    priority: 4,
+    ts: null,
+    text: `recommended_next_action=${doctor.recommended_next_action}`,
+    metadata: { stale_build_possible: doctor.stale_build_possible },
+  });
+  pushIndexItem(categories, "current_version_release_state", {
+    source: "doctor",
+    priority: 4,
+    ts: null,
+    text: `package_version=${packageVersion ?? "unknown"} current_head=${headResult.ok ? headResult.stdout.trim() : "unknown"}`,
+    metadata: {
+      package_version: packageVersion,
+      current_head: headResult.ok ? headResult.stdout.trim() : null,
+    },
+  });
+
+  for (const item of docsBacklogSignals) {
+    pushIndexItem(categories, "docs_backlog", item);
+  }
+
+  return {
+    ok: true,
+    tool: "read_overseer_memory_index",
+    workspace_path: layout.dir,
+    memory_index_version: "2026-05-15.live-v1",
+    generated_live: true,
+    persisted: false,
+    current_head: headResult.ok ? headResult.stdout.trim() : null,
+    package_version: packageVersion,
+    record_counts: {
+      decisions: decisions.length,
+      summary: [summary.project_summary, summary.current_state, summary.next_action].filter(Boolean)
+        .length,
+      handoff_results: handoffResults.length,
+      capabilities_doctor: capabilities.allowed_by_default.length + capabilities.forbidden.length + 1,
+      recent_notes: notes.length,
+      docs_backlog: docsBacklogSignals.length,
+      total: Object.values(categories).reduce((acc, list) => acc + list.length, 0),
+    },
+    retrieval_priority: [
+      "decisions",
+      "summary",
+      "handoff_results",
+      "capabilities/doctor",
+      "recent_notes",
+      "docs_backlog",
+    ],
+    categories,
+    staleness: {
+      stale_build_possible: doctor.stale_build_possible,
+      release_info_stale: null,
+      note: "release/version staleness is only flagged when deterministic local evidence exists; otherwise null",
+    },
+    notes: [
+      "Read-only live generated memory index built from curated local sources only.",
+      "No raw full chat history sync and no private raw conversation storage.",
+      "No persistent index file, vector DB, embeddings, runtime/runner/queue/provider/cloud/telemetry, or schema changes.",
     ],
   };
 }

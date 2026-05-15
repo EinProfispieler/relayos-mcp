@@ -37,6 +37,7 @@ import { readHandoffResults } from "./tools/read_handoff_results.js";
 import { readOverseerRecent } from "./tools/read_overseer_recent.js";
 import { readOverseerRunPreflight } from "./tools/read_overseer_run_preflight.js";
 import { readOverseerSummary } from "./tools/read_overseer_summary.js";
+import { readOverseerMemoryIndex } from "./tools/read_overseer_memory_index.js";
 import { writeHandoffResult } from "./tools/write_handoff_result.js";
 import { writeOverseerDecision } from "./tools/write_overseer_decision.js";
 import { writeOverseerNote } from "./tools/write_overseer_note.js";
@@ -420,6 +421,24 @@ export async function buildServer() {
     },
     async (args) => {
       const result = await readOverseerSummary(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "read_overseer_memory_index",
+    {
+      title: "Read overseer memory index",
+      description:
+        "Read-only live-generated overseer memory index from curated local sources only. " +
+        "Returns compact categorized structured state for overseer continuity without syncing raw full chat history. " +
+        "Never creates/modifies/deletes .relayos/overseer files and never persists an index file.",
+      inputSchema: {
+        limit: z.number().int().min(1).max(20).optional(),
+      },
+    },
+    async (args) => {
+      const result = await readOverseerMemoryIndex(args);
       return jsonResult(result);
     },
   );

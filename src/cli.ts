@@ -32,6 +32,7 @@ import {
   buildOverseerCapabilities,
   buildOverseerContextPack,
   buildOverseerDoctor,
+  buildOverseerMemoryIndex,
   buildOverseerSummary,
   buildOverseerRunPreflight,
   type OverseerHandoffResultStatus,
@@ -1331,6 +1332,38 @@ async function runOverseerSummary(args: string[], io: CliIO): Promise<number> {
   return 0;
 }
 
+async function runOverseerMemoryIndex(args: string[], io: CliIO): Promise<number> {
+  const parsed = parseOverseerContextPackArgs(args);
+  if (!parsed) {
+    io.stderr.write("usage: relayos overseer memory-index [--json] [--limit <1-20>]\n");
+    return 1;
+  }
+  const memory = await buildOverseerMemoryIndex(process.cwd(), parsed.limit);
+  if (parsed.wantsJson) {
+    io.stdout.write(`${JSON.stringify(memory, null, 2)}\n`);
+    return 0;
+  }
+
+  const lines = [
+    "OVERSEER MEMORY INDEX",
+    OVERSEER_SEP,
+    `  workspace: ${memory.workspace_path}`,
+    `  index version: ${memory.memory_index_version}`,
+    `  current head: ${memory.current_head ?? "unknown"}`,
+    `  package version: ${memory.package_version ?? "unknown"}`,
+    `  generated_live: ${memory.generated_live ? "yes" : "no"}  persisted: ${memory.persisted ? "yes" : "no"}`,
+    `  retrieval priority: ${memory.retrieval_priority.join(" > ")}`,
+    "  record counts:",
+    ...Object.entries(memory.record_counts).map(([key, value]) => `    - ${key}: ${value}`),
+    "  categories:",
+    ...Object.entries(memory.categories).map(([key, value]) => `    - ${key}: ${value.length}`),
+    "  notes:",
+    ...memory.notes.map((n) => `    - ${n}`),
+  ];
+  io.stdout.write(`${lines.join("\n")}\n`);
+  return 0;
+}
+
 async function runOverseerDoctor(args: string[], io: CliIO): Promise<number> {
   const wantsJson = args.length === 1 && args[0] === "--json";
   if (args.length > 1 || (args.length === 1 && !wantsJson)) {
@@ -2081,6 +2114,7 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "run-preflight") return runOverseerRunPreflight(rest, io);
   if (sub === "capabilities") return runOverseerCapabilities(rest, io);
   if (sub === "summary") return runOverseerSummary(rest, io);
+  if (sub === "memory-index") return runOverseerMemoryIndex(rest, io);
   if (sub === "doctor") return runOverseerDoctor(rest, io);
   if (sub === "note") return runOverseerNote(rest, io);
   if (sub === "decision") return runOverseerDecision(rest, io);
@@ -2100,7 +2134,7 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "branch") return runOverseerBranch(rest, io);
   if (sub === "progress") return runOverseerProgress(rest, io);
   io.stderr.write(
-    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|capabilities|summary|doctor|note|decision|decisions|handoff-result|handoff-results|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
+    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|capabilities|summary|memory-index|doctor|note|decision|decisions|handoff-result|handoff-results|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
   );
   return 1;
 }
