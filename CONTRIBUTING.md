@@ -47,6 +47,18 @@ agree on the approach before opening a PR:
 Small, well-scoped changes (bug fixes, typo fixes, additional test coverage,
 clearer error messages) are welcome without a prior issue.
 
+## Issue privacy warning
+
+GitHub issues are public unless explicitly marked otherwise.
+
+Do not paste:
+
+- secrets (API keys, tokens, passwords, private keys)
+- proprietary source code
+- private prompts
+- logs containing API keys or credentials
+- confidential customer or regulated data
+
 ---
 
 ## Tests are required

@@ -90,6 +90,12 @@ Use `relayos overseer runtime-check` as a read-only alias for `relayos overseer 
 - **Safe from accidental commits.** `.relayos/overseer/` is gitignored in the project repo. Handoff storage (envelopes, checkpoints, audit logs) defaults to `~/.claude/handoff/` — outside any project repo entirely.
 - **No cloud, no accounts, no telemetry.** All storage is local files on your machine.
 
+## Policy links
+
+- [Privacy (RelayOS Core)](PRIVACY.md)
+- [Security](SECURITY.md)
+- [Disclaimer](DISCLAIMER.md)
+
 ## Quick start
 
 ### 1. Install

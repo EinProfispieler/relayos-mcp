@@ -57,6 +57,23 @@ If you discover that a secret has been written to your local
 the relevant envelope and log files. The on-disk format is documented in the
 README so you can grep and clean up confidently.
 
+## Privacy boundary (current Core)
+
+RelayOS Core is local-first. Current Core does not provide cloud sync and does not include telemetry by default.
+
+RelayOS Core does not collect or transmit to a RelayOS-operated service by default:
+
+- source code
+- prompts
+- AI outputs
+- diffs
+- file paths
+- Git remote URLs
+- API keys
+- command output
+
+If future paid/cloud/enterprise services are introduced, they will require separate notice and explicit consent.
+
 ## Reporting a vulnerability
 
 There is no private security mailing address for this project yet.
@@ -76,3 +93,7 @@ appropriate, ask you to move there. A private security contact will be added
 to this file once one exists.
 
 Thank you for helping keep RelayOS safe.
+
+## Legal note
+
+This document is informational and not legal advice. Review with qualified counsel before commercial launch.
