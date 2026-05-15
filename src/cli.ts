@@ -1780,16 +1780,18 @@ function parseArgv(command: string): string[] {
       escaping = false;
       continue;
     }
-    if (char === "\\") {
-      escaping = true;
-      continue;
-    }
     if (quote) {
       if (char === quote) {
         quote = null;
+      } else if (char === "\\" && quote === "\"") {
+        escaping = true;
       } else {
         current += char;
       }
+      continue;
+    }
+    if (char === "\\") {
+      escaping = true;
       continue;
     }
     if (char === "'" || char === "\"") {

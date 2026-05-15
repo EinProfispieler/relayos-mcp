@@ -297,4 +297,35 @@ describe("relayos overseer execute-handoff", () => {
     const opts = runTargetMock.mock.calls[0]![0] as { argv?: string[] };
     expect(opts.argv).toEqual(["codex", "exec", "it's quoted"]);
   });
+
+  it("preserves backslashes inside single-quoted argv segments", async () => {
+    writeEnvelope("h_path", {
+      id: "h_path",
+      status: "recorded",
+      target_agent: "codex",
+      launch_command: String.raw`codex exec 'C:\Users\randy\tmp'`,
+      execution_mode: "patch",
+    });
+    detectCliMock.mockResolvedValue({
+      target_binary: "codex",
+      found: true,
+      resolved_path: "/usr/bin/codex",
+    });
+    runTargetMock.mockResolvedValue({
+      started_at: new Date().toISOString(),
+      finished_at: new Date().toISOString(),
+      exit_code: 0,
+      duration_ms: 50,
+      stdout_tail: "ok",
+      stderr_tail: "",
+    });
+
+    const cap = captureIO();
+    const code = await runCli(["overseer", "execute-handoff", "h_path"], cap.io);
+
+    expect(code).toBe(0);
+    expect(runTargetMock).toHaveBeenCalledOnce();
+    const opts = runTargetMock.mock.calls[0]![0] as { argv?: string[] };
+    expect(opts.argv).toEqual(["codex", "exec", "C:\\Users\\randy\\tmp"]);
+  });
 });
