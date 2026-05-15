@@ -18,10 +18,28 @@ describe("planRoute", () => {
   it("creates approval-required plan for release control routes", () => {
     const route = classifyMessage("please commit and push");
     const plan = planRoute("please commit and push", route);
-    expect(plan.task_type).toBe("release_control");
+    expect(plan.task_type).toBe("release");
     expect(plan.approval_required).toBe(true);
     expect(plan.target).toBe("approval");
     expect(plan.next_action).toContain("approval");
+  });
+
+  it("uses release task_type for commit and push intents", () => {
+    const route = classifyMessage("please commit and push this change");
+    const plan = planRoute("please commit and push this change", route);
+    expect(plan.task_type).toBe("release");
+  });
+
+  it("uses release task_type for tag and release intents", () => {
+    const route = classifyMessage("tag and release this version");
+    const plan = planRoute("tag and release this version", route);
+    expect(plan.task_type).toBe("release");
+  });
+
+  it("keeps implementation task_type for implementation intents", () => {
+    const route = classifyMessage("please fix the CLI bug");
+    const plan = planRoute("please fix the CLI bug", route);
+    expect(plan.task_type).toBe("implementation");
   });
 });
 
