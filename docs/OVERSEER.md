@@ -43,6 +43,9 @@ overseer wake routing.
   - then follow `startup_sequence` exactly
   - do not start repo audits/implementation/docs review before role-profile recovery
   - do not edit/commit/push/tag/release without explicit approval
+  - Codex App defaults for ordinary startup: `Approval = On request`, `Sandbox = Read only`
+  - temporary `workspace-write` only for approved scoped implementation, validation-only build/test/typecheck needing writes, or future explicit project-init writes
+  - do not grant broad/full access by default
 
 ### `overseer init --project --dry-run`
 
@@ -53,6 +56,7 @@ Read-only project-init preview for overseer AGENTS instructions.
 - Detects whether `AGENTS.md` exists at project root (git) or cwd (non-git).
 - Prints exact `RELAYOS-MANAGED AGENTS SECTION` content that should be merged.
 - Prints manual Codex App / Claude setup steps.
+- Prints concise Codex App safe defaults matching wake-instructions output.
 - Always ends with: `No files were written.`
 
 ### `overseer status`

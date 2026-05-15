@@ -82,6 +82,7 @@ Use `relayos overseer run-preflight` for read-only future run readiness checks.
 Use `relayos overseer runtime-check` as a read-only alias for `relayos overseer activate-runtime --dry-run`.
 Use `relayos overseer wake-instructions` to print only the RelayOS-managed AGENTS wake-routing section.
 Use `relayos overseer init --project --dry-run` to preview project AGENTS init instructions without writing files.
+Both outputs include Codex App safe defaults for Overseer startup: `Approval = On request`, `Sandbox = Read only`, read-only by default, scoped temporary `workspace-write` only with explicit approval, and never commit/push/tag/release without separate explicit approval.
 
 ## Safety model
 

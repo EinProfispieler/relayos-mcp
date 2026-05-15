@@ -85,6 +85,11 @@ tool for overseer session binding.
 If you need a copy-paste AGENTS wake block for a project, use
 `relayos overseer wake-instructions` or
 `relayos overseer init --project --dry-run` (preview only, no writes).
+Those outputs include Codex App safe defaults: `Approval = On request`,
+`Sandbox = Read only`, ordinary Overseer startup stays read-only, temporary
+`workspace-write` is only for approved scoped implementation or
+validation-only build/test/typecheck writes, and commit/push/tag/release
+still require separate explicit approval.
 Current overseer MCP surface for this flow:
 
 - `read_overseer_bootstrap_prompt` (optional ready-to-use startup prompt helper)

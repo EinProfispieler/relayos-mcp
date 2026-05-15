@@ -858,6 +858,7 @@ export function buildOverseerRoleProfile(): OverseerRoleProfile {
 
 export function buildOverseerManagedAgentsSection(): string {
   const profile = buildOverseerRoleProfile();
+  const codexAppSafetyDefaults = buildCodexAppSafetyGuidanceLines("- ");
   const lines: string[] = [
     "## RELAYOS-MANAGED OVERSEER INSTRUCTIONS",
     "When any of the following activation phrases appear, enter RelayOS Overseer routing mode immediately:",
@@ -868,8 +869,22 @@ export function buildOverseerManagedAgentsSection(): string {
     "- then follow startup_sequence exactly",
     "- do not start repo audits, implementation, or documentation review before role-profile recovery",
     "- do not edit/commit/push/tag/release without explicit approval",
+    "",
+    "Codex App safe defaults:",
+    ...codexAppSafetyDefaults,
   ];
   return lines.join("\n");
+}
+
+export function buildCodexAppSafetyGuidanceLines(prefix = ""): string[] {
+  return [
+    `${prefix}default approval policy: On request`,
+    `${prefix}default sandbox: Read only`,
+    `${prefix}ordinary Overseer startup runs read-only`,
+    `${prefix}temporary workspace-write only for approved scoped implementation, validation-only build/test/typecheck that require writes, or future explicit project-init writes`,
+    `${prefix}do not commit/push/tag/release without separate explicit approval`,
+    `${prefix}do not grant broad/full access by default`,
+  ];
 }
 
 export async function buildOverseerSummary(

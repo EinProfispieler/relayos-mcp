@@ -2468,6 +2468,10 @@ describe("relayos overseer wake-instructions", () => {
     expect(cap.stdout).toContain("read_overseer_role_profile {}");
     expect(cap.stdout).toContain("then follow startup_sequence exactly");
     expect(cap.stdout).toContain("do not edit/commit/push/tag/release without explicit approval");
+    expect(cap.stdout).toContain("default approval policy: On request");
+    expect(cap.stdout).toContain("default sandbox: Read only");
+    expect(cap.stdout).toContain("ordinary Overseer startup runs read-only");
+    expect(cap.stdout).toContain("do not grant broad/full access by default");
     expect(cap.stderr).toBe("");
   });
 
@@ -2498,6 +2502,9 @@ describe("relayos overseer init --project --dry-run", () => {
     expect(cap.stdout).toContain("AGENTS.md: missing");
     expect(cap.stdout).toContain("decision: DRY_RUN_ONLY");
     expect(cap.stdout).toContain("RELAYOS-MANAGED AGENTS SECTION");
+    expect(cap.stdout).toContain("CODEX APP SAFE DEFAULTS");
+    expect(cap.stdout).toContain("default approval policy: On request");
+    expect(cap.stdout).toContain("default sandbox: Read only");
     expect(cap.stdout).toContain("No files were written.");
     expect(existsSync(join(cwd, "AGENTS.md"))).toBe(false);
     expect(existsSync(join(cwd, ".relayos"))).toBe(false);
@@ -2520,6 +2527,8 @@ describe("relayos overseer init --project --dry-run", () => {
     expect(cap.stdout).toContain(subdir.split("/").pop() ?? subdir);
     expect(cap.stdout).toContain("git repo: yes");
     expect(cap.stdout).toContain("AGENTS.md: exists");
+    expect(cap.stdout).toContain("CODEX APP SAFE DEFAULTS");
+    expect(cap.stdout).toContain("do not commit/push/tag/release without separate explicit approval");
     expect(cap.stdout).toContain("No files were written.");
     expect(readFileSync(join(repo, "AGENTS.md"), "utf8")).toBe("# existing\n");
     expect(existsSync(join(repo, ".relayos"))).toBe(false);
