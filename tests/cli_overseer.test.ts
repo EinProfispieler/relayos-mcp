@@ -600,6 +600,7 @@ describe("relayos overseer summary", () => {
     expect(cap.stdout).toContain("Current state:");
     expect(cap.stdout).toContain("Next action:");
     expect(cap.stdout).toContain("Recent decisions (0/8):");
+    expect(cap.stdout).toContain("Recent handoff results (0/8):");
     expect(cap.stdout).toContain("Recent notes (0/8):");
     expect(cap.stdout).toContain("Run preflight:");
     expect(cap.stdout).toContain("Recommended next safe action:");
@@ -616,6 +617,18 @@ describe("relayos overseer summary", () => {
     await runCli(["overseer", "decision", "add", "decision one"], captureIO().io);
     await runCli(["overseer", "decision", "add", "decision two"], captureIO().io);
     await runCli(["overseer", "decision", "add", "decision three"], captureIO().io);
+    await runCli(
+      ["overseer", "handoff-result", "add", "--run-id", "run-a", "--status", "completed", "--summary", "a"],
+      captureIO().io,
+    );
+    await runCli(
+      ["overseer", "handoff-result", "add", "--run-id", "run-b", "--status", "failed", "--summary", "b"],
+      captureIO().io,
+    );
+    await runCli(
+      ["overseer", "handoff-result", "add", "--run-id", "run-c", "--status", "blocked", "--summary", "c"],
+      captureIO().io,
+    );
     const cap = captureIO();
 
     const code = await runCli(["overseer", "summary", "--json", "--limit", "2"], cap.io);
@@ -637,6 +650,11 @@ describe("relayos overseer summary", () => {
       "decision two",
       "decision three",
     ]);
+    expect(data.handoff_results_count).toBe(2);
+    expect(Array.isArray(data.recent_handoff_results)).toBe(true);
+    expect(
+      (data.recent_handoff_results as Array<Record<string, string>>).map((r) => `${r.run_id}:${r.status}:${r.summary}`),
+    ).toEqual(["run-b:failed:b", "run-c:blocked:c"]);
     expect((data.run_preflight as Record<string, unknown>).tool).toBe("run-preflight");
     expect(typeof data.recommended_next_action_prompt).toBe("string");
     expect(cap.stderr).toBe("");

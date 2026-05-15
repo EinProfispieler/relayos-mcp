@@ -280,6 +280,8 @@ export interface OverseerSummary {
   notes_count: number;
   recent_decisions: OverseerDecision[];
   decisions_count: number;
+  recent_handoff_results: OverseerHandoffResult[];
+  handoff_results_count: number;
   run_preflight: OverseerRunPreflight;
   recommended_next_action_prompt: string;
   evidence_links: string[];
@@ -604,9 +606,11 @@ export async function buildOverseerSummary(
   cwd: string,
   limit: number,
 ): Promise<OverseerSummary> {
-  const [pack, preflight] = await Promise.all([
+  const layout = resolveOverseerLayout(cwd);
+  const [pack, preflight, handoffResults] = await Promise.all([
     buildOverseerContextPack(cwd, limit),
     buildOverseerRunPreflight(cwd),
+    readLatestHandoffResults(layout, limit),
   ]);
 
   return {
@@ -623,6 +627,8 @@ export async function buildOverseerSummary(
     notes_count: pack.notes_count,
     recent_decisions: pack.recent_decisions,
     decisions_count: pack.decisions_count,
+    recent_handoff_results: handoffResults,
+    handoff_results_count: handoffResults.length,
     run_preflight: preflight,
     recommended_next_action_prompt: pack.recommended_prompt,
     evidence_links: pack.evidence_links,

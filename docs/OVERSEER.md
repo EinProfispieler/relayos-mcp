@@ -201,11 +201,12 @@ Read-only future-run readiness check for scoped Rookie/handoff workflows.
 Deterministic read-only session/migration summary assembled from existing local curated state.
 
 - `relayos overseer summary` prints a compact human-readable summary with:
-  context, current state, next action, recent decisions, recent notes, run-preflight snapshot, and a recommended next safe action prompt.
+  context, current state, next action, recent decisions, recent handoff result evidence, recent notes, run-preflight snapshot, and a recommended next safe action prompt.
 - `relayos overseer summary --json` returns stable machine-readable summary output.
-- `--limit <1-20>` bounds `recent_notes` and `recent_decisions` (default `8`, max `20`).
+- `--limit <1-20>` bounds `recent_notes`, `recent_decisions`, and `recent_handoff_results` (default `8`, max `20`).
 - No model summarization is used.
 - Command is read-only and does not create `.relayos/overseer/`.
+- Summary evidence is read-only continuity data; it does not perform run automation.
 
 ### `overseer doctor`
 

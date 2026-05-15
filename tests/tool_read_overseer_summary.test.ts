@@ -46,6 +46,16 @@ function writeDecisions(cwd: string, lines: Array<{ ts: string; text: string }>)
   );
 }
 
+function writeHandoffResults(cwd: string, lines: Array<Record<string, unknown>>) {
+  const dir = join(cwd, ".relayos", "overseer");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "handoff_results.jsonl"),
+    `${lines.map((l) => JSON.stringify(l)).join("\n")}\n`,
+    "utf8",
+  );
+}
+
 describe("read_overseer_summary", () => {
   it("returns deterministic read-only summary defaults when state is missing", async () => {
     const cwd = tempDir();
@@ -61,6 +71,8 @@ describe("read_overseer_summary", () => {
     expect(result.notes_count).toBe(0);
     expect(result.recent_decisions).toEqual([]);
     expect(result.decisions_count).toBe(0);
+    expect(result.recent_handoff_results).toEqual([]);
+    expect(result.handoff_results_count).toBe(0);
     expect(result.run_preflight.tool).toBe("run-preflight");
     expect(result.recommended_next_action_prompt).toContain("exactly one next safe action");
     expect(Array.isArray(result.evidence_links)).toBe(true);
@@ -88,6 +100,11 @@ describe("read_overseer_summary", () => {
       { ts: "2026-01-01T00:04:00.000Z", text: "decision two" },
       { ts: "2026-01-01T00:05:00.000Z", text: "decision three" },
     ]);
+    writeHandoffResults(cwd, [
+      { ts: "2026-01-01T00:06:00.000Z", run_id: "run-a", status: "completed", summary: "a" },
+      { ts: "2026-01-01T00:07:00.000Z", run_id: "run-b", status: "blocked", summary: "b" },
+      { ts: "2026-01-01T00:08:00.000Z", run_id: "run-c", status: "needs_review", summary: "c" },
+    ]);
 
     const result = await readOverseerSummary({ limit: 2 });
 
@@ -104,6 +121,11 @@ describe("read_overseer_summary", () => {
     expect(result.recent_decisions).toEqual([
       { ts: "2026-01-01T00:04:00.000Z", text: "decision two" },
       { ts: "2026-01-01T00:05:00.000Z", text: "decision three" },
+    ]);
+    expect(result.handoff_results_count).toBe(2);
+    expect(result.recent_handoff_results).toEqual([
+      { ts: "2026-01-01T00:07:00.000Z", run_id: "run-b", status: "blocked", summary: "b" },
+      { ts: "2026-01-01T00:08:00.000Z", run_id: "run-c", status: "needs_review", summary: "c" },
     ]);
     expect(result.run_preflight.ok).toBe(true);
     expect(Array.isArray(result.run_preflight.checks)).toBe(true);
