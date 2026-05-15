@@ -130,13 +130,14 @@ Restart both CLIs after registering so they pick up the tool list.
 
 ### 3. MCP tools (inside an AI agent session)
 
-Once registered, 20 MCP tools are available from within any MCP-capable agent session (Claude Code, Codex CLI, or others). Common ones:
+Once registered, 22 MCP tools are available from within any MCP-capable agent session (Claude Code, Codex CLI, or others). Common ones:
 
 - `list_templates` — discover built-in and project templates
 - `create_quick_handoff` — one-shot handoff from a task description
 - `create_handoff_from_template` — handoff with template + overrides
 - `read_latest_handoff` — Codex reads its current assignment
 - `doctor` — health check for config and storage
+- `write_overseer_decision` / `read_overseer_decisions` — local-first decision record write/read
 
 See [MCP tools](#mcp-tools) for the full table.
 
@@ -150,6 +151,8 @@ Current overseer MCP surface for this flow:
 - `read_overseer_handshake` (canonical bootstrap)
 - `read_overseer_context_pack` (optional curated continuity pack)
 - `read_overseer_run_preflight` (optional read-only future-run readiness check)
+- `write_overseer_decision` (optional local decision record append)
+- `read_overseer_decisions` (optional read-only decision record readback)
 - `write_overseer_note` (optional local progress note append)
 - `read_overseer_recent` (optional read-only compact session readback)
 

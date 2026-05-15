@@ -58,6 +58,8 @@ Current overseer MCP surface for this bootstrap flow:
 - `read_overseer_handshake` (canonical bootstrap)
 - `read_overseer_context_pack` (optional curated continuity pack)
 - `read_overseer_run_preflight` (optional read-only future-run readiness check)
+- `write_overseer_decision` (optional local decision record append)
+- `read_overseer_decisions` (optional read-only decision record readback)
 - `write_overseer_note` (optional local progress note append)
 - `read_overseer_recent` (optional read-only compact session readback)
 

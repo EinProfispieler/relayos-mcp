@@ -29,8 +29,10 @@ import { readLatestHandoff } from "./tools/read_latest_handoff.js";
 import { readOverseerHandshake } from "./tools/read_overseer_handshake.js";
 import { readOverseerBootstrapPrompt } from "./tools/read_overseer_bootstrap_prompt.js";
 import { readOverseerContextPack } from "./tools/read_overseer_context_pack.js";
+import { readOverseerDecisions } from "./tools/read_overseer_decisions.js";
 import { readOverseerRecent } from "./tools/read_overseer_recent.js";
 import { readOverseerRunPreflight } from "./tools/read_overseer_run_preflight.js";
+import { writeOverseerDecision } from "./tools/write_overseer_decision.js";
 import { writeOverseerNote } from "./tools/write_overseer_note.js";
 import { inspectConfig } from "./tools/inspect_config.js";
 import { doctor } from "./tools/doctor.js";
@@ -378,6 +380,40 @@ export async function buildServer() {
     },
     async (args) => {
       const result = await readOverseerRunPreflight(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "write_overseer_decision",
+    {
+      title: "Write overseer decision",
+      description:
+        "Append a local overseer decision record to .relayos/overseer/decisions.jsonl for curated continuity. " +
+        "Local-only. Creates .relayos/overseer/ if needed. Rejects empty/whitespace decision text.",
+      inputSchema: {
+        text: z.string().min(1),
+      },
+    },
+    async (args) => {
+      const result = await writeOverseerDecision(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "read_overseer_decisions",
+    {
+      title: "Read overseer decisions",
+      description:
+        "Read-only local overseer decision records for curated continuity. Returns latest bounded decisions " +
+        "from .relayos/overseer/decisions.jsonl. Local-only. Never creates files.",
+      inputSchema: {
+        limit: z.number().int().min(1).max(20).optional(),
+      },
+    },
+    async (args) => {
+      const result = await readOverseerDecisions(args);
       return jsonResult(result);
     },
   );
