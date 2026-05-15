@@ -4,6 +4,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { ulid } from "ulid";
 import { ensureOverseerDir, resolveOverseerLayout } from "./overseer.js";
 import { ChatSessionRecord } from "./schema.js";
+import { classifyMessage, type RouteDecision } from "./router.js";
 
 type ExitReason = "user_exit" | "eof" | "sigint";
 
@@ -11,6 +12,7 @@ interface ChatState {
   sessionId: string;
   startedAt: string;
   messageCount: number;
+  routes: RouteDecision[];
 }
 
 const CHAT_USAGE = "usage: relayos chat\n";
@@ -41,6 +43,7 @@ async function appendSessionRecord(state: ChatState, exitReason: ExitReason): Pr
     started_at: state.startedAt,
     ended_at: new Date().toISOString(),
     message_count: state.messageCount,
+    routes: state.routes,
     exit_reason: exitReason,
   });
 
@@ -79,6 +82,7 @@ export async function runChat(args: string[]): Promise<number> {
     sessionId: newChatSessionId(),
     startedAt: new Date().toISOString(),
     messageCount: 0,
+    routes: [],
   };
 
   output.write("RelayOS Chat - type /help for commands\n");
@@ -125,7 +129,18 @@ export async function runChat(args: string[]): Promise<number> {
     if (trimmed.length > 0) {
       state.messageCount += 1;
     }
-    output.write(`[not connected] ${line}\n`);
+    const decision = classifyMessage(line);
+    state.routes.push(decision);
+    output.write("[ROUTE]\n");
+    output.write(`  target:            ${decision.target}\n`);
+    output.write(`  model:             ${decision.model}\n`);
+    output.write(`  effort:            ${decision.effort}\n`);
+    output.write(`  mode:              ${decision.mode}\n`);
+    output.write(`  approval_required: ${decision.approval_required}\n`);
+    output.write(`  reason:            ${decision.reason}\n`);
+    if (decision.approval_required) {
+      output.write("  ⚠ approval required before execution\n");
+    }
   }
 
   return 0;
