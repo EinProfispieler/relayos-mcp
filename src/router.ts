@@ -14,22 +14,22 @@ interface RoutingRule {
 
 const ROUTING_RULES: readonly RoutingRule[] = [
   {
-    keywords: ["implement", "test", "cli", "mcp", "patch", "fix", "code", "change"],
-    decision: {
-      target: "codex",
-      model: "gpt-5.3-codex",
-      effort: "medium",
-      mode: "implementation",
-      approval_required: false,
-    },
-  },
-  {
     keywords: ["review", "audit", "check", "inspect"],
     decision: {
       target: "claude-reviewer",
       model: "claude-sonnet-4-6",
       effort: "medium",
       mode: "read_only",
+      approval_required: false,
+    },
+  },
+  {
+    keywords: ["implement", "test", "cli", "mcp", "patch", "fix", "code", "change"],
+    decision: {
+      target: "codex",
+      model: "gpt-5.3-codex",
+      effort: "medium",
+      mode: "implementation",
       approval_required: false,
     },
   },
@@ -65,10 +65,11 @@ const DEFAULT_DECISION: Omit<RouteDecision, "reason"> = {
 
 export function classifyMessage(message: string): RouteDecision {
   const normalized = message.toLowerCase();
+  const tokens = new Set(normalized.match(/[a-z0-9]+/g) ?? []);
 
   for (const rule of ROUTING_RULES) {
     for (const keyword of rule.keywords) {
-      if (normalized.includes(keyword)) {
+      if (tokens.has(keyword)) {
         return {
           ...rule.decision,
           reason: `matched keyword: ${keyword}`,
