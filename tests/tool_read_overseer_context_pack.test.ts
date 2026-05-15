@@ -46,6 +46,16 @@ function writeDecisions(cwd: string, lines: Array<{ ts: string; text: string }>)
   );
 }
 
+function writeHandoffResults(cwd: string, lines: Array<Record<string, unknown>>) {
+  const dir = join(cwd, ".relayos", "overseer");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "handoff_results.jsonl"),
+    `${lines.map((l) => JSON.stringify(l)).join("\n")}\n`,
+    "utf8",
+  );
+}
+
 describe("read_overseer_context_pack", () => {
   it("returns compact read-only context pack with defaults when state is missing", async () => {
     const cwd = tempDir();
@@ -66,6 +76,8 @@ describe("read_overseer_context_pack", () => {
     expect(result.notes_count).toBe(0);
     expect(result.recent_decisions).toEqual([]);
     expect(result.decisions_count).toBe(0);
+    expect(result.recent_handoff_results).toEqual([]);
+    expect(result.handoff_results_count).toBe(0);
     expect(result.limit).toBe(8);
     expect(Array.isArray(result.forbidden_actions)).toBe(true);
     expect(result.recommended_prompt).toContain("exactly one next safe action");
@@ -95,6 +107,11 @@ describe("read_overseer_context_pack", () => {
       { ts: "2026-01-01T00:04:00.000Z", text: "decision two" },
       { ts: "2026-01-01T00:05:00.000Z", text: "decision three" },
     ]);
+    writeHandoffResults(cwd, [
+      { ts: "2026-01-01T00:06:00.000Z", run_id: "run-a", status: "completed", summary: "a" },
+      { ts: "2026-01-01T00:07:00.000Z", run_id: "run-b", status: "failed", summary: "b" },
+      { ts: "2026-01-01T00:08:00.000Z", run_id: "run-c", status: "blocked", summary: "c" },
+    ]);
 
     const result = await readOverseerContextPack({ limit: 2 });
 
@@ -108,6 +125,11 @@ describe("read_overseer_context_pack", () => {
     expect(result.recent_decisions).toEqual([
       { ts: "2026-01-01T00:04:00.000Z", text: "decision two" },
       { ts: "2026-01-01T00:05:00.000Z", text: "decision three" },
+    ]);
+    expect(result.handoff_results_count).toBe(2);
+    expect(result.recent_handoff_results).toEqual([
+      { ts: "2026-01-01T00:07:00.000Z", run_id: "run-b", status: "failed", summary: "b" },
+      { ts: "2026-01-01T00:08:00.000Z", run_id: "run-c", status: "blocked", summary: "c" },
     ]);
     expect(result.project_summary).toBe("RelayOS coordination project.");
     expect(result.current_state).toBe("Stable milestone shipped.");

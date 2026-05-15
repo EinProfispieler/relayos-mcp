@@ -447,6 +447,7 @@ describe("relayos overseer context-pack", () => {
     expect(cap.stdout).toContain("protocol: relayos-overseer-session-v1");
     expect(cap.stdout).toContain("recent notes (0/8):");
     expect(cap.stdout).toContain("recent decisions (0/8):");
+    expect(cap.stdout).toContain("recent handoff results (0/8):");
     expect(cap.stdout).toContain("recommended prompt:");
     expect(cap.stdout).toContain("evidence links:");
     expect(cap.stderr).toBe("");
@@ -463,6 +464,18 @@ describe("relayos overseer context-pack", () => {
     await runCli(["overseer", "decision", "add", "decision one"], captureIO().io);
     await runCli(["overseer", "decision", "add", "decision two"], captureIO().io);
     await runCli(["overseer", "decision", "add", "decision three"], captureIO().io);
+    await runCli(
+      ["overseer", "handoff-result", "add", "--run-id", "run-a", "--status", "completed", "--summary", "a"],
+      captureIO().io,
+    );
+    await runCli(
+      ["overseer", "handoff-result", "add", "--run-id", "run-b", "--status", "failed", "--summary", "b"],
+      captureIO().io,
+    );
+    await runCli(
+      ["overseer", "handoff-result", "add", "--run-id", "run-c", "--status", "blocked", "--summary", "c"],
+      captureIO().io,
+    );
     const cap = captureIO();
 
     const code = await runCli(["overseer", "context-pack", "--json", "--limit", "2"], cap.io);
@@ -484,6 +497,11 @@ describe("relayos overseer context-pack", () => {
       "decision two",
       "decision three",
     ]);
+    expect(data.handoff_results_count).toBe(2);
+    expect(Array.isArray(data.recent_handoff_results)).toBe(true);
+    expect(
+      (data.recent_handoff_results as Array<Record<string, string>>).map((r) => `${r.run_id}:${r.status}:${r.summary}`),
+    ).toEqual(["run-b:failed:b", "run-c:blocked:c"]);
     expect(cap.stderr).toBe("");
   });
 
@@ -497,6 +515,7 @@ describe("relayos overseer context-pack", () => {
     expect(code).toBe(0);
     expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
     expect(cap.stdout).toContain("recent decisions (0/8):");
+    expect(cap.stdout).toContain("recent handoff results (0/8):");
   });
 
   it("exits 1 with usage on invalid flags or invalid limit", async () => {
@@ -695,6 +714,7 @@ describe("relayos overseer doctor", () => {
     expect(code).toBe(0);
     expect(cap.stdout).toContain("OVERSEER DOCTOR");
     expect(cap.stdout).toContain("CHECKS");
+    expect(cap.stdout).toContain("handoff results evidence:");
     expect(cap.stdout).toContain("NEXT ACTION:");
     expect(cap.stderr).toBe("");
   });
@@ -715,6 +735,8 @@ describe("relayos overseer doctor", () => {
     expect(Array.isArray(data.missing)).toBe(true);
     expect(typeof data.recent_notes_count).toBe("number");
     expect(typeof data.recent_decisions_count).toBe("number");
+    expect(typeof data.recent_handoff_results_count).toBe("number");
+    expect(typeof data.handoff_results_available).toBe("boolean");
     expect(typeof data.run_preflight_ready).toBe("boolean");
     expect(Array.isArray(data.tracked_local_state_files)).toBe(true);
     expect(typeof data.stale_build_possible).toBe("boolean");
@@ -740,6 +762,37 @@ describe("relayos overseer doctor", () => {
 
     expect(code).toBe(0);
     expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
+  });
+
+  it("reports handoff result evidence as unavailable when records are missing", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "doctor", "--json"], cap.io);
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect(data.recent_handoff_results_count).toBe(0);
+    expect(data.handoff_results_available).toBe(false);
+    expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
+  });
+
+  it("reports handoff result evidence as available when records exist", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    await runCli(
+      ["overseer", "handoff-result", "add", "--run-id", "run-d", "--status", "completed", "--summary", "done"],
+      captureIO().io,
+    );
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "doctor", "--json"], cap.io);
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect((data.recent_handoff_results_count as number)).toBeGreaterThan(0);
+    expect(data.handoff_results_available).toBe(true);
   });
 
   it("reports tracked .relayos/overseer files when present", async () => {

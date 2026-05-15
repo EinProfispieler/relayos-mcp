@@ -42,6 +42,8 @@ describe("read_overseer_doctor", () => {
     expect(Array.isArray(result.missing)).toBe(true);
     expect(typeof result.recent_notes_count).toBe("number");
     expect(typeof result.recent_decisions_count).toBe("number");
+    expect(typeof result.recent_handoff_results_count).toBe("number");
+    expect(typeof result.handoff_results_available).toBe("boolean");
     expect(typeof result.run_preflight_ready).toBe("boolean");
     expect(Array.isArray(result.tracked_local_state_files)).toBe(true);
     expect(typeof result.stale_build_possible).toBe("boolean");
@@ -78,5 +80,32 @@ describe("read_overseer_doctor", () => {
   it("rejects unexpected input fields", async () => {
     chdir(tempDir());
     await expect(readOverseerDoctor({ bad: true })).rejects.toThrow();
+  });
+
+  it("reports handoff result evidence availability based on local records", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+
+    const resultMissing = await readOverseerDoctor({});
+    expect(resultMissing.recent_handoff_results_count).toBe(0);
+    expect(resultMissing.handoff_results_available).toBe(false);
+    expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
+
+    const dir = join(cwd, ".relayos", "overseer");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "handoff_results.jsonl"),
+      `${JSON.stringify({
+        ts: "2026-01-01T00:00:00.000Z",
+        run_id: "run-1",
+        status: "completed",
+        summary: "ok",
+      })}\n`,
+      "utf8",
+    );
+
+    const resultPresent = await readOverseerDoctor({});
+    expect(resultPresent.recent_handoff_results_count).toBe(1);
+    expect(resultPresent.handoff_results_available).toBe(true);
   });
 });

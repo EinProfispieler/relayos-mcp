@@ -179,13 +179,14 @@ Compact example:
 Read-only curated continuity snapshot for non-MCP CLI workflows.
 
 - `relayos overseer context-pack` prints a compact summary:
-  project/current/next status, recent notes, recent decisions, boundaries, model policy,
+  project/current/next status, recent notes, recent decisions, recent handoff result evidence, boundaries, model policy,
   recommended prompt, and evidence links.
 - `relayos overseer context-pack --json` returns the same context-pack
   payload shape used by `read_overseer_context_pack`.
-- `--limit <1-20>` bounds `recent_notes` and `recent_decisions` (default `8`, max `20`).
+- `--limit <1-20>` bounds `recent_notes`, `recent_decisions`, and `recent_handoff_results` (default `8`, max `20`).
 - Missing local files are reported in `missing`; command remains read-only.
 - No raw full chat transcript is returned.
+- Context-pack handoff result evidence is read-only continuity data; it does not perform run automation.
 
 ### `overseer run-preflight`
 
@@ -212,13 +213,13 @@ Deterministic read-only session/migration summary assembled from existing local 
 
 Read-only local readiness diagnostic for overseer onboarding/migration sessions.
 
-- `relayos overseer doctor` prints a compact checklist covering version visibility, cwd/workspace, local context completeness, recent notes/decisions, context-pack/summary/run-preflight readiness, tracked `.relayos/overseer` files, and possible stale `dist/cli.js` build.
+- `relayos overseer doctor` prints a compact checklist covering version visibility, cwd/workspace, local context completeness, recent notes/decisions, handoff result evidence status, context-pack/summary/run-preflight readiness, tracked `.relayos/overseer` files, and possible stale `dist/cli.js` build.
 - `relayos overseer doctor --json` returns stable machine-readable output with:
   `ok`, `tool`, `workspace_path`, `version`, `context_complete`, `missing`,
-  `recent_notes_count`, `recent_decisions_count`, `run_preflight_ready`,
+  `recent_notes_count`, `recent_decisions_count`, `recent_handoff_results_count`, `handoff_results_available`, `run_preflight_ready`,
   `tracked_local_state_files`, `stale_build_possible`, `checks`,
   `recommended_next_action`, and `notes`.
-- Command is diagnostics-only and does not create, modify, or delete `.relayos/overseer/` files.
+- Command is diagnostics-only evidence readback and does not create, modify, or delete `.relayos/overseer/` files or run automation.
 
 ### `overseer handoff-result add/show` and `overseer handoff-results`
 

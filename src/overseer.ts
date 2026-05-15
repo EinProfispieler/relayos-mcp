@@ -232,6 +232,8 @@ export interface OverseerContextPack {
   notes_count: number;
   recent_decisions: OverseerDecision[];
   decisions_count: number;
+  recent_handoff_results: OverseerHandoffResult[];
+  handoff_results_count: number;
   limit: number;
   forbidden_actions: string[];
   model_policy: string | null;
@@ -304,6 +306,8 @@ export interface OverseerDoctor {
   missing: string[];
   recent_notes_count: number;
   recent_decisions_count: number;
+  recent_handoff_results_count: number;
+  handoff_results_available: boolean;
   run_preflight_ready: boolean;
   tracked_local_state_files: string[];
   stale_build_possible: boolean;
@@ -480,6 +484,7 @@ export async function buildOverseerContextPack(
     modelPolicyRaw,
     notes,
     decisions,
+    handoffResults,
   ] = await Promise.all([
     readOverseerContextSnapshot(cwd),
     readOverseerHandshakeSnapshot(cwd),
@@ -489,6 +494,7 @@ export async function buildOverseerContextPack(
     readOverseerTextFile(layout, "MODEL_POLICY.md"),
     readLatestNotes(layout, limit),
     readLatestDecisions(layout, limit),
+    readLatestHandoffResults(layout, limit),
   ]);
 
   return {
@@ -505,6 +511,8 @@ export async function buildOverseerContextPack(
     notes_count: notes.length,
     recent_decisions: decisions.map((d) => ({ ts: d.ts, text: d.text })),
     decisions_count: decisions.length,
+    recent_handoff_results: handoffResults,
+    handoff_results_count: handoffResults.length,
     limit,
     forbidden_actions: handshake.forbidden_actions,
     model_policy: compactText(modelPolicyRaw),
@@ -726,6 +734,8 @@ export async function buildOverseerDoctor(cwd: string): Promise<OverseerDoctor> 
     missing: context.missing,
     recent_notes_count: summary.notes_count,
     recent_decisions_count: summary.decisions_count,
+    recent_handoff_results_count: summary.handoff_results_count,
+    handoff_results_available: summary.handoff_results_count > 0,
     run_preflight_ready: preflight.ready_for_future_run,
     tracked_local_state_files: trackedFiles,
     stale_build_possible: staleBuildPossible,

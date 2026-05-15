@@ -75,7 +75,7 @@ Print a compact evidence snapshot in four sections: latest handoff, latest check
 Local coordination workspace stored under `.relayos/overseer/` (gitignored). Append timestamped notes, set and read a current next action. Survives terminal closes and context resets. See [`docs/OVERSEER.md`](docs/OVERSEER.md).
 Use `relayos overseer recent` for a compact current overseer summary.
 Use `relayos overseer recent --json` for automation-friendly JSON output.
-Use `relayos overseer context-pack` for a compact curated continuity pack.
+Use `relayos overseer context-pack` for a compact curated continuity pack, including recent structured handoff result evidence.
 Use `relayos overseer context-pack --json` for MCP-aligned JSON payload output.
 Use `relayos overseer summary` for a deterministic read-only session/migration summary, including recent structured handoff result evidence.
 Use `relayos overseer run-preflight` for read-only future run readiness checks.
@@ -335,7 +335,7 @@ Available inside any MCP-capable agent session once the server is registered.
 | `read_overseer_handshake` | Return a read-only overseer session handshake snapshot for MCP clients. |
 | `read_overseer_context_pack` | Return a curated read-only overseer context pack for cross-client continuity. |
 | `read_overseer_run_preflight` | Return a read-only future-run readiness preflight payload (no run created, no agent started). |
-| `read_overseer_doctor` | Return a read-only overseer readiness diagnostics payload aligned with `relayos overseer doctor --json`. |
+| `read_overseer_doctor` | Return a read-only overseer readiness diagnostics payload (including handoff result evidence status) aligned with `relayos overseer doctor --json`. |
 | `read_overseer_recent` | Return a compact read-only overseer session/state + recent-notes snapshot. |
 | `write_handoff_result` | Append a local structured overseer handoff result record. |
 | `read_handoff_results` | Return bounded local overseer handoff result records. |

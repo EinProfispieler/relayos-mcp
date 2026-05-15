@@ -1187,6 +1187,10 @@ async function runOverseerContextPack(args: string[], io: CliIO): Promise<number
     ...(pack.recent_decisions.length > 0
       ? pack.recent_decisions.map((d) => `    - [${d.ts}] ${d.text}`)
       : ["    - (none)"]),
+    `  recent handoff results (${pack.handoff_results_count}/${pack.limit}):`,
+    ...(pack.recent_handoff_results.length > 0
+      ? pack.recent_handoff_results.map((r) => `    - [${r.ts}] ${r.run_id} ${r.status}: ${r.summary}`)
+      : ["    - (none)"]),
     "  forbidden actions:",
     ...pack.forbidden_actions.map((a) => `    - ${a}`),
     "  recommended prompt:",
@@ -1316,6 +1320,7 @@ async function runOverseerDoctor(args: string[], io: CliIO): Promise<number> {
     `  context: ${result.context_complete ? "complete" : "incomplete"}`,
     `  recent notes: ${result.recent_notes_count}`,
     `  recent decisions: ${result.recent_decisions_count}`,
+    `  handoff results evidence: ${result.handoff_results_available ? "available" : "not available"} (${result.recent_handoff_results_count})`,
     `  run preflight ready: ${result.run_preflight_ready ? "yes" : "no"}`,
     `  tracked .relayos/overseer files: ${result.tracked_local_state_files.length}`,
     `  stale build possible: ${result.stale_build_possible ? "yes" : "no"}`,
