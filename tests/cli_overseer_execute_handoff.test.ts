@@ -178,10 +178,9 @@ describe("relayos overseer execute-handoff", () => {
     detectCliMock.mockRejectedValue(new Error("boom"));
 
     const cap = captureIO();
-    const code = await runCli(["overseer", "execute-handoff", "h_detect_throw"], cap.io);
-    expect(code).toBe(1);
-    expect(cap.stderr).toContain("Failed to detect CLI binary");
-    expect(cap.stderr).toContain("boom");
+    await expect(runCli(["overseer", "execute-handoff", "h_detect_throw"], cap.io)).rejects.toThrow(
+      "boom",
+    );
   });
 
   it("marks handoff failed when runTarget throws", async () => {
@@ -201,6 +200,7 @@ describe("relayos overseer execute-handoff", () => {
 
     const cap = captureIO();
     const code = await runCli(["overseer", "execute-handoff", "h_run_throw"], cap.io);
+
     expect(code).toBe(1);
     expect(cap.stdout).toContain("Status:  failed");
     expect(cap.stdout).toContain("Exit code: 1");
@@ -212,5 +212,74 @@ describe("relayos overseer execute-handoff", () => {
     expect(envelope.status).toBe("failed");
     expect(envelope.spawn?.exit_code).toBe(1);
     expect(envelope.spawn?.stderr_tail).toContain("spawn failed");
+  });
+
+  it("calls runTarget with correct SpawnOptions shape on success", async () => {
+    writeEnvelope("h_ok", {
+      id: "h_ok",
+      status: "recorded",
+      target_agent: "codex",
+      launch_command: "codex exec --model gpt-5.3-codex '[HANDOFF h_ok prompt]'",
+      execution_mode: "patch",
+    });
+    detectCliMock.mockResolvedValue({
+      target_binary: "codex",
+      found: true,
+      resolved_path: "/usr/bin/codex",
+    });
+    runTargetMock.mockResolvedValue({
+      started_at: new Date().toISOString(),
+      finished_at: new Date().toISOString(),
+      exit_code: 0,
+      duration_ms: 50,
+      stdout_tail: "ok",
+      stderr_tail: "",
+    });
+
+    const cap = captureIO();
+    const code = await runCli(["overseer", "execute-handoff", "h_ok"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("completed");
+    expect(runTargetMock).toHaveBeenCalledOnce();
+
+    const opts = runTargetMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(opts["handoffId"]).toBe("h_ok");
+    expect(opts["binary"]).toBe("/usr/bin/codex");
+    expect(Array.isArray(opts["argv"])).toBe(true);
+    expect((opts["argv"] as string[]).length).toBeGreaterThan(0);
+    expect(opts["layout"]).toBeDefined();
+    expect(typeof opts["layout"]).toBe("object");
+  });
+
+  it("decodes shell-escaped single quotes in launch command prompt argv", async () => {
+    writeEnvelope("h_quote", {
+      id: "h_quote",
+      status: "recorded",
+      target_agent: "codex",
+      launch_command: "codex exec 'it'\\''s quoted'",
+      execution_mode: "patch",
+    });
+    detectCliMock.mockResolvedValue({
+      target_binary: "codex",
+      found: true,
+      resolved_path: "/usr/bin/codex",
+    });
+    runTargetMock.mockResolvedValue({
+      started_at: new Date().toISOString(),
+      finished_at: new Date().toISOString(),
+      exit_code: 0,
+      duration_ms: 50,
+      stdout_tail: "ok",
+      stderr_tail: "",
+    });
+
+    const cap = captureIO();
+    const code = await runCli(["overseer", "execute-handoff", "h_quote"], cap.io);
+
+    expect(code).toBe(0);
+    expect(runTargetMock).toHaveBeenCalledOnce();
+    const opts = runTargetMock.mock.calls[0]![0] as { argv?: string[] };
+    expect(opts.argv).toEqual(["codex", "exec", "it's quoted"]);
   });
 });

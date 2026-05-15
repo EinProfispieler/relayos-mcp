@@ -57,7 +57,7 @@ import {
 } from "./overseer.js";
 import { detectCli, runTarget } from "./spawn/index.js";
 import { evaluatePolicy, formatBannerLines } from "./policy.js";
-import type { Envelope } from "./schema.js";
+import type { Envelope, SpawnResult } from "./schema.js";
 import { ensureStorage, resolveStorageLayout } from "./storage.js";
 
 interface CliIO {
@@ -1837,16 +1837,7 @@ async function runOverseerExecuteHandoff(args: string[], io: CliIO): Promise<num
     return 0;
   }
 
-  let detection;
-  try {
-    detection = await detectCli(envelope.target_agent);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    io.stderr.write(
-      `Failed to detect CLI binary for "${envelope.target_agent}": ${message}\n`,
-    );
-    return 1;
-  }
+  const detection = await detectCli(envelope.target_agent);
   if (!detection.found || !detection.resolved_path) {
     io.stderr.write(`CLI binary for "${envelope.target_agent}" not found. Is it installed and on PATH?\n`);
     return 1;
@@ -1859,21 +1850,15 @@ async function runOverseerExecuteHandoff(args: string[], io: CliIO): Promise<num
   };
   writeFileSync(envelopePath, `${JSON.stringify(spawningEnvelope, null, 2)}\n`, "utf8");
 
-  let result: {
-    started_at: string;
-    finished_at: string;
-    exit_code: number;
-    duration_ms: number;
-    stdout_tail: string;
-    stderr_tail: string;
-  };
+  const argv = splitLaunchCommand(envelope.launch_command);
+  let result: SpawnResult;
   try {
     result = await runTarget({
       layout,
       handoffId: parsed.handoffId,
       binary: detection.resolved_path,
-      argv: splitLaunchCommand(envelope.launch_command),
-      workingDir: envelope.working_dir ?? process.cwd(),
+      argv,
+      workingDir: envelope.working_dir,
     });
   } catch (err) {
     const now = new Date().toISOString();
