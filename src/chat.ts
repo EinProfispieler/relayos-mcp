@@ -2,11 +2,14 @@ import { appendFile } from "node:fs/promises";
 import { createInterface, type Interface } from "node:readline";
 import { stdin as input, stdout as output } from "node:process";
 import { ulid } from "ulid";
-import { ensureOverseerDir, resolveOverseerLayout } from "./overseer.js";
+import { ensureOverseerDir, resolveOverseerLayout, appendHandoffResult } from "./overseer.js";
 import { ChatSessionRecord, type AIRoutingPlan } from "./schema.js";
 import { classifyMessage, type RouteDecision } from "./router.js";
 import { safePlanRoute } from "./ai_planner.js";
 import { buildActionProposal, type ActionProposal } from "./action_dispatch.js";
+import { resolveStorageLayout, ensureStorage } from "./storage.js";
+import { createAuditWriter } from "./audit.js";
+import { createHandoff } from "./tools/create_handoff.js";
 
 type ExitReason = "user_exit" | "eof" | "sigint";
 
@@ -15,6 +18,83 @@ interface ChatState {
   startedAt: string;
   messageCount: number;
   routes: Array<RouteDecision & { ai_plan: AIRoutingPlan; action_proposal: ActionProposal }>;
+}
+
+export interface PendingActionProposal {
+  originalMessage: string;
+  aiPlan: AIRoutingPlan;
+  actionProposal: ActionProposal;
+  executed: boolean;
+}
+
+export function decideApproveAction(
+  pending: PendingActionProposal | null,
+): "create_handoff" | "blocked" | "none" {
+  if (!pending || pending.executed) return "none";
+  if (pending.actionProposal.action === "request_approval") return "blocked";
+  if (
+    pending.actionProposal.action === "create_handoff" &&
+    pending.actionProposal.target === "codex" &&
+    pending.actionProposal.status === "not_executed"
+  ) {
+    return "create_handoff";
+  }
+  return "none";
+}
+
+function toTaskTitle(message: string): string {
+  const cleaned = message.replace(/\s+/g, " ").trim();
+  return cleaned.slice(0, 80) || "Untitled task";
+}
+
+export function buildHandoffInputFromPending(pending: PendingActionProposal): {
+  source_agent: "claude";
+  target_agent: "codex";
+  model: string;
+  effort: "low" | "medium" | "high";
+  execution_mode: "patch";
+  task_title: string;
+  task_description: string;
+  expected_output: string[];
+  auto_spawn: false;
+} {
+  const model = pending.actionProposal.model || "gpt-5.3-codex";
+  const effort = (pending.actionProposal.effort || "medium") as "low" | "medium" | "high";
+  const proposalLines = [
+    `action: ${pending.actionProposal.action}`,
+    `target: ${pending.actionProposal.target ?? "n/a"}`,
+    `model: ${pending.actionProposal.model ?? "n/a"}`,
+    `effort: ${pending.actionProposal.effort ?? "n/a"}`,
+    `mode: ${pending.actionProposal.mode ?? "n/a"}`,
+    `status: ${pending.actionProposal.status}`,
+  ];
+
+  return {
+    source_agent: "claude",
+    target_agent: "codex",
+    model,
+    effort,
+    execution_mode: "patch",
+    task_title: toTaskTitle(pending.originalMessage),
+    task_description: [
+      "Original user message:",
+      pending.originalMessage,
+      "",
+      "AI plan summary:",
+      `task_type: ${pending.aiPlan.task_type}`,
+      `target: ${pending.aiPlan.target}`,
+      `model: ${pending.aiPlan.model}`,
+      `effort: ${pending.aiPlan.effort}`,
+      `mode: ${pending.aiPlan.mode}`,
+      `reason: ${pending.aiPlan.reason}`,
+      `next_action: ${pending.aiPlan.next_action}`,
+      "",
+      "Action proposal:",
+      ...proposalLines,
+    ].join("\n"),
+    expected_output: ["Patch applied", "Tests pass"],
+    auto_spawn: false,
+  };
 }
 
 const CHAT_USAGE = "usage: relayos chat\n";
@@ -28,9 +108,10 @@ function newChatSessionId(): string {
 
 function printHelp(): void {
   output.write("Available commands:\n");
-  output.write("  /help   show available commands\n");
-  output.write("  /status show current session info\n");
-  output.write("  /exit   write session record and exit\n");
+  output.write("  /help    show available commands\n");
+  output.write("  /status  show current session info\n");
+  output.write("  /approve approve latest action proposal\n");
+  output.write("  /exit    write session record and exit\n");
 }
 
 function printStatus(state: ChatState): void {
@@ -90,6 +171,8 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
     routes: [],
   };
 
+  let pendingProposal: PendingActionProposal | null = null;
+
   output.write("RelayOS Chat - type /help for commands\n");
 
   const rl = createInterface({ input, output, prompt: "RelayOS Overseer > " });
@@ -122,6 +205,42 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
       printStatus(state);
       continue;
     }
+    if (trimmed === "/approve") {
+      const approval = decideApproveAction(pendingProposal);
+      if (approval === "none") {
+        output.write("No pending action proposal to approve.\n");
+        continue;
+      }
+      if (approval === "blocked") {
+        output.write(
+          "BLOCKED: Release actions require manual approval. No commit/push/tag/release will be executed. Future release flow not yet implemented.\n",
+        );
+        continue;
+      }
+
+      const handoffInput = buildHandoffInputFromPending(pendingProposal!);
+      const storageLayout = resolveStorageLayout();
+      await ensureStorage(storageLayout);
+      const audit = createAuditWriter(storageLayout);
+      const handoffResult = await createHandoff(handoffInput, { layout: storageLayout, audit });
+      const overseerLayout = resolveOverseerLayout(process.cwd());
+      await appendHandoffResult(overseerLayout, {
+        run_id: handoffResult.handoff_id,
+        status: "completed",
+        summary: `Handoff created for: ${pendingProposal!.originalMessage}`,
+      });
+
+      pendingProposal!.executed = true;
+
+      output.write("HANDOFF CREATED:\n");
+      output.write(`  id:     ${handoffResult.handoff_id}\n`);
+      output.write("  worker: codex\n");
+      output.write(`  model:  ${handoffInput.model}\n`);
+      output.write(`  effort: ${handoffInput.effort}\n`);
+      output.write("  status: recorded\n");
+      output.write(`  next:   relayos overseer execute-handoff ${handoffResult.handoff_id}\n`);
+      continue;
+    }
     if (trimmed === "/exit") {
       return finalize("user_exit");
     }
@@ -137,6 +256,12 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
     const decision = classifyMessage(line);
     const aiPlan = safePlanRoute(line, decision);
     const actionProposal = buildActionProposal(aiPlan);
+    pendingProposal = {
+      originalMessage: line,
+      aiPlan,
+      actionProposal,
+      executed: false,
+    };
     state.routes.push({ ...decision, ai_plan: aiPlan, action_proposal: actionProposal });
     output.write("[ROUTE]\n");
     output.write(`  target:            ${decision.target}\n`);
