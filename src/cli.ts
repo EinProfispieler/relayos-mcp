@@ -253,7 +253,7 @@ function shortHead(head: string | null): string {
 
 function quoteMessage(message: string | null): string {
   if (message === null || message.length === 0) return "";
-  const escaped = message.replace(/"/g, '\\"');
+  const escaped = message.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   return ` "${escaped}"`;
 }
 

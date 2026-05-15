@@ -37,11 +37,25 @@ describe("read_overseer_bootstrap_prompt", () => {
     expect(result.protocol).toBe("relayos-overseer-session-v1");
     expect(result.tool).toBe("read_overseer_bootstrap_prompt");
     expect(typeof result.prompt).toBe("string");
+    expect(result.prompt).toContain("read_overseer_role_profile {}");
     expect(result.prompt).toContain("read_overseer_doctor {}");
+    expect(result.prompt).toContain("read_overseer_capabilities {}");
+    expect(result.prompt).toContain('read_overseer_memory_index {"limit":8}');
+    expect(result.prompt).toContain("read_overseer_bootstrap_prompt {}");
     expect(result.prompt).toContain("read_overseer_handshake {}");
     expect(result.prompt).toContain('read_overseer_summary {"limit":8}');
     expect(result.prompt).toContain('read_overseer_context_pack {"limit":8}');
     expect(result.prompt).toContain('read_overseer_recent {"limit":8}');
+    expect(result.prompt).toContain('read_overseer_decisions {"limit":8}');
+    expect(result.prompt).toContain('read_handoff_results {"limit":8}');
+    expect(result.prompt).toContain("Follow startup_sequence exactly");
+    expect(result.prompt).toContain(
+      "Validation-only workspace-write requires explicit user approval first.",
+    );
+    expect(result.prompt).toContain(
+      "delegate a validation-only implementation worker",
+    );
+    expect(result.prompt).toContain("final git status plus evidence");
     expect(result.prompt).toContain("write_handoff_result");
     expect(result.prompt).toContain("run_id, status, summary");
     expect(result.prompt).toContain("tests_run/test_result");
@@ -49,14 +63,26 @@ describe("read_overseer_bootstrap_prompt", () => {
     expect(result.prompt).toContain("Do not commit/push/tag/release without explicit user approval.");
     expect(result.prompt).toContain("Recommend exactly one next safe action");
     expect(result.recommended_first_calls).toEqual([
+      { tool: "read_overseer_role_profile", input: {} },
       { tool: "read_overseer_doctor", input: {} },
+      { tool: "read_overseer_capabilities", input: {} },
+      { tool: "read_overseer_memory_index", input: { limit: 8 } },
+      { tool: "read_overseer_bootstrap_prompt", input: {} },
       { tool: "read_overseer_handshake", input: {} },
       { tool: "read_overseer_summary", input: { limit: 8 } },
       { tool: "read_overseer_context_pack", input: { limit: 8 } },
       { tool: "read_overseer_recent", input: { limit: 8 } },
+      { tool: "read_overseer_decisions", input: { limit: 8 } },
+      { tool: "read_handoff_results", input: { limit: 8 } },
     ]);
     expect(Array.isArray(result.safety_boundaries)).toBe(true);
     expect(Array.isArray(result.notes)).toBe(true);
+    expect(result.notes.join(" ")).toContain(
+      "Validation-only workspace-write requires explicit user approval",
+    );
+    expect(result.notes.join(" ")).toContain(
+      "delegate a validation-only worker",
+    );
     expect(result.notes.join(" ")).toContain("write_handoff_result");
     expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
   });
