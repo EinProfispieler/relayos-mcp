@@ -82,6 +82,9 @@ state.
 For overseer-bound sessions, start by calling
 `read_overseer_handshake` once. This is the canonical MCP bootstrap
 tool for overseer session binding.
+If you need a copy-paste AGENTS wake block for a project, use
+`relayos overseer wake-instructions` or
+`relayos overseer init --project --dry-run` (preview only, no writes).
 Current overseer MCP surface for this flow:
 
 - `read_overseer_bootstrap_prompt` (optional ready-to-use startup prompt helper)

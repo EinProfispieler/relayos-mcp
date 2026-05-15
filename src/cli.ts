@@ -32,6 +32,7 @@ import {
   buildOverseerCapabilities,
   buildOverseerContextPack,
   buildOverseerDoctor,
+  buildOverseerManagedAgentsSection,
   buildOverseerRoleProfile,
   buildOverseerMemoryIndex,
   buildOverseerSummary,
@@ -1455,6 +1456,87 @@ async function runOverseerRoleProfile(args: string[], io: CliIO): Promise<number
   return 0;
 }
 
+async function runOverseerWakeInstructions(args: string[], io: CliIO): Promise<number> {
+  if (args.length > 0) {
+    io.stderr.write("usage: relayos overseer wake-instructions\n");
+    return 1;
+  }
+  io.stdout.write(`${buildOverseerManagedAgentsSection()}\n`);
+  return 0;
+}
+
+async function resolveGitProjectRoot(cwd: string): Promise<string | null> {
+  const repo = await runGitCommand(cwd, ["rev-parse", "--show-toplevel"]);
+  if (!repo.ok) return null;
+  const root = repo.stdout.trim();
+  return root.length > 0 ? resolve(root) : null;
+}
+
+function parseOverseerInitArgs(
+  args: string[],
+): { project: boolean; dryRun: boolean } | null {
+  let project = false;
+  let dryRun = false;
+  for (const arg of args) {
+    if (arg === "--project") {
+      project = true;
+      continue;
+    }
+    if (arg === "--dry-run") {
+      dryRun = true;
+      continue;
+    }
+    return null;
+  }
+  return { project, dryRun };
+}
+
+async function runOverseerInit(args: string[], io: CliIO): Promise<number> {
+  const parsed = parseOverseerInitArgs(args);
+  if (!parsed || !parsed.project || !parsed.dryRun) {
+    io.stderr.write("usage: relayos overseer init --project --dry-run\n");
+    return 1;
+  }
+
+  const workspace = process.cwd();
+  const gitRepo = await isGitRepo(workspace);
+  const gitRoot = gitRepo ? await resolveGitProjectRoot(workspace) : null;
+  const projectRoot = gitRoot ?? workspace;
+  const agentsPath = join(projectRoot, "AGENTS.md");
+  const agentsExists = existsSync(agentsPath);
+  const managedSection = buildOverseerManagedAgentsSection();
+  const lines = [
+    "RELAYOS OVERSEER PROJECT INIT DRY-RUN",
+    OVERSEER_SEP,
+    `workspace: ${workspace}`,
+    `git repo: ${gitRepo ? "yes" : "no"}`,
+    `AGENTS.md: ${agentsExists ? "exists" : "missing"}`,
+    "decision: DRY_RUN_ONLY",
+    "",
+    "RELAYOS-MANAGED AGENTS SECTION",
+    OVERSEER_SEP,
+    managedSection,
+    "",
+    "MANUAL SETUP (CODEX APP / CLAUDE)",
+    OVERSEER_SEP,
+    "1. Copy/merge the section above into your project AGENTS.md.",
+    "2. Restart or open a new Codex App session (and Claude session if used) so AGENTS instructions are reloaded.",
+    "3. Send “Overseer mode.” to trigger role recovery routing.",
+    "",
+    "NEXT STEPS",
+    OVERSEER_SEP,
+    "- Copy/merge section into project AGENTS.md.",
+    "- Restart/new Codex App session if needed.",
+    "- Send “Overseer mode.”",
+    "",
+    "SAFETY",
+    OVERSEER_SEP,
+    "No files were written.",
+  ];
+  io.stdout.write(`${lines.join("\n")}\n`);
+  return 0;
+}
+
 async function runOverseerNote(args: string[], io: CliIO): Promise<number> {
   if (args.length === 0) {
     io.stderr.write("usage: relayos overseer note <text>\n");
@@ -2159,6 +2241,8 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "memory-index") return runOverseerMemoryIndex(rest, io);
   if (sub === "doctor") return runOverseerDoctor(rest, io);
   if (sub === "role-profile") return runOverseerRoleProfile(rest, io);
+  if (sub === "wake-instructions") return runOverseerWakeInstructions(rest, io);
+  if (sub === "init") return runOverseerInit(rest, io);
   if (sub === "note") return runOverseerNote(rest, io);
   if (sub === "decision") return runOverseerDecision(rest, io);
   if (sub === "decisions") return runOverseerDecisions(rest, io);
@@ -2177,7 +2261,7 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "branch") return runOverseerBranch(rest, io);
   if (sub === "progress") return runOverseerProgress(rest, io);
   io.stderr.write(
-    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|capabilities|summary|memory-index|doctor|role-profile|note|decision|decisions|handoff-result|handoff-results|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
+    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|capabilities|summary|memory-index|doctor|role-profile|wake-instructions|init|note|decision|decisions|handoff-result|handoff-results|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
   );
   return 1;
 }

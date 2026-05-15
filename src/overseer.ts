@@ -856,6 +856,22 @@ export function buildOverseerRoleProfile(): OverseerRoleProfile {
   };
 }
 
+export function buildOverseerManagedAgentsSection(): string {
+  const profile = buildOverseerRoleProfile();
+  const lines: string[] = [
+    "## RELAYOS-MANAGED OVERSEER INSTRUCTIONS",
+    "When any of the following activation phrases appear, enter RelayOS Overseer routing mode immediately:",
+    ...profile.activation_phrases.map((phrase) => `- ${phrase}`),
+    "",
+    "Routing contract:",
+    "- first call read_overseer_role_profile {}",
+    "- then follow startup_sequence exactly",
+    "- do not start repo audits, implementation, or documentation review before role-profile recovery",
+    "- do not edit/commit/push/tag/release without explicit approval",
+  ];
+  return lines.join("\n");
+}
+
 export async function buildOverseerSummary(
   cwd: string,
   limit: number,

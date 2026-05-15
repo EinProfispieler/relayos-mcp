@@ -80,6 +80,8 @@ Use `relayos overseer context-pack --json` for MCP-aligned JSON payload output.
 Use `relayos overseer summary` for a deterministic read-only session/migration summary, including recent structured handoff result evidence.
 Use `relayos overseer run-preflight` for read-only future run readiness checks.
 Use `relayos overseer runtime-check` as a read-only alias for `relayos overseer activate-runtime --dry-run`.
+Use `relayos overseer wake-instructions` to print only the RelayOS-managed AGENTS wake-routing section.
+Use `relayos overseer init --project --dry-run` to preview project AGENTS init instructions without writing files.
 
 ## Safety model
 
@@ -257,6 +259,8 @@ relayos overseer context-pack
 relayos overseer context-pack --json --limit 8
 relayos overseer doctor
 relayos overseer doctor --json
+relayos overseer wake-instructions
+relayos overseer init --project --dry-run
 relayos overseer handoff-result add --run-id run-123 --status completed --summary "Patch applied and tests green."
 relayos overseer handoff-results --json --limit 5
 relayos overseer handoff-result show --run-id run-123 --json

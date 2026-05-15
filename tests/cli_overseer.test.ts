@@ -2451,3 +2451,94 @@ describe("relayos overseer role-profile", () => {
     expect(cap.stderr).toContain("usage: relayos overseer role-profile");
   });
 });
+
+describe("relayos overseer wake-instructions", () => {
+  it("prints RelayOS-managed routing instructions with wake phrases", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "wake-instructions"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("RELAYOS-MANAGED OVERSEER INSTRUCTIONS");
+    expect(cap.stdout).toContain("Overseer mode.");
+    expect(cap.stdout).toContain("RelayOS Overseer mode.");
+    expect(cap.stdout).toContain("进入 RelayOS Overseer。");
+    expect(cap.stdout).toContain("继续作为 RelayOS Overseer。");
+    expect(cap.stdout).toContain("read_overseer_role_profile {}");
+    expect(cap.stdout).toContain("then follow startup_sequence exactly");
+    expect(cap.stdout).toContain("do not edit/commit/push/tag/release without explicit approval");
+    expect(cap.stderr).toBe("");
+  });
+
+  it("exits 1 with usage on invalid flags", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "wake-instructions", "--json"], cap.io);
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("usage: relayos overseer wake-instructions");
+  });
+});
+
+describe("relayos overseer init --project --dry-run", () => {
+  it("reports non-git workspace with missing AGENTS.md", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "init", "--project", "--dry-run"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("RELAYOS OVERSEER PROJECT INIT DRY-RUN");
+    expect(cap.stdout).toContain("workspace: ");
+    expect(cap.stdout).toContain(cwd.split("/").pop() ?? cwd);
+    expect(cap.stdout).toContain("git repo: no");
+    expect(cap.stdout).toContain("AGENTS.md: missing");
+    expect(cap.stdout).toContain("decision: DRY_RUN_ONLY");
+    expect(cap.stdout).toContain("RELAYOS-MANAGED AGENTS SECTION");
+    expect(cap.stdout).toContain("No files were written.");
+    expect(existsSync(join(cwd, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(cwd, ".relayos"))).toBe(false);
+    expect(cap.stderr).toBe("");
+  });
+
+  it("reports git workspace with existing project-root AGENTS.md", async () => {
+    const repo = tempDir();
+    execFileSync("git", ["init"], { cwd: repo, stdio: "ignore" });
+    writeFileSync(join(repo, "AGENTS.md"), "# existing\n", "utf8");
+    const subdir = join(repo, "subdir");
+    mkdirSync(subdir, { recursive: true });
+    chdir(subdir);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "init", "--project", "--dry-run"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("workspace: ");
+    expect(cap.stdout).toContain(subdir.split("/").pop() ?? subdir);
+    expect(cap.stdout).toContain("git repo: yes");
+    expect(cap.stdout).toContain("AGENTS.md: exists");
+    expect(cap.stdout).toContain("No files were written.");
+    expect(readFileSync(join(repo, "AGENTS.md"), "utf8")).toBe("# existing\n");
+    expect(existsSync(join(repo, ".relayos"))).toBe(false);
+    expect(cap.stderr).toBe("");
+  });
+
+  it("exits 1 with usage on invalid flags", async () => {
+    chdir(tempDir());
+    const missingDryRun = captureIO();
+    const codeMissingDryRun = await runCli(["overseer", "init", "--project"], missingDryRun.io);
+    expect(codeMissingDryRun).toBe(1);
+    expect(missingDryRun.stderr).toContain("usage: relayos overseer init --project --dry-run");
+
+    const invalidFlag = captureIO();
+    const codeInvalidFlag = await runCli(
+      ["overseer", "init", "--project", "--dry-run", "--yaml"],
+      invalidFlag.io,
+    );
+    expect(codeInvalidFlag).toBe(1);
+    expect(invalidFlag.stderr).toContain("usage: relayos overseer init --project --dry-run");
+  });
+});

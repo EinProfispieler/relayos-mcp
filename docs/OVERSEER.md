@@ -13,6 +13,8 @@ relayos overseer context-pack [--json] [--limit <1-20>]
 relayos overseer run-preflight [--json]
 relayos overseer summary [--json] [--limit <1-20>]
 relayos overseer doctor [--json]
+relayos overseer wake-instructions
+relayos overseer init --project --dry-run
 relayos overseer handoff-result add --run-id <id> --status <completed|failed|blocked|needs_review> --summary <text> [--tests-run <text> ...] [--test-result <text>] [--blocker <text> ...] [--needs-review] [--requires-user-approval]
 relayos overseer handoff-result show --run-id <id> [--json]
 relayos overseer handoff-results [--json] [--limit <1-20>]
@@ -28,6 +30,30 @@ relayos overseer init-context
 relayos overseer branch <name>
 relayos overseer progress [text...]
 ```
+
+### `overseer wake-instructions`
+
+Prints only the RelayOS-managed AGENTS/project-instruction section for
+overseer wake routing.
+
+- Includes activation routing for `Overseer mode.`, `RelayOS Overseer mode.`,
+  `进入 RelayOS Overseer。`, and `继续作为 RelayOS Overseer。`
+- Includes strict startup safety contract:
+  - first call `read_overseer_role_profile {}`
+  - then follow `startup_sequence` exactly
+  - do not start repo audits/implementation/docs review before role-profile recovery
+  - do not edit/commit/push/tag/release without explicit approval
+
+### `overseer init --project --dry-run`
+
+Read-only project-init preview for overseer AGENTS instructions.
+
+- Detects current workspace path.
+- Detects whether cwd is inside a git repo.
+- Detects whether `AGENTS.md` exists at project root (git) or cwd (non-git).
+- Prints exact `RELAYOS-MANAGED AGENTS SECTION` content that should be merged.
+- Prints manual Codex App / Claude setup steps.
+- Always ends with: `No files were written.`
 
 ### `overseer status`
 
