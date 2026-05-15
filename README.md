@@ -162,7 +162,7 @@ Current overseer MCP surface for this flow:
 - Optionally call `read_overseer_bootstrap_prompt` to retrieve a
   read-only startup prompt + recommended first calls for MCP clients.
 - Optionally call `read_overseer_context_pack` for a compact curated
-  state package (project/current/next notes + boundaries + evidence links).
+  state package (project/current/next + recent notes/decisions + boundaries + evidence links).
 - If `ok` or `context_complete` is `false`, report `missing` to the user
   and ask whether to proceed before acting.
 - Treat `must_read`, `next_action_source`, `forbidden_actions`, and

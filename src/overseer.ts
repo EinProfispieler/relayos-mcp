@@ -154,6 +154,8 @@ export interface OverseerContextPack {
   next_action: string | null;
   recent_notes: OverseerContextPackNote[];
   notes_count: number;
+  recent_decisions: OverseerDecision[];
+  decisions_count: number;
   limit: number;
   forbidden_actions: string[];
   model_policy: string | null;
@@ -321,6 +323,7 @@ export async function buildOverseerContextPack(
     nextActionRaw,
     modelPolicyRaw,
     notes,
+    decisions,
   ] = await Promise.all([
     readOverseerContextSnapshot(cwd),
     readOverseerHandshakeSnapshot(cwd),
@@ -329,6 +332,7 @@ export async function buildOverseerContextPack(
     readNextAction(layout),
     readOverseerTextFile(layout, "MODEL_POLICY.md"),
     readLatestNotes(layout, limit),
+    readLatestDecisions(layout, limit),
   ]);
 
   return {
@@ -343,6 +347,8 @@ export async function buildOverseerContextPack(
     next_action: compactText(nextActionRaw),
     recent_notes: notes.map((n) => ({ ts: n.ts, text: n.text })),
     notes_count: notes.length,
+    recent_decisions: decisions.map((d) => ({ ts: d.ts, text: d.text })),
+    decisions_count: decisions.length,
     limit,
     forbidden_actions: handshake.forbidden_actions,
     model_policy: compactText(modelPolicyRaw),

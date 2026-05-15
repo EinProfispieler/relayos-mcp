@@ -445,6 +445,7 @@ describe("relayos overseer context-pack", () => {
     expect(cap.stdout).toContain("OVERSEER CONTEXT PACK");
     expect(cap.stdout).toContain("protocol: relayos-overseer-session-v1");
     expect(cap.stdout).toContain("recent notes (0/8):");
+    expect(cap.stdout).toContain("recent decisions (0/8):");
     expect(cap.stdout).toContain("recommended prompt:");
     expect(cap.stdout).toContain("evidence links:");
     expect(cap.stderr).toBe("");
@@ -458,6 +459,9 @@ describe("relayos overseer context-pack", () => {
     await runCli(["overseer", "note", "one"], captureIO().io);
     await runCli(["overseer", "note", "two"], captureIO().io);
     await runCli(["overseer", "note", "three"], captureIO().io);
+    await runCli(["overseer", "decision", "add", "decision one"], captureIO().io);
+    await runCli(["overseer", "decision", "add", "decision two"], captureIO().io);
+    await runCli(["overseer", "decision", "add", "decision three"], captureIO().io);
     const cap = captureIO();
 
     const code = await runCli(["overseer", "context-pack", "--json", "--limit", "2"], cap.io);
@@ -473,6 +477,12 @@ describe("relayos overseer context-pack", () => {
       "two",
       "three",
     ]);
+    expect(data.decisions_count).toBe(2);
+    expect(Array.isArray(data.recent_decisions)).toBe(true);
+    expect((data.recent_decisions as Array<Record<string, string>>).map((n) => n.text)).toEqual([
+      "decision two",
+      "decision three",
+    ]);
     expect(cap.stderr).toBe("");
   });
 
@@ -485,6 +495,7 @@ describe("relayos overseer context-pack", () => {
 
     expect(code).toBe(0);
     expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
+    expect(cap.stdout).toContain("recent decisions (0/8):");
   });
 
   it("exits 1 with usage on invalid flags or invalid limit", async () => {

@@ -69,7 +69,7 @@ Current overseer MCP surface for this bootstrap flow:
 - Optionally call `read_overseer_bootstrap_prompt` to retrieve a
   read-only startup prompt and recommended first calls.
 - Optionally call `read_overseer_context_pack` for a compact read-only
-  continuity pack (project/current/next notes + boundaries + evidence links).
+  continuity pack (project/current/next + recent notes/decisions + boundaries + evidence links).
 - If `ok` or `context_complete` is false, report missing files and ask
   the user whether to proceed.
 - Treat `must_read`, `next_action_source`, `forbidden_actions`, and
@@ -169,11 +169,11 @@ Compact example:
 Read-only curated continuity snapshot for non-MCP CLI workflows.
 
 - `relayos overseer context-pack` prints a compact summary:
-  project/current/next status, recent notes, boundaries, model policy,
+  project/current/next status, recent notes, recent decisions, boundaries, model policy,
   recommended prompt, and evidence links.
 - `relayos overseer context-pack --json` returns the same context-pack
   payload shape used by `read_overseer_context_pack`.
-- `--limit <1-20>` bounds `recent_notes` (default `8`, max `20`).
+- `--limit <1-20>` bounds `recent_notes` and `recent_decisions` (default `8`, max `20`).
 - Missing local files are reported in `missing`; command remains read-only.
 - No raw full chat transcript is returned.
 

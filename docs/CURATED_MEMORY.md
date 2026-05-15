@@ -50,6 +50,8 @@ Currently shipped local-first curated-memory commands:
 - `relayos overseer decision add <text>`
 - `relayos overseer decisions [--json] [--limit <1-20>]`
 
+Current context packs now include bounded `recent_notes` and `recent_decisions` summaries for compact continuity.
+
 Current MCP curated-memory tools:
 
 - `read_overseer_context_pack`

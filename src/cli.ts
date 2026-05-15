@@ -1177,6 +1177,10 @@ async function runOverseerContextPack(args: string[], io: CliIO): Promise<number
     ...(pack.recent_notes.length > 0
       ? pack.recent_notes.map((n) => `    - [${n.ts}] ${n.text}`)
       : ["    - (none)"]),
+    `  recent decisions (${pack.decisions_count}/${pack.limit}):`,
+    ...(pack.recent_decisions.length > 0
+      ? pack.recent_decisions.map((d) => `    - [${d.ts}] ${d.text}`)
+      : ["    - (none)"]),
     "  forbidden actions:",
     ...pack.forbidden_actions.map((a) => `    - ${a}`),
     "  recommended prompt:",

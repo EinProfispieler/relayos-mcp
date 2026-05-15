@@ -36,6 +36,16 @@ function writeTimeline(cwd: string, lines: Array<{ ts: string; text: string }>) 
   );
 }
 
+function writeDecisions(cwd: string, lines: Array<{ ts: string; text: string }>) {
+  const dir = join(cwd, ".relayos", "overseer");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "decisions.jsonl"),
+    `${lines.map((l) => JSON.stringify(l)).join("\n")}\n`,
+    "utf8",
+  );
+}
+
 describe("read_overseer_context_pack", () => {
   it("returns compact read-only context pack with defaults when state is missing", async () => {
     const cwd = tempDir();
@@ -54,6 +64,8 @@ describe("read_overseer_context_pack", () => {
     expect(result.model_policy).toBeNull();
     expect(result.recent_notes).toEqual([]);
     expect(result.notes_count).toBe(0);
+    expect(result.recent_decisions).toEqual([]);
+    expect(result.decisions_count).toBe(0);
     expect(result.limit).toBe(8);
     expect(Array.isArray(result.forbidden_actions)).toBe(true);
     expect(result.recommended_prompt).toContain("exactly one next safe action");
@@ -78,6 +90,11 @@ describe("read_overseer_context_pack", () => {
       { ts: "2026-01-01T00:01:00.000Z", text: "two" },
       { ts: "2026-01-01T00:02:00.000Z", text: "three" },
     ]);
+    writeDecisions(cwd, [
+      { ts: "2026-01-01T00:03:00.000Z", text: "decision one" },
+      { ts: "2026-01-01T00:04:00.000Z", text: "decision two" },
+      { ts: "2026-01-01T00:05:00.000Z", text: "decision three" },
+    ]);
 
     const result = await readOverseerContextPack({ limit: 2 });
 
@@ -86,6 +103,11 @@ describe("read_overseer_context_pack", () => {
     expect(result.recent_notes).toEqual([
       { ts: "2026-01-01T00:01:00.000Z", text: "two" },
       { ts: "2026-01-01T00:02:00.000Z", text: "three" },
+    ]);
+    expect(result.decisions_count).toBe(2);
+    expect(result.recent_decisions).toEqual([
+      { ts: "2026-01-01T00:04:00.000Z", text: "decision two" },
+      { ts: "2026-01-01T00:05:00.000Z", text: "decision three" },
     ]);
     expect(result.project_summary).toBe("RelayOS coordination project.");
     expect(result.current_state).toBe("Stable milestone shipped.");
