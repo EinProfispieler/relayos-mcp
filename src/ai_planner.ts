@@ -13,8 +13,8 @@ const SAFE_DEFAULT_ROUTE: RouteDecision = {
 function detectTaskType(message: string): string {
   const normalized = message.toLowerCase();
   if (/(review|audit|inspect|check)/.test(normalized)) return "review";
+  if (/(commit|push|tag|release|merge|publish)/.test(normalized)) return "release";
   if (/(implement|fix|patch|code|change|test)/.test(normalized)) return "implementation";
-  if (/(commit|push|tag|release|merge|publish)/.test(normalized)) return "release_control";
   if (/(plan|planning|design|architecture|product)/.test(normalized)) return "planning";
   return "general";
 }
