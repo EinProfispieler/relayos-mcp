@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { Envelope, HandoffInput } from "../src/schema.js";
+import { AIRoutingPlan, Envelope, HandoffInput } from "../src/schema.js";
 import { sampleInput, sampleInputArray } from "./_helpers.js";
 
 describe("HandoffInput schema", () => {
@@ -103,5 +103,54 @@ describe("HandoffInput schema", () => {
       },
     });
     expect(parsed.expected_output).toEqual(["Legacy single expected output."]);
+  });
+});
+
+describe("AIRoutingPlan schema", () => {
+  it("parses a fully valid AIRoutingPlan", () => {
+    const parsed = AIRoutingPlan.parse({
+      task_type: "implementation",
+      target: "codex",
+      model: "gpt-5.3-codex",
+      effort: "medium",
+      mode: "implementation",
+      approval_required: false,
+      confidence: 0.9,
+      reason: "matched keyword: implement",
+      next_action: "Proceed with local implementation flow.",
+    });
+    expect(parsed.target).toBe("codex");
+    expect(parsed.confidence).toBe(0.9);
+  });
+
+  it("throws when a required field is missing", () => {
+    expect(() =>
+      AIRoutingPlan.parse({
+        task_type: "implementation",
+        target: "codex",
+        model: "gpt-5.3-codex",
+        effort: "medium",
+        mode: "implementation",
+        approval_required: false,
+        confidence: 0.9,
+        reason: "matched keyword: implement",
+      }),
+    ).toThrow();
+  });
+
+  it("throws when confidence is greater than 1", () => {
+    expect(() =>
+      AIRoutingPlan.parse({
+        task_type: "implementation",
+        target: "codex",
+        model: "gpt-5.3-codex",
+        effort: "medium",
+        mode: "implementation",
+        approval_required: false,
+        confidence: 1.5,
+        reason: "matched keyword: implement",
+        next_action: "Proceed with local implementation flow.",
+      }),
+    ).toThrow();
   });
 });
