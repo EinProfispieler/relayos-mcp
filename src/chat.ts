@@ -10,6 +10,7 @@ import { buildActionProposal, type ActionProposal } from "./action_dispatch.js";
 import { resolveStorageLayout, ensureStorage } from "./storage.js";
 import { createAuditWriter } from "./audit.js";
 import { createHandoff } from "./tools/create_handoff.js";
+import { runOverseerExecuteHandoffById } from "./overseer_execute_handoff.js";
 
 type ExitReason = "user_exit" | "eof" | "sigint";
 
@@ -25,6 +26,18 @@ export interface PendingActionProposal {
   aiPlan: AIRoutingPlan;
   actionProposal: ActionProposal;
   executed: boolean;
+}
+
+export function resolveRunHandoffId(
+  sessionHandoffId: string | null,
+): { handoffId: string | null; errorMessage: string | null } {
+  if (!sessionHandoffId) {
+    return {
+      handoffId: null,
+      errorMessage: "No handoff created in this session. Use /approve first.",
+    };
+  }
+  return { handoffId: sessionHandoffId, errorMessage: null };
 }
 
 export function decideApproveAction(
@@ -111,6 +124,7 @@ function printHelp(): void {
   output.write("  /help    show available commands\n");
   output.write("  /status  show current session info\n");
   output.write("  /approve approve latest action proposal\n");
+  output.write("  /run     execute latest open handoff via execute-handoff\n");
   output.write("  /exit    write session record and exit\n");
 }
 
@@ -172,6 +186,7 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
   };
 
   let pendingProposal: PendingActionProposal | null = null;
+  let sessionHandoffId: string | null = null;
 
   output.write("RelayOS Chat - type /help for commands\n");
 
@@ -223,6 +238,7 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
       await ensureStorage(storageLayout);
       const audit = createAuditWriter(storageLayout);
       const handoffResult = await createHandoff(handoffInput, { layout: storageLayout, audit });
+      sessionHandoffId = handoffResult.handoff_id;
       const overseerLayout = resolveOverseerLayout(process.cwd());
       await appendHandoffResult(overseerLayout, {
         run_id: handoffResult.handoff_id,
@@ -239,6 +255,20 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
       output.write(`  effort: ${handoffInput.effort}\n`);
       output.write("  status: recorded\n");
       output.write(`  next:   relayos overseer execute-handoff ${handoffResult.handoff_id}\n`);
+      continue;
+    }
+    if (trimmed === "/run") {
+      const runTarget = resolveRunHandoffId(sessionHandoffId);
+      if (!runTarget.handoffId) {
+        output.write(`${runTarget.errorMessage}\n`);
+        continue;
+      }
+      output.write(`Executing session handoff: ${runTarget.handoffId}\n`);
+      const exitCode = await runOverseerExecuteHandoffById(
+        runTarget.handoffId,
+        { stdout: output, stderr: output },
+      );
+      output.write(`Execution result: ${exitCode === 0 ? "completed" : "failed"}\n`);
       continue;
     }
     if (trimmed === "/exit") {
