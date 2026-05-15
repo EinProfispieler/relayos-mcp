@@ -911,6 +911,226 @@ describe("relayos overseer decision/decisions", () => {
   });
 });
 
+describe("relayos overseer handoff-result/handoff-results", () => {
+  it("records one handoff result entry and exits 0", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(
+      [
+        "overseer",
+        "handoff-result",
+        "add",
+        "--run-id",
+        "run-1",
+        "--status",
+        "completed",
+        "--summary",
+        "done",
+      ],
+      cap.io,
+    );
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("handoff result recorded");
+    const path = join(process.cwd(), ".relayos", "overseer", "handoff_results.jsonl");
+    const lines = readFileSync(path, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.run_id).toBe("run-1");
+    expect(lines[0]?.status).toBe("completed");
+    expect(lines[0]?.summary).toBe("done");
+    expect(typeof lines[0]?.ts).toBe("string");
+  });
+
+  it("supports optional result evidence fields", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(
+      [
+        "overseer",
+        "handoff-result",
+        "add",
+        "--run-id",
+        "run-2",
+        "--status",
+        "needs_review",
+        "--summary",
+        "needs review",
+        "--tests-run",
+        "npm test",
+        "--tests-run",
+        "npm run lint",
+        "--test-result",
+        "pass",
+        "--blocker",
+        "pending approval",
+        "--needs-review",
+        "--requires-user-approval",
+      ],
+      cap.io,
+    );
+
+    expect(code).toBe(0);
+    const path = join(process.cwd(), ".relayos", "overseer", "handoff_results.jsonl");
+    const lines = readFileSync(path, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines[0]?.tests_run).toEqual(["npm test", "npm run lint"]);
+    expect(lines[0]?.test_result).toBe("pass");
+    expect(lines[0]?.blockers).toEqual(["pending approval"]);
+    expect(lines[0]?.needs_review).toBe(true);
+    expect(lines[0]?.requires_user_approval).toBe(true);
+  });
+
+  it("lists handoff results in human mode", async () => {
+    chdir(tempDir());
+    await runCli(
+      ["overseer", "handoff-result", "add", "--run-id", "run-a", "--status", "completed", "--summary", "a"],
+      captureIO().io,
+    );
+    await runCli(
+      ["overseer", "handoff-result", "add", "--run-id", "run-b", "--status", "failed", "--summary", "b"],
+      captureIO().io,
+    );
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "handoff-results", "--limit", "1"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("OVERSEER HANDOFF RESULTS");
+    expect(cap.stdout).toContain("results (1/1):");
+    expect(cap.stdout).toContain("run-b failed: b");
+  });
+
+  it("lists handoff results in JSON mode", async () => {
+    chdir(tempDir());
+    await runCli(
+      ["overseer", "handoff-result", "add", "--run-id", "run-a", "--status", "completed", "--summary", "a"],
+      captureIO().io,
+    );
+    await runCli(
+      ["overseer", "handoff-result", "add", "--run-id", "run-b", "--status", "failed", "--summary", "b"],
+      captureIO().io,
+    );
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "handoff-results", "--json", "--limit", "2"], cap.io);
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect(data.tool).toBe("overseer_handoff_results");
+    expect(data.limit).toBe(2);
+    expect(data.results_count).toBe(2);
+    expect(Array.isArray(data.results)).toBe(true);
+  });
+
+  it("shows records for a run_id in human and JSON mode", async () => {
+    chdir(tempDir());
+    await runCli(
+      ["overseer", "handoff-result", "add", "--run-id", "run-z", "--status", "blocked", "--summary", "blocked once"],
+      captureIO().io,
+    );
+    await runCli(
+      ["overseer", "handoff-result", "add", "--run-id", "run-z", "--status", "completed", "--summary", "completed now"],
+      captureIO().io,
+    );
+    await runCli(
+      ["overseer", "handoff-result", "add", "--run-id", "run-x", "--status", "failed", "--summary", "other run"],
+      captureIO().io,
+    );
+
+    const capHuman = captureIO();
+    const codeHuman = await runCli(
+      ["overseer", "handoff-result", "show", "--run-id", "run-z"],
+      capHuman.io,
+    );
+    expect(codeHuman).toBe(0);
+    expect(capHuman.stdout).toContain("run_id: run-z");
+    expect(capHuman.stdout).toContain("results (2):");
+    expect(capHuman.stdout).toContain("blocked: blocked once");
+    expect(capHuman.stdout).toContain("completed: completed now");
+
+    const capJson = captureIO();
+    const codeJson = await runCli(
+      ["overseer", "handoff-result", "show", "--run-id", "run-z", "--json"],
+      capJson.io,
+    );
+    expect(codeJson).toBe(0);
+    const data = JSON.parse(capJson.stdout) as Record<string, unknown>;
+    expect(data.tool).toBe("overseer_handoff_result");
+    expect(data.run_id).toBe("run-z");
+    expect(data.results_count).toBe(2);
+    expect(Array.isArray(data.results)).toBe(true);
+  });
+
+  it("read commands remain read-only when workspace/result file is missing", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    const capList = captureIO();
+    const codeList = await runCli(["overseer", "handoff-results"], capList.io);
+    expect(codeList).toBe(0);
+    expect(capList.stdout).toContain("results (0/8):");
+    expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
+
+    const capShow = captureIO();
+    const codeShow = await runCli(
+      ["overseer", "handoff-result", "show", "--run-id", "none"],
+      capShow.io,
+    );
+    expect(codeShow).toBe(0);
+    expect(capShow.stdout).toContain("results (0):");
+    expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
+  });
+
+  it("fails with usage on invalid args", async () => {
+    chdir(tempDir());
+    const invalidStatus = captureIO();
+    const codeInvalidStatus = await runCli(
+      [
+        "overseer",
+        "handoff-result",
+        "add",
+        "--run-id",
+        "run-1",
+        "--status",
+        "queued",
+        "--summary",
+        "bad",
+      ],
+      invalidStatus.io,
+    );
+    expect(codeInvalidStatus).toBe(1);
+    expect(invalidStatus.stderr).toContain("usage: relayos overseer handoff-result add");
+
+    const missingRun = captureIO();
+    const codeMissingRun = await runCli(
+      ["overseer", "handoff-result", "add", "--status", "completed", "--summary", "ok"],
+      missingRun.io,
+    );
+    expect(codeMissingRun).toBe(1);
+
+    const missingSummary = captureIO();
+    const codeMissingSummary = await runCli(
+      ["overseer", "handoff-result", "add", "--run-id", "x", "--status", "completed"],
+      missingSummary.io,
+    );
+    expect(codeMissingSummary).toBe(1);
+
+    const invalidLimit = captureIO();
+    const codeInvalidLimit = await runCli(
+      ["overseer", "handoff-results", "--limit", "21"],
+      invalidLimit.io,
+    );
+    expect(codeInvalidLimit).toBe(1);
+    expect(invalidLimit.stderr).toContain("usage: relayos overseer handoff-results");
+  });
+});
+
 describe("relayos overseer next", () => {
   it("sets and prints the next action", async () => {
     chdir(tempDir());

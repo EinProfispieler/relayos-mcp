@@ -7,6 +7,7 @@ export interface OverseerLayout {
   dir: string;
   timelinePath: string;
   decisionsPath: string;
+  handoffResultsPath: string;
   nextActionPath: string;
 }
 
@@ -16,6 +17,7 @@ export function resolveOverseerLayout(cwd: string): OverseerLayout {
     dir,
     timelinePath: join(dir, "timeline.jsonl"),
     decisionsPath: join(dir, "decisions.jsonl"),
+    handoffResultsPath: join(dir, "handoff_results.jsonl"),
     nextActionPath: join(dir, "next_action.md"),
   };
 }
@@ -32,6 +34,24 @@ export interface OverseerNote {
 export interface OverseerDecision {
   ts: string;
   text: string;
+}
+
+export type OverseerHandoffResultStatus =
+  | "completed"
+  | "failed"
+  | "blocked"
+  | "needs_review";
+
+export interface OverseerHandoffResult {
+  ts: string;
+  run_id: string;
+  status: OverseerHandoffResultStatus;
+  summary: string;
+  tests_run?: string[];
+  test_result?: string;
+  blockers?: string[];
+  needs_review?: boolean;
+  requires_user_approval?: boolean;
 }
 
 export async function appendNote(layout: OverseerLayout, text: string): Promise<void> {
@@ -80,6 +100,62 @@ export async function readLatestDecisions(
     }
   }
   return decisions.slice(-limit);
+}
+
+export async function appendHandoffResult(
+  layout: OverseerLayout,
+  input: Omit<OverseerHandoffResult, "ts">,
+): Promise<void> {
+  await ensureOverseerDir(layout);
+  const entry: OverseerHandoffResult = {
+    ts: new Date().toISOString(),
+    run_id: input.run_id,
+    status: input.status,
+    summary: input.summary,
+    tests_run: input.tests_run,
+    test_result: input.test_result,
+    blockers: input.blockers,
+    needs_review: input.needs_review,
+    requires_user_approval: input.requires_user_approval,
+  };
+  await appendFile(layout.handoffResultsPath, `${JSON.stringify(entry)}\n`, "utf8");
+}
+
+export async function readLatestHandoffResults(
+  layout: OverseerLayout,
+  limit = 8,
+): Promise<OverseerHandoffResult[]> {
+  if (!existsSync(layout.handoffResultsPath)) return [];
+  const raw = await readFile(layout.handoffResultsPath, "utf8");
+  const results: OverseerHandoffResult[] = [];
+  for (const line of raw.split("\n")) {
+    if (line.trim().length === 0) continue;
+    try {
+      results.push(JSON.parse(line) as OverseerHandoffResult);
+    } catch {
+      // skip malformed lines
+    }
+  }
+  return results.slice(-limit);
+}
+
+export async function readHandoffResultsByRunId(
+  layout: OverseerLayout,
+  runId: string,
+): Promise<OverseerHandoffResult[]> {
+  if (!existsSync(layout.handoffResultsPath)) return [];
+  const raw = await readFile(layout.handoffResultsPath, "utf8");
+  const results: OverseerHandoffResult[] = [];
+  for (const line of raw.split("\n")) {
+    if (line.trim().length === 0) continue;
+    try {
+      const parsed = JSON.parse(line) as OverseerHandoffResult;
+      if (parsed.run_id === runId) results.push(parsed);
+    } catch {
+      // skip malformed lines
+    }
+  }
+  return results;
 }
 
 export async function writeNextAction(layout: OverseerLayout, text: string): Promise<void> {

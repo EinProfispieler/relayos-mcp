@@ -27,11 +27,15 @@ import { listEnvelopes } from "./envelope.js";
 import {
   appendBranchProgress,
   appendDecision,
+  appendHandoffResult,
   appendNote,
   buildOverseerContextPack,
   buildOverseerDoctor,
   buildOverseerSummary,
   buildOverseerRunPreflight,
+  type OverseerHandoffResultStatus,
+  readHandoffResultsByRunId,
+  readLatestHandoffResults,
   hasOverseerState,
   initContextFiles,
   readOverseerContextSnapshot,
@@ -1386,6 +1390,262 @@ async function runOverseerDecision(args: string[], io: CliIO): Promise<number> {
   return 1;
 }
 
+const HANDOFF_RESULT_STATUSES: OverseerHandoffResultStatus[] = [
+  "completed",
+  "failed",
+  "blocked",
+  "needs_review",
+];
+
+interface OverseerHandoffResultAddArgs {
+  runId: string;
+  status: OverseerHandoffResultStatus;
+  summary: string;
+  testsRun: string[];
+  testResult: string | null;
+  blockers: string[];
+  needsReview: boolean;
+  requiresUserApproval: boolean;
+}
+
+function parseOverseerHandoffResultAddArgs(
+  args: string[],
+): OverseerHandoffResultAddArgs | null {
+  let runId: string | null = null;
+  let status: OverseerHandoffResultStatus | null = null;
+  let summary: string | null = null;
+  const testsRun: string[] = [];
+  let testResult: string | null = null;
+  const blockers: string[] = [];
+  let needsReview = false;
+  let requiresUserApproval = false;
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "--run-id") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("--")) return null;
+      runId = value;
+      i++;
+      continue;
+    }
+    if (arg === "--status") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("--")) return null;
+      if (!HANDOFF_RESULT_STATUSES.includes(value as OverseerHandoffResultStatus)) return null;
+      status = value as OverseerHandoffResultStatus;
+      i++;
+      continue;
+    }
+    if (arg === "--summary") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("--")) return null;
+      summary = value;
+      i++;
+      continue;
+    }
+    if (arg === "--tests-run") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("--")) return null;
+      testsRun.push(value);
+      i++;
+      continue;
+    }
+    if (arg === "--test-result") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("--")) return null;
+      testResult = value;
+      i++;
+      continue;
+    }
+    if (arg === "--blocker") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("--")) return null;
+      blockers.push(value);
+      i++;
+      continue;
+    }
+    if (arg === "--needs-review") {
+      needsReview = true;
+      continue;
+    }
+    if (arg === "--requires-user-approval") {
+      requiresUserApproval = true;
+      continue;
+    }
+    return null;
+  }
+
+  if (!runId || runId.trim().length === 0) return null;
+  if (!status) return null;
+  if (!summary || summary.trim().length === 0) return null;
+  return {
+    runId: runId.trim(),
+    status,
+    summary: summary.trim(),
+    testsRun,
+    testResult: testResult ? testResult.trim() : null,
+    blockers,
+    needsReview,
+    requiresUserApproval,
+  };
+}
+
+function parseOverseerHandoffResultsArgs(
+  args: string[],
+): { wantsJson: boolean; limit: number } | null {
+  let wantsJson = false;
+  let limit = 8;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "--json") {
+      wantsJson = true;
+      continue;
+    }
+    if (arg === "--limit") {
+      const raw = args[i + 1];
+      if (!raw) return null;
+      const parsed = Number(raw);
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 20) return null;
+      limit = parsed;
+      i++;
+      continue;
+    }
+    return null;
+  }
+  return { wantsJson, limit };
+}
+
+function parseOverseerHandoffResultShowArgs(
+  args: string[],
+): { wantsJson: boolean; runId: string } | null {
+  let wantsJson = false;
+  let runId: string | null = null;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "--json") {
+      wantsJson = true;
+      continue;
+    }
+    if (arg === "--run-id") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("--")) return null;
+      runId = value;
+      i++;
+      continue;
+    }
+    return null;
+  }
+  if (!runId || runId.trim().length === 0) return null;
+  return { wantsJson, runId: runId.trim() };
+}
+
+async function runOverseerHandoffResult(args: string[], io: CliIO): Promise<number> {
+  const [sub, ...rest] = args;
+  if (sub === "add") {
+    const parsed = parseOverseerHandoffResultAddArgs(rest);
+    if (!parsed) {
+      io.stderr.write(
+        "usage: relayos overseer handoff-result add --run-id <id> --status <completed|failed|blocked|needs_review> --summary <text> [--tests-run <text> ...] [--test-result <text>] [--blocker <text> ...] [--needs-review] [--requires-user-approval]\n",
+      );
+      return 1;
+    }
+    const layout = resolveOverseerLayout(process.cwd());
+    await appendHandoffResult(layout, {
+      run_id: parsed.runId,
+      status: parsed.status,
+      summary: parsed.summary,
+      tests_run: parsed.testsRun.length > 0 ? parsed.testsRun : undefined,
+      test_result: parsed.testResult ?? undefined,
+      blockers: parsed.blockers.length > 0 ? parsed.blockers : undefined,
+      needs_review: parsed.needsReview ? true : undefined,
+      requires_user_approval: parsed.requiresUserApproval ? true : undefined,
+    });
+    io.stdout.write(`handoff result recorded: run_id=${parsed.runId} status=${parsed.status}\n`);
+    return 0;
+  }
+  if (sub === "show") {
+    const parsed = parseOverseerHandoffResultShowArgs(rest);
+    if (!parsed) {
+      io.stderr.write("usage: relayos overseer handoff-result show --run-id <id> [--json]\n");
+      return 1;
+    }
+    const layout = resolveOverseerLayout(process.cwd());
+    const results = await readHandoffResultsByRunId(layout, parsed.runId);
+    if (parsed.wantsJson) {
+      io.stdout.write(
+        `${JSON.stringify(
+          {
+            tool: "overseer_handoff_result",
+            workspace_path: layout.dir,
+            run_id: parsed.runId,
+            results_count: results.length,
+            results,
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      return 0;
+    }
+    const lines = [
+      "OVERSEER HANDOFF RESULT",
+      OVERSEER_SEP,
+      `  workspace: ${layout.dir}`,
+      `  run_id: ${parsed.runId}`,
+      `  results (${results.length}):`,
+      ...(results.length > 0
+        ? results.map((r) => `    - [${r.ts}] ${r.status}: ${r.summary}`)
+        : ["    - (none)"]),
+    ];
+    io.stdout.write(`${lines.join("\n")}\n`);
+    return 0;
+  }
+  io.stderr.write(
+    "usage: relayos overseer handoff-result <add|show> [args...]\n",
+  );
+  return 1;
+}
+
+async function runOverseerHandoffResults(args: string[], io: CliIO): Promise<number> {
+  const parsed = parseOverseerHandoffResultsArgs(args);
+  if (!parsed) {
+    io.stderr.write("usage: relayos overseer handoff-results [--json] [--limit <1-20>]\n");
+    return 1;
+  }
+  const layout = resolveOverseerLayout(process.cwd());
+  const results = await readLatestHandoffResults(layout, parsed.limit);
+
+  if (parsed.wantsJson) {
+    io.stdout.write(
+      `${JSON.stringify(
+        {
+          tool: "overseer_handoff_results",
+          workspace_path: layout.dir,
+          results_count: results.length,
+          limit: parsed.limit,
+          results,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return 0;
+  }
+
+  const lines = [
+    "OVERSEER HANDOFF RESULTS",
+    OVERSEER_SEP,
+    `  workspace: ${layout.dir}`,
+    `  results (${results.length}/${parsed.limit}):`,
+    ...(results.length > 0
+      ? results.map((r) => `    - [${r.ts}] ${r.run_id} ${r.status}: ${r.summary}`)
+      : ["    - (none)"]),
+  ];
+  io.stdout.write(`${lines.join("\n")}\n`);
+  return 0;
+}
+
 async function runOverseerDecisions(args: string[], io: CliIO): Promise<number> {
   const parsed = parseOverseerDecisionsArgs(args);
   if (!parsed) {
@@ -1780,6 +2040,8 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "note") return runOverseerNote(rest, io);
   if (sub === "decision") return runOverseerDecision(rest, io);
   if (sub === "decisions") return runOverseerDecisions(rest, io);
+  if (sub === "handoff-result") return runOverseerHandoffResult(rest, io);
+  if (sub === "handoff-results") return runOverseerHandoffResults(rest, io);
   if (sub === "next") return runOverseerNext(rest, io);
   if (sub === "start") return runOverseerStart(rest, io);
   if (sub === "mode") return runOverseerMode(rest, io);
@@ -1793,7 +2055,7 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "branch") return runOverseerBranch(rest, io);
   if (sub === "progress") return runOverseerProgress(rest, io);
   io.stderr.write(
-    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|summary|doctor|note|decision|decisions|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
+    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|summary|doctor|note|decision|decisions|handoff-result|handoff-results|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
   );
   return 1;
 }

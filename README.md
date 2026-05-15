@@ -253,6 +253,9 @@ relayos overseer context-pack
 relayos overseer context-pack --json --limit 8
 relayos overseer doctor
 relayos overseer doctor --json
+relayos overseer handoff-result add --run-id run-123 --status completed --summary "Patch applied and tests green."
+relayos overseer handoff-results --json --limit 5
+relayos overseer handoff-result show --run-id run-123 --json
 relayos overseer run-preflight
 relayos overseer run-preflight --json
 ```
@@ -349,7 +352,7 @@ Available from any terminal after `npm link` (or via `./bin/relayos`).
 | `relayos checkpoint <create\|list\|show\|restore>` | Snapshot HEAD + status + diff before risky handoffs. See [docs/CHECKPOINTS.md](docs/CHECKPOINTS.md). |
 | `relayos diff-risk` | Classify the current working tree before `git commit`. See [docs/DIFF_RISK.md](docs/DIFF_RISK.md). |
 | `relayos report` | Print a compact evidence snapshot: handoff, checkpoint, diff-risk, git status. |
-| `relayos overseer <status\|context\|handshake\|recent\|context-pack\|run-preflight\|summary\|doctor\|note\|next\|start\|mode\|env\|activate-runtime\|brief\|init-context\|branch\|progress>` | Local coordination workspace and read-only runtime-safety checks. See [docs/OVERSEER.md](docs/OVERSEER.md). |
+| `relayos overseer <status\|context\|handshake\|recent\|context-pack\|run-preflight\|summary\|doctor\|note\|decision\|decisions\|handoff-result\|handoff-results\|next\|start\|mode\|env\|activate-runtime\|brief\|init-context\|branch\|progress>` | Local coordination workspace and read-only runtime-safety checks. Includes local handoff result evidence recording (no runner/queue). See [docs/OVERSEER.md](docs/OVERSEER.md). |
 
 ### Diagnostics
 

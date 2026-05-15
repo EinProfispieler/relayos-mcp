@@ -13,6 +13,9 @@ relayos overseer context-pack [--json] [--limit <1-20>]
 relayos overseer run-preflight [--json]
 relayos overseer summary [--json] [--limit <1-20>]
 relayos overseer doctor [--json]
+relayos overseer handoff-result add --run-id <id> --status <completed|failed|blocked|needs_review> --summary <text> [--tests-run <text> ...] [--test-result <text>] [--blocker <text> ...] [--needs-review] [--requires-user-approval]
+relayos overseer handoff-result show --run-id <id> [--json]
+relayos overseer handoff-results [--json] [--limit <1-20>]
 relayos overseer note <text...>
 relayos overseer next [text...]
 relayos overseer start
@@ -212,6 +215,24 @@ Read-only local readiness diagnostic for overseer onboarding/migration sessions.
   `tracked_local_state_files`, `stale_build_possible`, `checks`,
   `recommended_next_action`, and `notes`.
 - Command is diagnostics-only and does not create, modify, or delete `.relayos/overseer/` files.
+
+### `overseer handoff-result add/show` and `overseer handoff-results`
+
+Local-first structured handoff result evidence primitives for future Rookie Mode lifecycle support.
+
+- `relayos overseer handoff-result add` appends one result record to local `.relayos/overseer/handoff_results.jsonl`.
+- Required flags for add: `--run-id`, `--status`, `--summary`.
+- Allowed `--status` values in this slice: `completed`, `failed`, `blocked`, `needs_review`.
+- Optional fields for add:
+  - `--tests-run <text>` (repeatable)
+  - `--test-result <text>`
+  - `--blocker <text>` (repeatable)
+  - `--needs-review`
+  - `--requires-user-approval`
+- `relayos overseer handoff-results [--json] [--limit <1-20>]` reads latest bounded result records (default `8`).
+- `relayos overseer handoff-result show --run-id <id> [--json]` reads records for one run id.
+- Read commands are local and read-only; missing file/workspace returns empty results and does not create `.relayos/overseer/`.
+- This records result evidence only. It does not start agents, create a queue, or run lifecycle automation.
 
 ### `overseer note <text...>`
 
