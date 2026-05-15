@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -55,6 +55,7 @@ import {
   writeActiveBrief,
   writeNextAction,
 } from "./overseer.js";
+import { detectCli, runTarget } from "./spawn/index.js";
 import { evaluatePolicy, formatBannerLines } from "./policy.js";
 import type { Envelope } from "./schema.js";
 import { ensureStorage, resolveStorageLayout } from "./storage.js";
@@ -1747,6 +1748,171 @@ function parseOverseerHandoffResultShowArgs(
   return { wantsJson, runId: runId.trim() };
 }
 
+function parseOverseerExecuteHandoffArgs(
+  args: string[],
+): { handoffId: string; dryRun: boolean } | null {
+  let handoffId: string | null = null;
+  let dryRun = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "--dry-run") {
+      dryRun = true;
+      continue;
+    }
+    if (arg.startsWith("--")) return null;
+    if (handoffId !== null) return null;
+    handoffId = arg;
+  }
+  if (!handoffId || handoffId.trim().length === 0) return null;
+  return { handoffId: handoffId.trim(), dryRun };
+}
+
+function splitLaunchCommand(command: string): string[] {
+  const argv: string[] = [];
+  let current = "";
+  let quote: "'" | "\"" | null = null;
+  let escaping = false;
+
+  for (const char of command) {
+    if (escaping) {
+      current += char;
+      escaping = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaping = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+    if (char === "'" || char === "\"") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current.length > 0) {
+        argv.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += char;
+  }
+
+  if (escaping) current += "\\";
+  if (current.length > 0) argv.push(current);
+  return argv;
+}
+
+async function runOverseerExecuteHandoff(args: string[], io: CliIO): Promise<number> {
+  const parsed = parseOverseerExecuteHandoffArgs(args);
+  if (!parsed) {
+    io.stderr.write("Usage: relayos overseer execute-handoff <handoff_id> [--dry-run]\n");
+    return 1;
+  }
+
+  const layout = resolveStorageLayout();
+  const envelopePath = join(layout.envelopesDir, `${parsed.handoffId}.json`);
+  if (!existsSync(envelopePath)) {
+    io.stderr.write(`Handoff not found: ${parsed.handoffId}\n`);
+    return 1;
+  }
+
+  const envelope = JSON.parse(readFileSync(envelopePath, "utf8")) as Envelope;
+  if (envelope.status !== "recorded") {
+    io.stderr.write(
+      `Cannot execute handoff with status "${envelope.status}". Only "recorded" handoffs may be executed.\n`,
+    );
+    return 1;
+  }
+
+  if (parsed.dryRun) {
+    io.stdout.write(`[dry-run] launch_command:\n${envelope.launch_command}\n`);
+    return 0;
+  }
+
+  let detection;
+  try {
+    detection = await detectCli(envelope.target_agent);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    io.stderr.write(
+      `Failed to detect CLI binary for "${envelope.target_agent}": ${message}\n`,
+    );
+    return 1;
+  }
+  if (!detection.found || !detection.resolved_path) {
+    io.stderr.write(`CLI binary for "${envelope.target_agent}" not found. Is it installed and on PATH?\n`);
+    return 1;
+  }
+
+  const spawningEnvelope: Envelope = {
+    ...envelope,
+    status: "spawning",
+    updated_at: new Date().toISOString(),
+  };
+  writeFileSync(envelopePath, `${JSON.stringify(spawningEnvelope, null, 2)}\n`, "utf8");
+
+  let result: {
+    started_at: string;
+    finished_at: string;
+    exit_code: number;
+    duration_ms: number;
+    stdout_tail: string;
+    stderr_tail: string;
+  };
+  try {
+    result = await runTarget({
+      layout,
+      handoffId: parsed.handoffId,
+      binary: detection.resolved_path,
+      argv: splitLaunchCommand(envelope.launch_command),
+      workingDir: envelope.working_dir ?? process.cwd(),
+    });
+  } catch (err) {
+    const now = new Date().toISOString();
+    const message = err instanceof Error ? err.message : String(err);
+    result = {
+      started_at: now,
+      finished_at: now,
+      exit_code: 1,
+      duration_ms: 0,
+      stdout_tail: "",
+      stderr_tail: message,
+    };
+  }
+  const finalStatus = result.exit_code === 0 ? "completed" : "failed";
+
+  const finalEnvelope: Envelope = {
+    ...spawningEnvelope,
+    status: finalStatus,
+    updated_at: new Date().toISOString(),
+    spawn: result,
+  };
+  writeFileSync(envelopePath, `${JSON.stringify(finalEnvelope, null, 2)}\n`, "utf8");
+
+  const overseerLayout = resolveOverseerLayout(process.cwd());
+  await appendHandoffResult(overseerLayout, {
+    run_id: parsed.handoffId,
+    status: finalStatus as OverseerHandoffResultStatus,
+    summary: `Codex execution ${finalStatus} for handoff ${parsed.handoffId}`,
+    test_result: `exit_code=${result.exit_code}`,
+  });
+
+  io.stdout.write(`\nHandoff: ${parsed.handoffId}\nStatus:  ${finalStatus}\nExit code: ${result.exit_code}\n`);
+  if (result.stdout_tail) io.stdout.write(`\n--- stdout tail ---\n${result.stdout_tail}\n`);
+  if (result.stderr_tail) io.stdout.write(`\n--- stderr tail ---\n${result.stderr_tail}\n`);
+  io.stdout.write(`\nResult recorded: ${overseerLayout.handoffResultsPath}\n`);
+
+  return result.exit_code === 0 ? 0 : 1;
+}
+
 async function runOverseerHandoffResult(args: string[], io: CliIO): Promise<number> {
   const [sub, ...rest] = args;
   if (sub === "add") {
@@ -2254,6 +2420,7 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "decisions") return runOverseerDecisions(rest, io);
   if (sub === "handoff-result") return runOverseerHandoffResult(rest, io);
   if (sub === "handoff-results") return runOverseerHandoffResults(rest, io);
+  if (sub === "execute-handoff") return runOverseerExecuteHandoff(rest, io);
   if (sub === "next") return runOverseerNext(rest, io);
   if (sub === "start") return runOverseerStart(rest, io);
   if (sub === "mode") return runOverseerMode(rest, io);
@@ -2267,7 +2434,9 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "branch") return runOverseerBranch(rest, io);
   if (sub === "progress") return runOverseerProgress(rest, io);
   io.stderr.write(
-    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|capabilities|summary|memory-index|doctor|role-profile|wake-instructions|init|note|decision|decisions|handoff-result|handoff-results|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
+    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|capabilities|summary|memory-index|doctor|role-profile|wake-instructions|init|note|decision|decisions|handoff-result|handoff-results|execute-handoff|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n" +
+      "  overseer execute-handoff <id>   launch Codex for a recorded handoff and capture result\n" +
+      "  overseer execute-handoff --dry-run <id>  print launch_command without executing\n",
   );
   return 1;
 }
