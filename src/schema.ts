@@ -154,22 +154,52 @@ export const ChatSessionRecord = z
     started_at: z.string().datetime(),
     ended_at: z.string().datetime(),
     message_count: z.number().int().nonnegative(),
-    routes: z
-      .array(
-        z.object({
+    routes: z.array(
+      z
+        .object({
           target: z.string(),
           model: z.string(),
           effort: z.string(),
           mode: z.string(),
           approval_required: z.boolean(),
           reason: z.string(),
+        })
+        .extend({
+          ai_plan: z
+            .object({
+              task_type: z.string(),
+              target: z.string(),
+              model: z.string(),
+              effort: z.string(),
+              mode: z.string(),
+              approval_required: z.boolean(),
+              confidence: z.number().min(0).max(1),
+              reason: z.string(),
+              next_action: z.string(),
+            })
+            .strict()
+            .optional(),
         }),
-      )
-      .optional(),
+    ).optional(),
     exit_reason: z.enum(["user_exit", "eof", "sigint"]),
   })
   .strict();
 export type ChatSessionRecord = z.infer<typeof ChatSessionRecord>;
+
+export const AIRoutingPlan = z
+  .object({
+    task_type: z.string(),
+    target: z.string(),
+    model: z.string(),
+    effort: z.string(),
+    mode: z.string(),
+    approval_required: z.boolean(),
+    confidence: z.number().min(0).max(1),
+    reason: z.string(),
+    next_action: z.string(),
+  })
+  .strict();
+export type AIRoutingPlan = z.infer<typeof AIRoutingPlan>;
 
 // ---------- v0.2.0 templates ----------
 

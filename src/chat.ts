@@ -3,8 +3,9 @@ import { createInterface, type Interface } from "node:readline";
 import { stdin as input, stdout as output } from "node:process";
 import { ulid } from "ulid";
 import { ensureOverseerDir, resolveOverseerLayout } from "./overseer.js";
-import { ChatSessionRecord } from "./schema.js";
+import { ChatSessionRecord, type AIRoutingPlan } from "./schema.js";
 import { classifyMessage, type RouteDecision } from "./router.js";
+import { safePlanRoute } from "./ai_planner.js";
 
 type ExitReason = "user_exit" | "eof" | "sigint";
 
@@ -12,7 +13,7 @@ interface ChatState {
   sessionId: string;
   startedAt: string;
   messageCount: number;
-  routes: RouteDecision[];
+  routes: Array<RouteDecision & { ai_plan: AIRoutingPlan }>;
 }
 
 const CHAT_USAGE = "usage: relayos chat\n";
@@ -87,7 +88,7 @@ export async function runChat(args: string[]): Promise<number> {
 
   output.write("RelayOS Chat - type /help for commands\n");
 
-  const rl = createInterface({ input, output, prompt: "> " });
+  const rl = createInterface({ input, output, prompt: "RelayOS Overseer > " });
 
   let finished = false;
   const finalize = async (reason: ExitReason): Promise<number> => {
@@ -130,7 +131,8 @@ export async function runChat(args: string[]): Promise<number> {
       state.messageCount += 1;
     }
     const decision = classifyMessage(line);
-    state.routes.push(decision);
+    const aiPlan = safePlanRoute(line, decision);
+    state.routes.push({ ...decision, ai_plan: aiPlan });
     output.write("[ROUTE]\n");
     output.write(`  target:            ${decision.target}\n`);
     output.write(`  model:             ${decision.model}\n`);
@@ -141,6 +143,16 @@ export async function runChat(args: string[]): Promise<number> {
     if (decision.approval_required) {
       output.write("  ⚠ approval required before execution\n");
     }
+    output.write("[AI PLAN]\n");
+    output.write(`  task_type:         ${aiPlan.task_type}\n`);
+    output.write(`  target:            ${aiPlan.target}\n`);
+    output.write(`  model:             ${aiPlan.model}\n`);
+    output.write(`  effort:            ${aiPlan.effort}\n`);
+    output.write(`  mode:              ${aiPlan.mode}\n`);
+    output.write(`  approval_required: ${aiPlan.approval_required}\n`);
+    output.write(`  confidence:        ${aiPlan.confidence}\n`);
+    output.write(`  reason:            ${aiPlan.reason}\n`);
+    output.write(`  next_action:       ${aiPlan.next_action}\n`);
   }
 
   return 0;

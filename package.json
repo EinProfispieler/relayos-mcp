@@ -25,7 +25,8 @@
   "type": "module",
   "bin": {
     "relayos-mcp": "dist/index.js",
-    "relayos": "bin/relayos"
+    "relayos": "bin/relayos",
+    "relays": "bin/relays"
   },
   "main": "dist/index.js",
   "files": [
