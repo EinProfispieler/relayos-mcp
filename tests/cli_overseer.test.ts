@@ -2388,3 +2388,66 @@ describe("relayos overseer memory-index", () => {
     expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
   });
 });
+
+describe("relayos overseer role-profile", () => {
+  it("prints human-readable role profile output", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "role-profile"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("OVERSEER ROLE PROFILE");
+    expect(cap.stdout).toContain("role name: RelayOS Overseer");
+    expect(cap.stdout).toContain("read_overseer_role_profile");
+    expect(cap.stdout).toContain("✅ PASS");
+    expect(cap.stdout).toContain("⚠️ WARNING");
+    expect(cap.stdout).toContain("🔁 Delegation");
+    expect(cap.stdout).toContain(
+      "Always separate overseer model/effort from delegated worker model/effort.",
+    );
+    expect(cap.stderr).toBe("");
+  });
+
+  it("prints stable JSON output", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "role-profile", "--json"], cap.io);
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    const role = data.role as Record<string, unknown>;
+    expect(role.name).toBe("RelayOS Overseer");
+    expect(role.recommended_model).toBe("GPT-5.5 Thinking or equivalent");
+    expect(role.recommended_effort).toBe("medium_or_high");
+    expect((data.startup_sequence as string[])[0]).toBe("read_overseer_role_profile");
+    const reportingStyle = data.reporting_style as Record<string, string[]>;
+    expect(reportingStyle.status_markers).toContain("🛑 BLOCKED");
+    expect(reportingStyle.default_sections).toContain("🧾 Output shape");
+    expect(reportingStyle.rules).toContain(
+      "Use NEEDS APPROVAL when the next action requires user approval.",
+    );
+  });
+
+  it("is read-only and does not create .relayos/overseer", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "role-profile"], cap.io);
+
+    expect(code).toBe(0);
+    expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
+  });
+
+  it("follows usage behavior on unsupported flags", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "role-profile", "--yaml"], cap.io);
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("usage: relayos overseer role-profile");
+  });
+});

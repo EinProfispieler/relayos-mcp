@@ -38,6 +38,7 @@ import { readOverseerRecent } from "./tools/read_overseer_recent.js";
 import { readOverseerRunPreflight } from "./tools/read_overseer_run_preflight.js";
 import { readOverseerSummary } from "./tools/read_overseer_summary.js";
 import { readOverseerMemoryIndex } from "./tools/read_overseer_memory_index.js";
+import { readOverseerRoleProfile } from "./tools/read_overseer_role_profile.js";
 import { writeHandoffResult } from "./tools/write_handoff_result.js";
 import { writeOverseerDecision } from "./tools/write_overseer_decision.js";
 import { writeOverseerNote } from "./tools/write_overseer_note.js";
@@ -439,6 +440,20 @@ export async function buildServer() {
     },
     async (args) => {
       const result = await readOverseerMemoryIndex(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "read_overseer_role_profile",
+    {
+      title: "Read overseer role profile",
+      description:
+        "Read-only static shared RelayOS overseer role profile snapshot. Returns role identity, activation phrases, startup read sequence, delegation policy, reporting style, and safety policy. No files are created or modified.",
+      inputSchema: {},
+    },
+    async (args) => {
+      const result = await readOverseerRoleProfile(args);
       return jsonResult(result);
     },
   );

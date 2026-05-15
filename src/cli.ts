@@ -32,6 +32,7 @@ import {
   buildOverseerCapabilities,
   buildOverseerContextPack,
   buildOverseerDoctor,
+  buildOverseerRoleProfile,
   buildOverseerMemoryIndex,
   buildOverseerSummary,
   buildOverseerRunPreflight,
@@ -1413,6 +1414,47 @@ async function runOverseerDoctor(args: string[], io: CliIO): Promise<number> {
   return 0;
 }
 
+async function runOverseerRoleProfile(args: string[], io: CliIO): Promise<number> {
+  const wantsJson = args.length === 1 && args[0] === "--json";
+  if (args.length > 1 || (args.length === 1 && !wantsJson)) {
+    io.stderr.write("usage: relayos overseer role-profile [--json]\n");
+    return 1;
+  }
+
+  const profile = buildOverseerRoleProfile();
+  if (wantsJson) {
+    io.stdout.write(`${JSON.stringify(profile, null, 2)}\n`);
+    return 0;
+  }
+
+  const lines = [
+    "OVERSEER ROLE PROFILE",
+    OVERSEER_SEP,
+    `  role name: ${profile.role.name}`,
+    `  description: ${profile.role.description}`,
+    `  recommended model: ${profile.role.recommended_model}`,
+    `  recommended effort: ${profile.role.recommended_effort}`,
+    "  activation phrases:",
+    ...profile.activation_phrases.map((item) => `    - ${item}`),
+    "  startup sequence:",
+    ...profile.startup_sequence.map((item, idx) => `    ${idx + 1}. ${item}`),
+    "  delegation policy:",
+    ...profile.delegation_policy.map((item) => `    - ${item}`),
+    "  reporting style requirements:",
+    ...profile.reporting_style.requirements.map((item) => `    - ${item}`),
+    "  reporting status markers:",
+    ...profile.reporting_style.status_markers.map((item) => `    - ${item}`),
+    "  reporting default sections:",
+    ...profile.reporting_style.default_sections.map((item) => `    - ${item}`),
+    "  reporting rules:",
+    ...profile.reporting_style.rules.map((item) => `    - ${item}`),
+    "  safety policy:",
+    ...profile.safety_policy.map((item) => `    - ${item}`),
+  ];
+  io.stdout.write(`${lines.join("\n")}\n`);
+  return 0;
+}
+
 async function runOverseerNote(args: string[], io: CliIO): Promise<number> {
   if (args.length === 0) {
     io.stderr.write("usage: relayos overseer note <text>\n");
@@ -2116,6 +2158,7 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "summary") return runOverseerSummary(rest, io);
   if (sub === "memory-index") return runOverseerMemoryIndex(rest, io);
   if (sub === "doctor") return runOverseerDoctor(rest, io);
+  if (sub === "role-profile") return runOverseerRoleProfile(rest, io);
   if (sub === "note") return runOverseerNote(rest, io);
   if (sub === "decision") return runOverseerDecision(rest, io);
   if (sub === "decisions") return runOverseerDecisions(rest, io);
@@ -2134,7 +2177,7 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "branch") return runOverseerBranch(rest, io);
   if (sub === "progress") return runOverseerProgress(rest, io);
   io.stderr.write(
-    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|capabilities|summary|memory-index|doctor|note|decision|decisions|handoff-result|handoff-results|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
+    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|capabilities|summary|memory-index|doctor|role-profile|note|decision|decisions|handoff-result|handoff-results|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
   );
   return 1;
 }
