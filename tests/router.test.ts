@@ -25,13 +25,22 @@ describe("classifyMessage", () => {
     expect(decision.mode).toBe("plan");
   });
 
-  it("release keywords require approval", () => {
-    const decision = classifyMessage("please push a release tag");
-    expect(decision.target).toBe("release-control");
-    expect(decision.model).toBe("n/a");
-    expect(decision.mode).toBe("release-control");
+  it("routes commit and push to release control approval", () => {
+    const decision = classifyMessage("please commit and push this change");
+    expect(decision.target).toBe("approval");
+    expect(decision.model).toBe("current-session");
+    expect(decision.mode).toBe("release_control");
     expect(decision.approval_required).toBe(true);
-    expect(decision.effort).toBe("low");
+    expect(decision.effort).toBe("medium");
+  });
+
+  it("routes tag and release to release control approval", () => {
+    const decision = classifyMessage("tag and release this version");
+    expect(decision.target).toBe("approval");
+    expect(decision.model).toBe("current-session");
+    expect(decision.mode).toBe("release_control");
+    expect(decision.approval_required).toBe(true);
+    expect(decision.effort).toBe("medium");
   });
 
   it("unknown message defaults to overseer", () => {
@@ -48,16 +57,38 @@ describe("classifyMessage", () => {
     expect(decision.reason).toBe("matched keyword: fix");
   });
 
-  it("first-match wins for overlapping keywords", () => {
+  it("routes review ahead of implementation keywords", () => {
     const decision = classifyMessage("please review and then implement fix");
     expect(decision.target).toBe("claude-reviewer");
     expect(decision.mode).toBe("read_only");
   });
 
-  it("does not match implementation keyword by substring inside another word", () => {
+  it("routes review of latest patch to review", () => {
     const decision = classifyMessage("please review the latest patch");
     expect(decision.target).toBe("claude-reviewer");
     expect(decision.mode).toBe("read_only");
     expect(decision.reason).toBe("matched keyword: review");
+  });
+
+  it("routes implementation fix requests to codex", () => {
+    const decision = classifyMessage("please fix the CLI bug");
+    expect(decision.target).toBe("codex");
+    expect(decision.model).toBe("gpt-5.3-codex");
+    expect(decision.mode).toBe("implementation");
+  });
+
+  it("routes run tests to codex implementation", () => {
+    const decision = classifyMessage("run tests");
+    expect(decision.target).toBe("codex");
+    expect(decision.model).toBe("gpt-5.3-codex");
+    expect(decision.mode).toBe("implementation");
+  });
+
+  it("does not match test by substring inside latest", () => {
+    const decision = classifyMessage("latest");
+    expect(decision.target).toBe("overseer");
+    expect(decision.model).toBe("claude-sonnet-4-6");
+    expect(decision.mode).toBe("plan");
+    expect(decision.reason).toBe("no keyword match → overseer");
   });
 });
