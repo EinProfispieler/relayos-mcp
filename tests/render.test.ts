@@ -50,6 +50,7 @@ describe("renderCodexTarget", () => {
     expect(r.prompt).toContain("RelayOS Overseer MCP bootstrap");
     expect(r.prompt).toContain("read_overseer_bootstrap_prompt");
     expect(r.prompt).toContain("read_overseer_handshake");
+    expect(r.prompt).toContain("read_overseer_summary");
     expect(r.prompt).toContain("read_overseer_context_pack");
     expect(r.prompt).toContain("read_overseer_recent");
     expect(r.prompt).toContain("before execution");
@@ -100,6 +101,7 @@ describe("renderClaudeTarget", () => {
     expect(r.prompt).toContain("RelayOS Overseer MCP bootstrap");
     expect(r.prompt).toContain("read_overseer_bootstrap_prompt");
     expect(r.prompt).toContain("read_overseer_handshake");
+    expect(r.prompt).toContain("read_overseer_summary");
     expect(r.prompt).toContain("read_overseer_context_pack");
     expect(r.prompt).toContain("read_overseer_recent");
     expect(r.prompt).toContain("before execution");
