@@ -6,6 +6,7 @@ import { ensureOverseerDir, resolveOverseerLayout } from "./overseer.js";
 import { ChatSessionRecord, type AIRoutingPlan } from "./schema.js";
 import { classifyMessage, type RouteDecision } from "./router.js";
 import { safePlanRoute } from "./ai_planner.js";
+import { buildActionProposal, type ActionProposal } from "./action_dispatch.js";
 
 type ExitReason = "user_exit" | "eof" | "sigint";
 
@@ -13,10 +14,13 @@ interface ChatState {
   sessionId: string;
   startedAt: string;
   messageCount: number;
-  routes: Array<RouteDecision & { ai_plan: AIRoutingPlan }>;
+  routes: Array<RouteDecision & { ai_plan: AIRoutingPlan; action_proposal: ActionProposal }>;
 }
 
 const CHAT_USAGE = "usage: relayos chat\n";
+interface ChatRuntimeOptions {
+  showActionProposal?: boolean;
+}
 
 function newChatSessionId(): string {
   return `chat_${ulid()}`;
@@ -73,7 +77,7 @@ function askLine(rl: Interface): Promise<string | null> {
   });
 }
 
-export async function runChat(args: string[]): Promise<number> {
+export async function runChat(args: string[], options: ChatRuntimeOptions = {}): Promise<number> {
   if (args.length > 0) {
     process.stderr.write(CHAT_USAGE);
     return 1;
@@ -132,7 +136,8 @@ export async function runChat(args: string[]): Promise<number> {
     }
     const decision = classifyMessage(line);
     const aiPlan = safePlanRoute(line, decision);
-    state.routes.push({ ...decision, ai_plan: aiPlan });
+    const actionProposal = buildActionProposal(aiPlan);
+    state.routes.push({ ...decision, ai_plan: aiPlan, action_proposal: actionProposal });
     output.write("[ROUTE]\n");
     output.write(`  target:            ${decision.target}\n`);
     output.write(`  model:             ${decision.model}\n`);
@@ -153,6 +158,18 @@ export async function runChat(args: string[]): Promise<number> {
     output.write(`  confidence:        ${aiPlan.confidence}\n`);
     output.write(`  reason:            ${aiPlan.reason}\n`);
     output.write(`  next_action:       ${aiPlan.next_action}\n`);
+    if (options.showActionProposal !== false) {
+      output.write("ACTION PROPOSAL:\n");
+      output.write(`  action: ${actionProposal.action}\n`);
+      if (actionProposal.target) output.write(`  target: ${actionProposal.target}\n`);
+      if (actionProposal.model) output.write(`  model: ${actionProposal.model}\n`);
+      if (actionProposal.effort) output.write(`  effort: ${actionProposal.effort}\n`);
+      if (actionProposal.mode) output.write(`  mode: ${actionProposal.mode}\n`);
+      if (typeof actionProposal.approval_required === "boolean") {
+        output.write(`  approval_required: ${actionProposal.approval_required}\n`);
+      }
+      output.write(`  status: ${actionProposal.status}\n`);
+    }
   }
 
   return 0;

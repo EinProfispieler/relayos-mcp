@@ -2459,7 +2459,7 @@ export async function runCli(
   if (command === "diff-risk") return runDiffRisk(rest, io);
   if (command === "report") return runReport(rest, io);
   if (command === "overseer") return runOverseer(rest, io);
-  if (command === "chat") return runChat(rest);
+  if (command === "chat") return runChat(rest, { showActionProposal: true });
 
   io.stderr.write(usage());
   return 1;
