@@ -139,7 +139,7 @@ Restart both CLIs after registering so they pick up the tool list.
 
 ### 3. MCP tools (inside an AI agent session)
 
-Once registered, 24 MCP tools are available from within any MCP-capable agent session (Claude Code, Codex CLI, or others). Common ones:
+Once registered, 27 MCP tools are available from within any MCP-capable agent session (Claude Code, Codex CLI, or others). Common ones:
 
 - `list_templates` — discover built-in and project templates
 - `create_quick_handoff` — one-shot handoff from a task description
@@ -147,6 +147,7 @@ Once registered, 24 MCP tools are available from within any MCP-capable agent se
 - `read_latest_handoff` — Codex reads its current assignment
 - `doctor` — health check for config and storage
 - `write_overseer_decision` / `read_overseer_decisions` — local-first decision record write/read
+- `write_handoff_result` / `read_handoff_results` / `read_handoff_result` — local-first structured handoff result evidence write/read
 
 See [MCP tools](#mcp-tools) for the full table.
 
@@ -165,6 +166,9 @@ Current overseer MCP surface for this flow:
 - `read_overseer_doctor` (optional read-only overseer readiness diagnostics)
 - `write_overseer_decision` (optional local decision record append)
 - `read_overseer_decisions` (optional read-only decision record readback)
+- `write_handoff_result` (optional local structured handoff result append)
+- `read_handoff_results` (optional read-only bounded handoff result readback)
+- `read_handoff_result` (optional read-only handoff result readback by `run_id`)
 - `write_overseer_note` (optional local progress note append)
 - `read_overseer_recent` (optional read-only compact session readback)
 
@@ -333,6 +337,9 @@ Available inside any MCP-capable agent session once the server is registered.
 | `read_overseer_run_preflight` | Return a read-only future-run readiness preflight payload (no run created, no agent started). |
 | `read_overseer_doctor` | Return a read-only overseer readiness diagnostics payload aligned with `relayos overseer doctor --json`. |
 | `read_overseer_recent` | Return a compact read-only overseer session/state + recent-notes snapshot. |
+| `write_handoff_result` | Append a local structured overseer handoff result record. |
+| `read_handoff_results` | Return bounded local overseer handoff result records. |
+| `read_handoff_result` | Return local overseer handoff result records for one `run_id`. |
 | `write_overseer_note` | Append a local overseer timeline note for progress tracking. |
 | `list_open_handoffs` | List open handoff summaries — no full envelope leak. |
 | `inspect_config` | Show the effective RelayOS config: storage dir, templates, warnings. |

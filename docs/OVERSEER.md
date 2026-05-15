@@ -66,6 +66,9 @@ Current overseer MCP surface for this bootstrap flow:
 - `read_overseer_doctor` (optional read-only overseer readiness diagnostics)
 - `write_overseer_decision` (optional local decision record append)
 - `read_overseer_decisions` (optional read-only decision record readback)
+- `write_handoff_result` (optional local structured handoff result append)
+- `read_handoff_results` (optional read-only bounded handoff result readback)
+- `read_handoff_result` (optional read-only handoff result readback by `run_id`)
 - `write_overseer_note` (optional local progress note append)
 - `read_overseer_recent` (optional read-only compact session readback)
 
@@ -231,6 +234,10 @@ Local-first structured handoff result evidence primitives for future Rookie Mode
   - `--requires-user-approval`
 - `relayos overseer handoff-results [--json] [--limit <1-20>]` reads latest bounded result records (default `8`).
 - `relayos overseer handoff-result show --run-id <id> [--json]` reads records for one run id.
+- MCP parity tools:
+  - `write_handoff_result` appends one local structured handoff result record.
+  - `read_handoff_results` reads latest bounded local structured handoff result records.
+  - `read_handoff_result` reads local structured handoff result records for one `run_id`.
 - Read commands are local and read-only; missing file/workspace returns empty results and does not create `.relayos/overseer/`.
 - This records result evidence only. It does not start agents, create a queue, or run lifecycle automation.
 

@@ -31,9 +31,12 @@ import { readOverseerBootstrapPrompt } from "./tools/read_overseer_bootstrap_pro
 import { readOverseerContextPack } from "./tools/read_overseer_context_pack.js";
 import { readOverseerDecisions } from "./tools/read_overseer_decisions.js";
 import { readOverseerDoctor } from "./tools/read_overseer_doctor.js";
+import { readHandoffResult } from "./tools/read_handoff_result.js";
+import { readHandoffResults } from "./tools/read_handoff_results.js";
 import { readOverseerRecent } from "./tools/read_overseer_recent.js";
 import { readOverseerRunPreflight } from "./tools/read_overseer_run_preflight.js";
 import { readOverseerSummary } from "./tools/read_overseer_summary.js";
+import { writeHandoffResult } from "./tools/write_handoff_result.js";
 import { writeOverseerDecision } from "./tools/write_overseer_decision.js";
 import { writeOverseerNote } from "./tools/write_overseer_note.js";
 import { inspectConfig } from "./tools/inspect_config.js";
@@ -400,6 +403,64 @@ export async function buildServer() {
     },
     async (args) => {
       const result = await readOverseerSummary(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "write_handoff_result",
+    {
+      title: "Write handoff result",
+      description:
+        "Append a local-first structured overseer handoff result record to .relayos/overseer/handoff_results.jsonl. " +
+        "Local-only. Creates .relayos/overseer/ if needed. Rejects empty/whitespace run_id or summary.",
+      inputSchema: {
+        run_id: z.string().min(1),
+        status: z.enum(["completed", "failed", "blocked", "needs_review"]),
+        summary: z.string().min(1),
+        tests_run: z.array(z.string()).optional(),
+        test_result: z.string().optional(),
+        blockers: z.array(z.string()).optional(),
+        needs_review: z.boolean().optional(),
+        requires_user_approval: z.boolean().optional(),
+      },
+    },
+    async (args) => {
+      const result = await writeHandoffResult(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "read_handoff_results",
+    {
+      title: "Read handoff results",
+      description:
+        "Read-only local overseer handoff result records from .relayos/overseer/handoff_results.jsonl. " +
+        "Returns latest bounded records. Local-only. Never creates files.",
+      inputSchema: {
+        limit: z.number().int().min(1).max(20).optional(),
+      },
+    },
+    async (args) => {
+      const result = await readHandoffResults(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "read_handoff_result",
+    {
+      title: "Read handoff result by run id",
+      description:
+        "Read-only local overseer handoff result records for a specific run_id from .relayos/overseer/handoff_results.jsonl. " +
+        "Local-only. Never creates files.",
+      inputSchema: {
+        run_id: z.string().min(1),
+      },
+    },
+    async (args) => {
+      const result = await readHandoffResult(args);
       return jsonResult(result);
     },
   );
