@@ -154,6 +154,18 @@ export const ChatSessionRecord = z
     started_at: z.string().datetime(),
     ended_at: z.string().datetime(),
     message_count: z.number().int().nonnegative(),
+    routes: z
+      .array(
+        z.object({
+          target: z.string(),
+          model: z.string(),
+          effort: z.string(),
+          mode: z.string(),
+          approval_required: z.boolean(),
+          reason: z.string(),
+        }),
+      )
+      .optional(),
     exit_reason: z.enum(["user_exit", "eof", "sigint"]),
   })
   .strict();
