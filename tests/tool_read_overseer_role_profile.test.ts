@@ -59,6 +59,34 @@ describe("read_overseer_role_profile", () => {
     expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
   });
 
+  it("includes language_policy with expected rules", async () => {
+    chdir(tempDir());
+    const result = await readOverseerRoleProfile({});
+
+    expect(Array.isArray(result.language_policy)).toBe(true);
+    expect(result.language_policy).toContain(
+      "Reply to the human in the human's language.",
+    );
+    expect(result.language_policy).toContain(
+      "Delegated task instructions to backend agents must be written in precise English by default.",
+    );
+    expect(result.language_policy).toContain(
+      "Do not mix languages within a single delegated task instruction unless the target agent explicitly requires it.",
+    );
+  });
+
+  it("safety_policy includes fast-mode and user-model-choice rules", async () => {
+    chdir(tempDir());
+    const result = await readOverseerRoleProfile({});
+
+    expect(result.safety_policy).toContain(
+      "Fast mode must remain off unless the user explicitly requests it.",
+    );
+    expect(result.safety_policy).toContain(
+      "The user must not be asked to manually choose backend agents, models, or efforts; the Overseer decides internally.",
+    );
+  });
+
   it("enforces strict empty input", async () => {
     chdir(tempDir());
     await expect(readOverseerRoleProfile({ bad: true })).rejects.toThrow();

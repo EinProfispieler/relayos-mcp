@@ -49,6 +49,15 @@ describe("read_overseer_capabilities", () => {
     expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
   });
 
+  it("requires_explicit_approval includes hooks approval rule", async () => {
+    chdir(tempDir());
+    const result = await readOverseerCapabilities({});
+
+    expect(result.requires_explicit_approval).toContain(
+      "Install or modify hooks of any kind (requires dry-run, explicit approval, non-overwrite behavior, status reporting, and uninstall support).",
+    );
+  });
+
   it("rejects unexpected input fields", async () => {
     chdir(tempDir());
     await expect(readOverseerCapabilities({ bad: true })).rejects.toThrow();

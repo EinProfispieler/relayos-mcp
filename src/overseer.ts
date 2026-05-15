@@ -297,6 +297,7 @@ export interface OverseerRoleProfile {
     rules: string[];
   };
   safety_policy: string[];
+  language_policy: string[];
 }
 
 export interface OverseerSummary {
@@ -721,6 +722,7 @@ export async function buildOverseerCapabilities(
       "Commit, push, tag, or release.",
       "Run outside a failed sandbox for environment recovery.",
       "Modify shell profiles or global npm, git, proxy, or system configuration.",
+      "Install or modify hooks of any kind (requires dry-run, explicit approval, non-overwrite behavior, status reporting, and uninstall support).",
     ],
     forbidden: [
       "Runner, queue, daemon, or autonomous runtime activation.",
@@ -852,6 +854,13 @@ export function buildOverseerRoleProfile(): OverseerRoleProfile {
       "no runner/queue/daemon/autonomous loop/runtime activation",
       "no provider/API/cloud/telemetry/raw chat sync/vector DB/UI/server/account/billing/schema changes unless explicitly approved",
       "proxy/TUN/sandbox failures use fresh retry and manual approval recovery policy",
+      "Fast mode must remain off unless the user explicitly requests it.",
+      "The user must not be asked to manually choose backend agents, models, or efforts; the Overseer decides internally.",
+    ],
+    language_policy: [
+      "Reply to the human in the human's language.",
+      "Delegated task instructions to backend agents must be written in precise English by default.",
+      "Do not mix languages within a single delegated task instruction unless the target agent explicitly requires it.",
     ],
   };
 }
