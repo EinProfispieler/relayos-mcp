@@ -29,6 +29,7 @@ import {
   appendDecision,
   appendNote,
   buildOverseerContextPack,
+  buildOverseerSummary,
   buildOverseerRunPreflight,
   hasOverseerState,
   initContextFiles,
@@ -1233,6 +1234,55 @@ async function runOverseerRunPreflight(args: string[], io: CliIO): Promise<numbe
   return 0;
 }
 
+async function runOverseerSummary(args: string[], io: CliIO): Promise<number> {
+  const parsed = parseOverseerContextPackArgs(args);
+  if (!parsed) {
+    io.stderr.write("usage: relayos overseer summary [--json] [--limit <1-20>]\n");
+    return 1;
+  }
+
+  const summary = await buildOverseerSummary(process.cwd(), parsed.limit);
+
+  if (parsed.wantsJson) {
+    io.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+    return 0;
+  }
+
+  const lines = [
+    "OVERSEER SESSION SUMMARY",
+    OVERSEER_SEP,
+    "  Context:",
+    `    - protocol: ${summary.protocol}`,
+    `    - context status: ${summary.context_complete ? "complete" : "incomplete"}`,
+    `    - workspace: ${summary.workspace_path}`,
+    "  Current state:",
+    `    - project summary: ${summary.project_summary ?? "not available"}`,
+    `    - current state: ${summary.current_state ?? "not available"}`,
+    "  Next action:",
+    `    - ${summary.next_action ?? "not available"}`,
+    `  Recent decisions (${summary.decisions_count}/${summary.limit}):`,
+    ...(summary.recent_decisions.length > 0
+      ? summary.recent_decisions.map((d) => `    - [${d.ts}] ${d.text}`)
+      : ["    - (none)"]),
+    `  Recent notes (${summary.notes_count}/${summary.limit}):`,
+    ...(summary.recent_notes.length > 0
+      ? summary.recent_notes.map((n) => `    - [${n.ts}] ${n.text}`)
+      : ["    - (none)"]),
+    "  Run preflight:",
+    `    - ready for future run: ${summary.run_preflight.ready_for_future_run ? "yes" : "no"}`,
+    `    - context status: ${summary.run_preflight.context_complete ? "complete" : "incomplete"}`,
+    "  Recommended next safe action:",
+    `    - ${summary.recommended_next_action_prompt}`,
+    "  Notes:",
+    ...summary.notes.map((n) => `    - ${n}`),
+  ];
+  if (summary.missing.length > 0) {
+    lines.push("  Missing:", ...summary.missing.map((m) => `    - ${m}`));
+  }
+  io.stdout.write(`${lines.join("\n")}\n`);
+  return 0;
+}
+
 async function runOverseerNote(args: string[], io: CliIO): Promise<number> {
   if (args.length === 0) {
     io.stderr.write("usage: relayos overseer note <text>\n");
@@ -1676,6 +1726,7 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "recent") return runOverseerRecent(rest, io);
   if (sub === "context-pack") return runOverseerContextPack(rest, io);
   if (sub === "run-preflight") return runOverseerRunPreflight(rest, io);
+  if (sub === "summary") return runOverseerSummary(rest, io);
   if (sub === "note") return runOverseerNote(rest, io);
   if (sub === "decision") return runOverseerDecision(rest, io);
   if (sub === "decisions") return runOverseerDecisions(rest, io);
@@ -1692,7 +1743,7 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "branch") return runOverseerBranch(rest, io);
   if (sub === "progress") return runOverseerProgress(rest, io);
   io.stderr.write(
-    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|note|decision|decisions|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
+    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|summary|note|decision|decisions|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n",
   );
   return 1;
 }

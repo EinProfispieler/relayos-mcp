@@ -586,6 +586,86 @@ describe("relayos overseer run-preflight", () => {
   });
 });
 
+describe("relayos overseer summary", () => {
+  it("prints compact deterministic human-readable summary output", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "summary"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("OVERSEER SESSION SUMMARY");
+    expect(cap.stdout).toContain("Context:");
+    expect(cap.stdout).toContain("Current state:");
+    expect(cap.stdout).toContain("Next action:");
+    expect(cap.stdout).toContain("Recent decisions (0/8):");
+    expect(cap.stdout).toContain("Recent notes (0/8):");
+    expect(cap.stdout).toContain("Run preflight:");
+    expect(cap.stdout).toContain("Recommended next safe action:");
+    expect(cap.stdout).toContain("Deterministic read-only summary built from local curated state.");
+    expect(cap.stderr).toBe("");
+  });
+
+  it("prints stable JSON and honors --limit", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    await runCli(["overseer", "note", "one"], captureIO().io);
+    await runCli(["overseer", "note", "two"], captureIO().io);
+    await runCli(["overseer", "note", "three"], captureIO().io);
+    await runCli(["overseer", "decision", "add", "decision one"], captureIO().io);
+    await runCli(["overseer", "decision", "add", "decision two"], captureIO().io);
+    await runCli(["overseer", "decision", "add", "decision three"], captureIO().io);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "summary", "--json", "--limit", "2"], cap.io);
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect(data.tool).toBe("read_overseer_summary");
+    expect(data.protocol).toBe("relayos-overseer-session-v1");
+    expect(data.limit).toBe(2);
+    expect(data.notes_count).toBe(2);
+    expect(Array.isArray(data.recent_notes)).toBe(true);
+    expect((data.recent_notes as Array<Record<string, string>>).map((n) => n.text)).toEqual([
+      "two",
+      "three",
+    ]);
+    expect(data.decisions_count).toBe(2);
+    expect(Array.isArray(data.recent_decisions)).toBe(true);
+    expect((data.recent_decisions as Array<Record<string, string>>).map((n) => n.text)).toEqual([
+      "decision two",
+      "decision three",
+    ]);
+    expect((data.run_preflight as Record<string, unknown>).tool).toBe("run-preflight");
+    expect(typeof data.recommended_next_action_prompt).toBe("string");
+    expect(cap.stderr).toBe("");
+  });
+
+  it("stays read-only when state is missing", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "summary"], cap.io);
+
+    expect(code).toBe(0);
+    expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
+  });
+
+  it("exits 1 with usage on invalid flags or invalid limit", async () => {
+    chdir(tempDir());
+    const capFlag = captureIO();
+    const codeFlag = await runCli(["overseer", "summary", "--yaml"], capFlag.io);
+    expect(codeFlag).toBe(1);
+    expect(capFlag.stderr).toContain("usage: relayos overseer summary");
+
+    const capLimit = captureIO();
+    const codeLimit = await runCli(["overseer", "summary", "--limit", "21"], capLimit.io);
+    expect(codeLimit).toBe(1);
+    expect(capLimit.stderr).toContain("usage: relayos overseer summary");
+  });
+});
+
 describe("relayos overseer note", () => {
   it("records a note and exits 0", async () => {
     chdir(tempDir());

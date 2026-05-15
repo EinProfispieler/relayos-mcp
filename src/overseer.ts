@@ -190,6 +190,27 @@ export interface OverseerRunPreflight {
   notes: string[];
 }
 
+export interface OverseerSummary {
+  ok: boolean;
+  protocol: "relayos-overseer-session-v1";
+  tool: "read_overseer_summary";
+  workspace_path: string;
+  context_complete: boolean;
+  missing: string[];
+  project_summary: string | null;
+  current_state: string | null;
+  next_action: string | null;
+  recent_notes: OverseerContextPackNote[];
+  notes_count: number;
+  recent_decisions: OverseerDecision[];
+  decisions_count: number;
+  run_preflight: OverseerRunPreflight;
+  recommended_next_action_prompt: string;
+  evidence_links: string[];
+  limit: number;
+  notes: string[];
+}
+
 async function runGitCommand(
   cwd: string,
   args: string[],
@@ -442,6 +463,41 @@ export async function buildOverseerRunPreflight(
       "No agent process was started.",
       "Runner/queue/runtime activation are not active in current Core.",
       "High-risk actions still require explicit human approval (commit/push/tag/release/deletion/schema/runtime/provider).",
+    ],
+  };
+}
+
+export async function buildOverseerSummary(
+  cwd: string,
+  limit: number,
+): Promise<OverseerSummary> {
+  const [pack, preflight] = await Promise.all([
+    buildOverseerContextPack(cwd, limit),
+    buildOverseerRunPreflight(cwd),
+  ]);
+
+  return {
+    ok: pack.ok,
+    protocol: pack.protocol,
+    tool: "read_overseer_summary",
+    workspace_path: pack.workspace_path,
+    context_complete: pack.context_complete,
+    missing: pack.missing,
+    project_summary: pack.project_summary,
+    current_state: pack.current_state,
+    next_action: pack.next_action,
+    recent_notes: pack.recent_notes,
+    notes_count: pack.notes_count,
+    recent_decisions: pack.recent_decisions,
+    decisions_count: pack.decisions_count,
+    run_preflight: preflight,
+    recommended_next_action_prompt: pack.recommended_prompt,
+    evidence_links: pack.evidence_links,
+    limit: pack.limit,
+    notes: [
+      "Deterministic read-only summary built from local curated state.",
+      "No model summarization and no raw full chat transcript sync.",
+      "Summary builder does not create, modify, or delete .relayos/overseer files.",
     ],
   };
 }

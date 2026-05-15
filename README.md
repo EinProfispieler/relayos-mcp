@@ -77,6 +77,7 @@ Use `relayos overseer recent` for a compact current overseer summary.
 Use `relayos overseer recent --json` for automation-friendly JSON output.
 Use `relayos overseer context-pack` for a compact curated continuity pack.
 Use `relayos overseer context-pack --json` for MCP-aligned JSON payload output.
+Use `relayos overseer summary` for a deterministic read-only session/migration summary.
 Use `relayos overseer run-preflight` for read-only future run readiness checks.
 Use `relayos overseer runtime-check` as a read-only alias for `relayos overseer activate-runtime --dry-run`.
 
@@ -150,6 +151,7 @@ Current overseer MCP surface for this flow:
 - `read_overseer_bootstrap_prompt` (optional ready-to-use startup prompt helper)
 - `read_overseer_handshake` (canonical bootstrap)
 - `read_overseer_context_pack` (optional curated continuity pack)
+- `read_overseer_summary` (optional deterministic read-only session summary)
 - `read_overseer_run_preflight` (optional read-only future-run readiness check)
 - `write_overseer_decision` (optional local decision record append)
 - `read_overseer_decisions` (optional read-only decision record readback)

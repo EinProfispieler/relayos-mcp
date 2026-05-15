@@ -11,6 +11,7 @@ relayos overseer handshake
 relayos overseer recent
 relayos overseer context-pack [--json] [--limit <1-20>]
 relayos overseer run-preflight [--json]
+relayos overseer summary [--json] [--limit <1-20>]
 relayos overseer note <text...>
 relayos overseer next [text...]
 relayos overseer start
@@ -57,6 +58,7 @@ Current overseer MCP surface for this bootstrap flow:
 - `read_overseer_bootstrap_prompt` (optional ready-to-use startup prompt helper)
 - `read_overseer_handshake` (canonical bootstrap)
 - `read_overseer_context_pack` (optional curated continuity pack)
+- `read_overseer_summary` (optional deterministic read-only session summary)
 - `read_overseer_run_preflight` (optional read-only future-run readiness check)
 - `write_overseer_decision` (optional local decision record append)
 - `read_overseer_decisions` (optional read-only decision record readback)
@@ -185,6 +187,17 @@ Read-only future-run readiness check for scoped Rookie/handoff workflows.
 - `relayos overseer run-preflight --json` prints deterministic machine-readable preflight output.
 - This command is preflight only: it does not create a run, start agents, activate runtime, or mutate local state.
 - Runner/queue/runtime execution are not active in current Core.
+
+### `overseer summary`
+
+Deterministic read-only session/migration summary assembled from existing local curated state.
+
+- `relayos overseer summary` prints a compact human-readable summary with:
+  context, current state, next action, recent decisions, recent notes, run-preflight snapshot, and a recommended next safe action prompt.
+- `relayos overseer summary --json` returns stable machine-readable summary output.
+- `--limit <1-20>` bounds `recent_notes` and `recent_decisions` (default `8`, max `20`).
+- No model summarization is used.
+- Command is read-only and does not create `.relayos/overseer/`.
 
 ### `overseer note <text...>`
 

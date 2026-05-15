@@ -32,6 +32,7 @@ import { readOverseerContextPack } from "./tools/read_overseer_context_pack.js";
 import { readOverseerDecisions } from "./tools/read_overseer_decisions.js";
 import { readOverseerRecent } from "./tools/read_overseer_recent.js";
 import { readOverseerRunPreflight } from "./tools/read_overseer_run_preflight.js";
+import { readOverseerSummary } from "./tools/read_overseer_summary.js";
 import { writeOverseerDecision } from "./tools/write_overseer_decision.js";
 import { writeOverseerNote } from "./tools/write_overseer_note.js";
 import { inspectConfig } from "./tools/inspect_config.js";
@@ -380,6 +381,24 @@ export async function buildServer() {
     },
     async (args) => {
       const result = await readOverseerRunPreflight(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "read_overseer_summary",
+    {
+      title: "Read overseer summary",
+      description:
+        "Read-only deterministic overseer session summary for migration/handoff continuity. " +
+        "Assembles compact context, recent notes, recent decisions, run-preflight readiness, and recommended next safe action prompt " +
+        "from local curated state. No model summarization and no file writes.",
+      inputSchema: {
+        limit: z.number().int().min(1).max(20).optional(),
+      },
+    },
+    async (args) => {
+      const result = await readOverseerSummary(args);
       return jsonResult(result);
     },
   );
