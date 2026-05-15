@@ -179,6 +179,18 @@ export const ChatSessionRecord = z
             })
             .strict()
             .optional(),
+          action_proposal: z
+            .object({
+              action: z.string(),
+              target: z.string().optional(),
+              model: z.string().optional(),
+              effort: z.string().optional(),
+              mode: z.string().optional(),
+              approval_required: z.boolean().optional(),
+              status: z.string(),
+            })
+            .strict()
+            .optional(),
         }),
     ).optional(),
     exit_reason: z.enum(["user_exit", "eof", "sigint"]),
