@@ -37,6 +37,7 @@ describe("read_overseer_bootstrap_prompt", () => {
     expect(result.protocol).toBe("relayos-overseer-session-v1");
     expect(result.tool).toBe("read_overseer_bootstrap_prompt");
     expect(typeof result.prompt).toBe("string");
+    expect(result.prompt).toContain("read_overseer_doctor {}");
     expect(result.prompt).toContain("read_overseer_handshake {}");
     expect(result.prompt).toContain('read_overseer_summary {"limit":8}');
     expect(result.prompt).toContain('read_overseer_context_pack {"limit":8}');
@@ -44,8 +45,10 @@ describe("read_overseer_bootstrap_prompt", () => {
     expect(result.prompt).toContain("Do not commit/push/tag/release without explicit user approval.");
     expect(result.prompt).toContain("Recommend exactly one next safe action");
     expect(result.recommended_first_calls).toEqual([
+      { tool: "read_overseer_doctor", input: {} },
       { tool: "read_overseer_handshake", input: {} },
       { tool: "read_overseer_summary", input: { limit: 8 } },
+      { tool: "read_overseer_context_pack", input: { limit: 8 } },
       { tool: "read_overseer_recent", input: { limit: 8 } },
     ]);
     expect(Array.isArray(result.safety_boundaries)).toBe(true);

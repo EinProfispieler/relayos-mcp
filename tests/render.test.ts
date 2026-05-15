@@ -49,6 +49,7 @@ describe("renderCodexTarget", () => {
     const r = renderCodexTarget(input);
     expect(r.prompt).toContain("RelayOS Overseer MCP bootstrap");
     expect(r.prompt).toContain("read_overseer_bootstrap_prompt");
+    expect(r.prompt).toContain("read_overseer_doctor");
     expect(r.prompt).toContain("read_overseer_handshake");
     expect(r.prompt).toContain("read_overseer_summary");
     expect(r.prompt).toContain("read_overseer_context_pack");
@@ -100,6 +101,7 @@ describe("renderClaudeTarget", () => {
     const r = renderClaudeTarget(input);
     expect(r.prompt).toContain("RelayOS Overseer MCP bootstrap");
     expect(r.prompt).toContain("read_overseer_bootstrap_prompt");
+    expect(r.prompt).toContain("read_overseer_doctor");
     expect(r.prompt).toContain("read_overseer_handshake");
     expect(r.prompt).toContain("read_overseer_summary");
     expect(r.prompt).toContain("read_overseer_context_pack");

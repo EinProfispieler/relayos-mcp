@@ -50,8 +50,9 @@ Read-only session protocol snapshot for overseer-bound clients.
 
 #### MCP client bootstrap rule
 
-For Claude/Codex/other MCP clients, `read_overseer_handshake` is the
-canonical session-start bootstrap call.
+For Claude/Codex/other MCP clients, call `read_overseer_doctor` then
+`read_overseer_handshake` as the canonical session-start bootstrap
+sequence.
 Current overseer MCP surface for this bootstrap flow:
 
 - `read_overseer_bootstrap_prompt` (optional ready-to-use startup prompt helper)
@@ -86,7 +87,7 @@ Current overseer MCP surface for this bootstrap flow:
 
 Minimal copy-paste prompt:
 
-`Call read_overseer_handshake first. If ok/context_complete is true, follow the returned session contract. If incomplete, report missing files before acting.`
+`Call read_overseer_doctor first, then read_overseer_handshake. If handshake ok/context_complete is true, follow the returned session contract. If incomplete, report missing files before acting.`
 
 #### MCP smoke verification
 
@@ -95,11 +96,12 @@ After `npm run build`, restart MCP clients so they reload
 not a daemon.
 
 1. Confirm RelayOS tools are visible in the MCP client.
-2. Call `read_overseer_handshake {}`.
-3. If `ok` or `context_complete` is false, report `missing` and ask the user before proceeding.
-4. Call `read_overseer_recent { "limit": 5 }`.
-5. Optionally call `write_overseer_note { "text": "smoke: connected via MCP" }`.
-6. Call `read_overseer_recent { "limit": 5 }` again and confirm the note appears.
+2. Call `read_overseer_doctor {}`.
+3. Call `read_overseer_handshake {}`.
+4. If `ok` or `context_complete` is false, report `missing` and ask the user before proceeding.
+5. Call `read_overseer_recent { "limit": 5 }`.
+6. Optionally call `write_overseer_note { "text": "smoke: connected via MCP" }`.
+7. Call `read_overseer_recent { "limit": 5 }` again and confirm the note appears.
 
 Safety boundaries remain: local-only state, no daemon, no automatic
 orchestration, no runtime activation, no security sandbox, and

@@ -152,8 +152,9 @@ See [MCP tools](#mcp-tools) for the full table.
 
 ### Overseer MCP bootstrap (Claude/Codex/other MCP clients)
 
-When starting an overseer-bound session, call `read_overseer_handshake`
-first. This is the canonical MCP bootstrap tool for overseer sessions.
+When starting an overseer-bound session, call `read_overseer_doctor`
+then `read_overseer_handshake`. This is the canonical MCP bootstrap
+entry sequence for overseer sessions.
 Current overseer MCP surface for this flow:
 
 - `read_overseer_bootstrap_prompt` (optional ready-to-use startup prompt helper)
@@ -188,7 +189,7 @@ Current overseer MCP surface for this flow:
 
 Minimal session bootstrap prompt:
 
-`Call read_overseer_handshake first. If ok/context_complete is true, follow the returned session contract. If incomplete, report missing files before acting.`
+`Call read_overseer_doctor first, then read_overseer_handshake. If handshake ok/context_complete is true, follow the returned session contract. If incomplete, report missing files before acting.`
 
 ### MCP smoke verification (overseer loop)
 
@@ -197,11 +198,12 @@ After `npm run build`, restart Claude/Codex MCP clients so they reload
 (not a daemon).
 
 1. Confirm RelayOS tools are visible in the MCP client.
-2. Call `read_overseer_handshake {}`.
-3. If `ok` or `context_complete` is false, report `missing` and ask the user before proceeding.
-4. Call `read_overseer_recent { "limit": 5 }`.
-5. Optionally call `write_overseer_note { "text": "smoke: connected via MCP" }`.
-6. Call `read_overseer_recent { "limit": 5 }` again and confirm the note appears.
+2. Call `read_overseer_doctor {}`.
+3. Call `read_overseer_handshake {}`.
+4. If `ok` or `context_complete` is false, report `missing` and ask the user before proceeding.
+5. Call `read_overseer_recent { "limit": 5 }`.
+6. Optionally call `write_overseer_note { "text": "smoke: connected via MCP" }`.
+7. Call `read_overseer_recent { "limit": 5 }` again and confirm the note appears.
 
 Safety boundaries still apply: local-only overseer state, no daemon, no
 automatic orchestration, no runtime activation, no security sandbox, and
@@ -333,7 +335,7 @@ Available inside any MCP-capable agent session once the server is registered.
 | `inspect_config` | Show the effective RelayOS config: storage dir, templates, warnings. |
 | `doctor` | Run health checks; never throws on broken state. |
 
-Rendered handoff prompts now include a RelayOS overseer MCP bootstrap reminder (`read_overseer_bootstrap_prompt` → `read_overseer_handshake` → `read_overseer_summary` → `read_overseer_context_pack` → `read_overseer_recent`) for RelayOS-aware clients. This is prompt guidance only, not automatic execution, not daemon behavior, and not a security sandbox.
+Rendered handoff prompts now include a RelayOS overseer MCP bootstrap reminder (`read_overseer_bootstrap_prompt` → `read_overseer_doctor` → `read_overseer_handshake` → `read_overseer_summary` → `read_overseer_context_pack` → `read_overseer_recent`) for RelayOS-aware clients. This is prompt guidance only, not automatic execution, not daemon behavior, and not a security sandbox.
 
 ### CLI commands
 
