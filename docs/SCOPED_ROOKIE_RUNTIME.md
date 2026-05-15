@@ -49,6 +49,45 @@ Each runtime scope should define at minimum:
 
 No scope should execute without a complete contract.
 
+## Environment Failure and Recovery Policy (Future)
+
+This section is future-design only and does not imply current runner support.
+
+For scoped runtime runs, errors like `EPERM`, `proxyconnect`, `127.0.0.1:7890`, npm registry failures, and GitHub registry failures should default to environment failures unless evidence indicates implementation fault.
+
+Future runtime direction:
+
+- retry the same scoped task in a fresh process first
+- allow up to 3 total attempts for the same scoped task
+- record `failure_type` as:
+  - `environment_network_proxy_tun`
+  - `environment_sandbox_permission`
+
+If retries fail, status should move to `needs_manual_environment_approval` before final environment blocking, with a clear recovery plan and explicit user approval request.
+
+Approved recovery actions may include:
+
+- retrying in a normal Terminal
+- rerunning with isolated npm cache
+- rerunning the same scoped command outside the failed sandbox
+
+Runtime should record approved action details and result evidence.
+
+Future status notes that may appear in this flow:
+
+- `environment_retrying`
+- `needs_manual_environment_approval`
+- `environment_recovery_running`
+- `blocked_by_environment`
+
+Recovery boundaries:
+
+- do not automatically change system proxy/TUN settings
+- do not modify shell profiles or global npm/git/proxy config without explicit approval
+- do not upload secrets/logs
+- do not disable security tools
+- do not broaden scope during recovery
+
 ## Agent Routing Direction (Future)
 
 Example specialization model (directional):
@@ -96,6 +135,7 @@ This design note does not propose current implementation of:
 - unbounded task loop execution
 - automatic release execution
 - unapproved provider fallback
+- automatic proxy/TUN/system network reconfiguration
 - security sandbox guarantees/claims
 
 ## Relationship To Product Tiers

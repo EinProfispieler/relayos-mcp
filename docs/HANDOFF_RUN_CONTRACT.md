@@ -22,6 +22,9 @@ Future run lifecycle should support these canonical states:
 - assigned
 - running
 - waiting_for_agent
+- environment_retrying
+- needs_manual_environment_approval
+- environment_recovery_running
 - completed
 - needs_review
 - approved
@@ -35,6 +38,17 @@ Future run lifecycle should support these canonical states:
 - unknown
 
 These states are directional contract terms for future runtime behavior and should not be interpreted as currently implemented lifecycle transitions.
+
+## 3.1) Environment/Proxy/Sandbox Failure Classification (Future)
+
+Future runtime handling should classify network and sandbox failures carefully before treating a run as implementation-failed.
+
+- Errors such as `EPERM`, `proxyconnect`, `127.0.0.1:7890`, npm registry failures, or GitHub registry failures should default to environment failures, not implementation failures.
+- When this class is detected, runtime should retry the same scoped task in a fresh process before escalation.
+- Retry budget should be up to 3 total attempts for the same scoped task.
+- Future structured failure evidence should include `failure_type` values:
+  - `environment_network_proxy_tun`
+  - `environment_sandbox_permission`
 
 ## 4) Future Structured Run Result Payload
 
@@ -95,6 +109,7 @@ Future runtime detection should require minimum evidence for terminal/critical s
 - Structured result payload with `status=blocked`.
 - Clear blocker reason and required external/user action.
 - Explicit indication that scope execution could not continue safely.
+- When retries are exhausted for environment failures, status should first move to `needs_manual_environment_approval` (not only `blocked_by_environment`), with a recovery plan and explicit approval request.
 
 ### timeout
 
@@ -123,6 +138,33 @@ High-risk actions must remain explicit human approval only:
 
 A run reaching `completed` or `needs_review` should not be interpreted as implicit approval for high-risk actions.
 
+## 7.1) Manual Environment Recovery Gate (Future)
+
+If fresh retries fail for environment-classified failures, future runtime should move to `needs_manual_environment_approval`, present a recovery plan, and request explicit user approval.
+
+After approval, runtime may execute only the approved recovery action and should capture evidence of what was attempted and what result occurred.
+
+Examples of limited recovery actions that may be approved:
+
+- retry in a normal Terminal
+- rerun with isolated npm cache
+- rerun the same scoped command outside the failed sandbox
+
+Future status progression may include:
+
+- `environment_retrying`
+- `needs_manual_environment_approval`
+- `environment_recovery_running`
+- `blocked_by_environment`
+
+Recovery boundaries (future policy):
+
+- Do not automatically change system proxy/TUN settings.
+- Do not modify shell profiles or global npm/git/proxy configuration without explicit approval.
+- Do not upload secrets or logs.
+- Do not disable security tools.
+- Do not broaden task scope during recovery.
+
 ## 8) Relationship to Current Core
 
 Current RelayOS Core already provides relevant building blocks:
@@ -143,6 +185,7 @@ This contract does not implement or claim current support for:
 - storage/envelope/audit schema changes
 - automatic agent execution
 - provider/network/API integration
+- environment recovery automation or manual-approval execution plumbing
 - security sandbox guarantees
 
 ## Summary
