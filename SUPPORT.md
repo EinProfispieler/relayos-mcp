@@ -2,6 +2,8 @@
 
 This page is the primary support entry point for RelayOS Core.
 
+Community behavior expectations are documented in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
 ## Where to ask usage questions
 
 - If GitHub Discussions is enabled, use Discussions for usage/help questions.

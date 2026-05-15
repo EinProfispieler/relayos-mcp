@@ -1,5 +1,8 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Code of Conduct
+    url: https://github.com/EinProfispieler/relayos/blob/main/CODE_OF_CONDUCT.md
+    about: Community behavior expectations for issues, pull requests, and discussions.
   - name: Support guide
     url: https://github.com/EinProfispieler/relayos/blob/main/SUPPORT.md
     about: Where to ask questions, report bugs, and follow public/private data guidance.

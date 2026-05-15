@@ -93,6 +93,7 @@ Use `relayos overseer runtime-check` as a read-only alias for `relayos overseer 
 ## Policy links
 
 - [Support](SUPPORT.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
 - [Privacy (RelayOS Core)](PRIVACY.md)
 - [Security](SECURITY.md)
 - [Disclaimer](DISCLAIMER.md)
