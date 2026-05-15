@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -663,6 +664,94 @@ describe("relayos overseer summary", () => {
     const codeLimit = await runCli(["overseer", "summary", "--limit", "21"], capLimit.io);
     expect(codeLimit).toBe(1);
     expect(capLimit.stderr).toContain("usage: relayos overseer summary");
+  });
+});
+
+describe("relayos overseer doctor", () => {
+  it("prints a compact checklist and ends with one next action", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "doctor"], cap.io);
+
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("OVERSEER DOCTOR");
+    expect(cap.stdout).toContain("CHECKS");
+    expect(cap.stdout).toContain("NEXT ACTION:");
+    expect(cap.stderr).toBe("");
+  });
+
+  it("prints stable JSON shape", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "doctor", "--json"], cap.io);
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect(data.tool).toBe("overseer-doctor");
+    expect(typeof data.ok).toBe("boolean");
+    expect(typeof data.workspace_path).toBe("string");
+    expect(typeof data.version).toBe("string");
+    expect(typeof data.context_complete).toBe("boolean");
+    expect(Array.isArray(data.missing)).toBe(true);
+    expect(typeof data.recent_notes_count).toBe("number");
+    expect(typeof data.recent_decisions_count).toBe("number");
+    expect(typeof data.run_preflight_ready).toBe("boolean");
+    expect(Array.isArray(data.tracked_local_state_files)).toBe(true);
+    expect(typeof data.stale_build_possible).toBe("boolean");
+    expect(Array.isArray(data.checks)).toBe(true);
+    expect(Array.isArray(data.notes)).toBe(true);
+    expect(
+      [
+        "ready",
+        "run npm run build",
+        "initialize/fix local overseer context",
+        "inspect missing files",
+      ].includes(String(data.recommended_next_action)),
+    ).toBe(true);
+    expect(cap.stderr).toBe("");
+  });
+
+  it("is read-only and does not create overseer state", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "doctor"], cap.io);
+
+    expect(code).toBe(0);
+    expect(existsSync(join(cwd, ".relayos", "overseer"))).toBe(false);
+  });
+
+  it("reports tracked .relayos/overseer files when present", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    execFileSync("git", ["init"], { cwd, stdio: "ignore" });
+    execFileSync("git", ["config", "user.email", "dev@example.com"], { cwd, stdio: "ignore" });
+    execFileSync("git", ["config", "user.name", "Dev"], { cwd, stdio: "ignore" });
+    mkdirSync(join(cwd, ".relayos", "overseer"), { recursive: true });
+    writeFileSync(join(cwd, ".relayos", "overseer", "leak.txt"), "tracked\n", "utf8");
+    execFileSync("git", ["add", ".relayos/overseer/leak.txt"], { cwd, stdio: "ignore" });
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "doctor", "--json"], cap.io);
+
+    expect(code).toBe(0);
+    const data = JSON.parse(cap.stdout) as Record<string, unknown>;
+    expect(Array.isArray(data.tracked_local_state_files)).toBe(true);
+    expect((data.tracked_local_state_files as string[]).length).toBe(1);
+    expect((data.tracked_local_state_files as string[])[0]).toContain(".relayos/overseer/leak.txt");
+  });
+
+  it("exits 1 with usage on unsupported flags", async () => {
+    chdir(tempDir());
+    const cap = captureIO();
+
+    const code = await runCli(["overseer", "doctor", "--yaml"], cap.io);
+
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("usage: relayos overseer doctor");
   });
 });
 

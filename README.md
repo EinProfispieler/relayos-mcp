@@ -248,6 +248,8 @@ relayos overseer progress "tests passing, moving to review"
 relayos overseer brief
 relayos overseer context-pack
 relayos overseer context-pack --json --limit 8
+relayos overseer doctor
+relayos overseer doctor --json
 relayos overseer run-preflight
 relayos overseer run-preflight --json
 ```
@@ -343,7 +345,7 @@ Available from any terminal after `npm link` (or via `./bin/relayos`).
 | `relayos checkpoint <create\|list\|show\|restore>` | Snapshot HEAD + status + diff before risky handoffs. See [docs/CHECKPOINTS.md](docs/CHECKPOINTS.md). |
 | `relayos diff-risk` | Classify the current working tree before `git commit`. See [docs/DIFF_RISK.md](docs/DIFF_RISK.md). |
 | `relayos report` | Print a compact evidence snapshot: handoff, checkpoint, diff-risk, git status. |
-| `relayos overseer <status\|context\|handshake\|recent\|context-pack\|run-preflight\|note\|next\|start\|mode\|env\|activate-runtime\|brief\|init-context\|branch\|progress>` | Local coordination workspace and read-only runtime-safety checks. See [docs/OVERSEER.md](docs/OVERSEER.md). |
+| `relayos overseer <status\|context\|handshake\|recent\|context-pack\|run-preflight\|summary\|doctor\|note\|next\|start\|mode\|env\|activate-runtime\|brief\|init-context\|branch\|progress>` | Local coordination workspace and read-only runtime-safety checks. See [docs/OVERSEER.md](docs/OVERSEER.md). |
 
 ### Diagnostics
 

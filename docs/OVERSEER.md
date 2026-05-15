@@ -12,6 +12,7 @@ relayos overseer recent
 relayos overseer context-pack [--json] [--limit <1-20>]
 relayos overseer run-preflight [--json]
 relayos overseer summary [--json] [--limit <1-20>]
+relayos overseer doctor [--json]
 relayos overseer note <text...>
 relayos overseer next [text...]
 relayos overseer start
@@ -196,6 +197,18 @@ Deterministic read-only session/migration summary assembled from existing local 
 - `--limit <1-20>` bounds `recent_notes` and `recent_decisions` (default `8`, max `20`).
 - No model summarization is used.
 - Command is read-only and does not create `.relayos/overseer/`.
+
+### `overseer doctor`
+
+Read-only local readiness diagnostic for overseer onboarding/migration sessions.
+
+- `relayos overseer doctor` prints a compact checklist covering version visibility, cwd/workspace, local context completeness, recent notes/decisions, context-pack/summary/run-preflight readiness, tracked `.relayos/overseer` files, and possible stale `dist/cli.js` build.
+- `relayos overseer doctor --json` returns stable machine-readable output with:
+  `ok`, `tool`, `workspace_path`, `version`, `context_complete`, `missing`,
+  `recent_notes_count`, `recent_decisions_count`, `run_preflight_ready`,
+  `tracked_local_state_files`, `stale_build_possible`, `checks`,
+  `recommended_next_action`, and `notes`.
+- Command is diagnostics-only and does not create, modify, or delete `.relayos/overseer/` files.
 
 ### `overseer note <text...>`
 
