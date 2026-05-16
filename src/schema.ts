@@ -193,6 +193,14 @@ export const ChatSessionRecord = z
             .optional(),
         }),
     ).optional(),
+    conversation_messages: z.array(
+      z
+        .object({
+          role: z.enum(["user", "assistant"]),
+          content: z.string(),
+        })
+        .strict(),
+    ).optional(),
     exit_reason: z.enum(["user_exit", "eof", "sigint"]),
   })
   .strict();
@@ -310,8 +318,30 @@ export const RelayConfig = z
     defaults: RelayConfigDefaults.optional(),
     overseer: z
       .object({
-        provider: z.string().min(1).optional(),
+        provider: z
+          .union([
+            z.string().min(1),
+            z
+              .object({
+                name: z.string().min(1),
+                kind: z.enum(["subscription", "api", "fallback", "subscription_cli", "local_command"]),
+                model: z.string().min(1),
+                effort: z.string().min(1).optional(),
+                execution_mode: z.string().min(1).optional(),
+                command: z.string().min(1).optional(),
+                args: z.array(z.string()).optional(),
+                timeout_ms: z.number().int().positive().optional(),
+              })
+              .strict(),
+          ])
+          .optional(),
+        kind: z.enum(["subscription", "api", "fallback", "subscription_cli", "local_command"]).optional(),
         model: z.string().min(1).optional(),
+        effort: z.string().min(1).optional(),
+        execution_mode: z.string().min(1).optional(),
+        command: z.string().min(1).optional(),
+        args: z.array(z.string()).optional(),
+        timeout_ms: z.number().int().positive().optional(),
       })
       .strict()
       .optional(),

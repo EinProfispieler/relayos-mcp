@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -40,7 +40,7 @@ describe("relayos chat routing", () => {
     const cwd = tempDir();
     chdir(cwd);
     const out = await runChatStdin("what can you do in this project\n");
-    expect(out).toContain("AI conversation provider not configured.");
+    expect(out).toContain("provider-not-configured:");
     expect(out).not.toContain("ROUTE");
     expect(out).not.toContain("AI PLAN");
     expect(out).not.toContain("ACTION PROPOSAL");
@@ -58,9 +58,10 @@ describe("relayos chat routing", () => {
     chdir(cwd);
 
     const help = await runChatStdin("/help\n");
-    expect(help).toContain("Slash commands:");
+    expect(help).toContain("Slash commands");
     expect(help).toContain("/status");
     expect(help).toContain("/run");
+    expect(help).toContain("/settings");
     expect(help).toContain("/exit");
 
     const status = await runChatStdin("/status\n");
@@ -72,6 +73,9 @@ describe("relayos chat routing", () => {
     const run = await runChatStdin("/run\n");
     expect(run).toContain("supported in interactive mode");
 
+    const settings = await runChatStdin("/settings\n");
+    expect(settings).toContain("interactive-only");
+
     const exit = await runChatStdin("/exit\n");
     expect(exit).toContain("session closed");
   });
@@ -80,9 +84,33 @@ describe("relayos chat routing", () => {
     const cwd = tempDir();
     chdir(cwd);
     const out = await runChatStdin("hello\n");
-    expect(out).toContain("AI conversation provider not configured.");
+    expect(out).toContain("provider-not-configured:");
     const logPath = join(cwd, ".relayos", "overseer", "conversation_log.jsonl");
     expect(existsSync(logPath)).toBe(true);
     expect(readFileSync(logPath, "utf8")).toContain("\"role\":\"user\"");
+  });
+
+  it("returns provider-configured-but-not-executable when provider config is present", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    const cfgDir = join(cwd, ".relayos");
+    rmSync(cfgDir, { recursive: true, force: true });
+    mkdirSync(cfgDir, { recursive: true });
+    writeFileSync(
+      join(cfgDir, "config.json"),
+      JSON.stringify({
+        overseer: {
+          provider: "chatgpt",
+          kind: "subscription",
+          model: "gpt-5.5-thinking",
+          effort: "high",
+          execution_mode: "plan",
+        },
+      }),
+      "utf8",
+    );
+    const out = await runChatStdin("hello\n");
+    expect(out).toContain("provider-configured-but-not-executable:");
+    expect(out).toContain("chatgpt/gpt-5.5-thinking [subscription]");
   });
 });
