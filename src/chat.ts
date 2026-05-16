@@ -1,4 +1,5 @@
 import { appendFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { createInterface, type Interface } from "node:readline";
 import { stdin as input, stdout as output } from "node:process";
 import { ulid } from "ulid";
@@ -437,7 +438,8 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
     }
     state.conversationMessages.push({ role: "user", content: line });
     const loaded = loadProjectConfig({ cwd: process.cwd() });
-    const result = await handleConversation([{ role: "user", content: line }], loaded.config);
+    const projectRoot = loaded.source ? dirname(dirname(loaded.source)) : process.cwd();
+    const result = await handleConversation([{ role: "user", content: line }], loaded.config, { projectRoot });
     state.conversationMessages.push({ role: "assistant", content: result.reply });
     output.write(`${result.reply}\n`);
   }

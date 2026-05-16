@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { stdin as processStdin } from "node:process";
 import {
@@ -122,7 +122,8 @@ export async function runChatSingleInput(input: string, io: CliIO): Promise<numb
 
   const loaded = loadProjectConfig({ cwd: process.cwd() });
   const messages: ConversationMessage[] = [{ role: "user", content: message }];
-  const result = await handleConversation(messages, loaded.config);
+  const projectRoot = loaded.source ? dirname(dirname(loaded.source)) : process.cwd();
+  const result = await handleConversation(messages, loaded.config, { projectRoot });
   io.stdout.write(`${result.reply}\n`);
   return 0;
 }
