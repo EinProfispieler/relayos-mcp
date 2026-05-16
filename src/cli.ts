@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { stdin as processStdin } from "node:process";
 import {
   CheckpointResolutionError,
   type Checkpoint,
@@ -56,6 +57,11 @@ import {
   writeNextAction,
 } from "./overseer.js";
 import { runChat } from "./chat.js";
+import { loadProjectConfig } from "./config.js";
+import { handleConversation, type ConversationMessage } from "./conversation.js";
+import { classifyMessage, classifyForChat } from "./router.js";
+import { safePlanRoute } from "./ai_planner.js";
+import { buildActionProposal } from "./action_dispatch.js";
 import { detectCli, runTarget } from "./spawn/index.js";
 import { evaluatePolicy, formatBannerLines } from "./policy.js";
 import type { Envelope, SpawnResult } from "./schema.js";
@@ -68,6 +74,53 @@ interface CliIO {
 
 function usage(): string {
   return "usage: relayos [banner|launch|policy|checkpoint|diff-risk|report|overseer|chat] [--force] [args...]\n";
+}
+
+function readAllFromStdin(): Promise<string> {
+  return new Promise((resolveRead, rejectRead) => {
+    let buf = "";
+    processStdin.setEncoding("utf8");
+    processStdin.on("data", (chunk) => {
+      buf += chunk;
+    });
+    processStdin.on("end", () => resolveRead(buf));
+    processStdin.on("error", (err) => rejectRead(err));
+  });
+}
+
+function isSlashCommand(input: string): boolean {
+  return /^\/(help|status|tasks|current|result|approve|run)\b/.test(input.trim());
+}
+
+async function runChatWithConversationMode(args: string[], io: CliIO): Promise<number> {
+  if (io.stdout.isTTY !== true && args.length === 0) {
+    const raw = await readAllFromStdin();
+    const message = raw.trim();
+    if (!message) return 0;
+
+    if (isSlashCommand(message)) {
+      return runChat([message], { showActionProposal: true });
+    }
+
+    const classed = classifyForChat(message);
+    if (classed === "conversation") {
+      const loaded = loadProjectConfig({ cwd: process.cwd() });
+      const messages: ConversationMessage[] = [{ role: "user", content: message }];
+      const result = await handleConversation(messages, loaded.config);
+      io.stdout.write(`${result.reply}\n`);
+      return 0;
+    }
+
+    const route = classifyMessage(message);
+    const aiPlan = safePlanRoute(message, route);
+    const actionProposal = buildActionProposal(aiPlan);
+    io.stdout.write(`ROUTE\n${JSON.stringify(route, null, 2)}\n`);
+    io.stdout.write(`AI PLAN\n${JSON.stringify(aiPlan, null, 2)}\n`);
+    io.stdout.write(`ACTION PROPOSAL\n${JSON.stringify(actionProposal, null, 2)}\n`);
+    return 0;
+  }
+
+  return runChat(args, { showActionProposal: true });
 }
 
 function checkpointUsage(): string {
@@ -2468,7 +2521,7 @@ export async function runCli(
   if (command === "diff-risk") return runDiffRisk(rest, io);
   if (command === "report") return runReport(rest, io);
   if (command === "overseer") return runOverseer(rest, io);
-  if (command === "chat") return runChat(rest, { showActionProposal: true });
+  if (command === "chat") return runChatWithConversationMode(rest, io);
 
   io.stderr.write(usage());
   return 1;

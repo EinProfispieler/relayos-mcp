@@ -63,6 +63,21 @@ const DEFAULT_DECISION: Omit<RouteDecision, "reason"> = {
   approval_required: false,
 };
 
+const TASK_KEYWORDS = new Set(
+  ROUTING_RULES.flatMap((rule) => rule.keywords.map((keyword) => keyword.toLowerCase())),
+);
+
+export type MessageClassification = "task" | "conversation";
+
+export function classifyForChat(message: string): MessageClassification {
+  const normalized = message.toLowerCase();
+  const tokens = new Set(normalized.match(/[a-z0-9]+/g) ?? []);
+  for (const token of tokens) {
+    if (TASK_KEYWORDS.has(token)) return "task";
+  }
+  return "conversation";
+}
+
 export function classifyMessage(message: string): RouteDecision {
   const normalized = message.toLowerCase();
   const tokens = new Set(normalized.match(/[a-z0-9]+/g) ?? []);
