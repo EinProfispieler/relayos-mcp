@@ -2,12 +2,14 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { TaskRecord as TaskRecordSchema, type TaskRecord } from "./schema.js";
 
 export interface OverseerLayout {
   dir: string;
   timelinePath: string;
   decisionsPath: string;
   handoffResultsPath: string;
+  tasksPath: string;
   nextActionPath: string;
 }
 
@@ -18,6 +20,7 @@ export function resolveOverseerLayout(cwd: string): OverseerLayout {
     timelinePath: join(dir, "timeline.jsonl"),
     decisionsPath: join(dir, "decisions.jsonl"),
     handoffResultsPath: join(dir, "handoff_results.jsonl"),
+    tasksPath: join(dir, "tasks.jsonl"),
     nextActionPath: join(dir, "next_action.md"),
   };
 }
@@ -119,6 +122,78 @@ export async function appendHandoffResult(
     requires_user_approval: input.requires_user_approval,
   };
   await appendFile(layout.handoffResultsPath, `${JSON.stringify(entry)}\n`, "utf8");
+}
+
+async function readTaskRecords(layout: OverseerLayout): Promise<TaskRecord[]> {
+  if (!existsSync(layout.tasksPath)) return [];
+  const raw = await readFile(layout.tasksPath, "utf8");
+  const records: TaskRecord[] = [];
+  for (const line of raw.split("\n")) {
+    if (line.trim().length === 0) continue;
+    try {
+      const parsed = JSON.parse(line);
+      records.push(TaskRecordSchema.parse(parsed));
+    } catch {
+      // skip malformed lines
+    }
+  }
+  return records;
+}
+
+export async function appendTaskRecord(
+  layout: OverseerLayout,
+  record: TaskRecord,
+): Promise<void> {
+  await ensureOverseerDir(layout);
+  const parsed = TaskRecordSchema.parse(record);
+  await appendFile(layout.tasksPath, `${JSON.stringify(parsed)}\n`, "utf8");
+}
+
+export async function readTaskById(
+  layout: OverseerLayout,
+  taskId: string,
+): Promise<TaskRecord | null> {
+  const records = await readTaskRecords(layout);
+  for (let i = records.length - 1; i >= 0; i -= 1) {
+    if (records[i]!.task_id === taskId) {
+      return records[i]!;
+    }
+  }
+  return null;
+}
+
+export async function updateTaskRecord(
+  layout: OverseerLayout,
+  taskId: string,
+  patch: Partial<TaskRecord>,
+): Promise<void> {
+  const current = await readTaskById(layout, taskId);
+  if (!current) throw new Error(`Task not found: ${taskId}`);
+  const next = TaskRecordSchema.parse({
+    ...current,
+    ...patch,
+    task_id: current.task_id,
+  });
+  await appendTaskRecord(layout, next);
+}
+
+export async function readRecentTasks(
+  layout: OverseerLayout,
+  limit = 10,
+): Promise<TaskRecord[]> {
+  const records = await readTaskRecords(layout);
+  const latestById = new Map<string, TaskRecord>();
+  const order: string[] = [];
+  for (const record of records) {
+    if (!latestById.has(record.task_id)) {
+      order.push(record.task_id);
+    }
+    latestById.set(record.task_id, record);
+  }
+  const unique = order
+    .map((taskId) => latestById.get(taskId))
+    .filter((record): record is TaskRecord => Boolean(record));
+  return unique.slice(-limit);
 }
 
 export async function readLatestHandoffResults(

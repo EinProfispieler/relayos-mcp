@@ -2,8 +2,16 @@ import { appendFile } from "node:fs/promises";
 import { createInterface, type Interface } from "node:readline";
 import { stdin as input, stdout as output } from "node:process";
 import { ulid } from "ulid";
-import { ensureOverseerDir, resolveOverseerLayout, appendHandoffResult } from "./overseer.js";
-import { ChatSessionRecord, type AIRoutingPlan } from "./schema.js";
+import {
+  ensureOverseerDir,
+  resolveOverseerLayout,
+  appendHandoffResult,
+  appendTaskRecord,
+  updateTaskRecord,
+  readRecentTasks,
+  readTaskById,
+} from "./overseer.js";
+import { ChatSessionRecord, type AIRoutingPlan, type TaskRecord } from "./schema.js";
 import { classifyMessage, type RouteDecision } from "./router.js";
 import { safePlanRoute } from "./ai_planner.js";
 import { buildActionProposal, type ActionProposal } from "./action_dispatch.js";
@@ -17,6 +25,7 @@ interface ChatState {
   sessionId: string;
   startedAt: string;
   messageCount: number;
+  currentTaskId: string | null;
   routes: Array<RouteDecision & { ai_plan: AIRoutingPlan; action_proposal: ActionProposal }>;
 }
 
@@ -122,6 +131,9 @@ function printHelp(): void {
   output.write("Available commands:\n");
   output.write("  /help    show available commands\n");
   output.write("  /status  show current session info\n");
+  output.write("  /tasks   show recent tasks\n");
+  output.write("  /current show current task details\n");
+  output.write("  /result  show current task result summary\n");
   output.write("  /approve approve latest action proposal\n");
   output.write("  /run     execute latest open handoff via execute-handoff\n");
   output.write("  /exit    write session record and exit\n");
@@ -189,6 +201,7 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
     sessionId: newChatSessionId(),
     startedAt: new Date().toISOString(),
     messageCount: 0,
+    currentTaskId: null,
     routes: [],
   };
 
@@ -227,6 +240,46 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
       printStatus(state);
       continue;
     }
+    if (trimmed === "/tasks") {
+      const overseerLayout = resolveOverseerLayout(process.cwd());
+      const tasks = await readRecentTasks(overseerLayout, 10);
+      output.write(`Recent tasks (project: ${process.cwd()}):\n`);
+      for (const task of tasks) {
+        const summary = task.user_input.length > 60
+          ? `${task.user_input.slice(0, 57)}...`
+          : task.user_input;
+        output.write(`  ${task.task_id}  ${task.status}  ${task.created_at}  ${summary}\n`);
+      }
+      continue;
+    }
+    if (trimmed === "/current") {
+      if (!state.currentTaskId) {
+        output.write("No current task.\n");
+        continue;
+      }
+      const overseerLayout = resolveOverseerLayout(process.cwd());
+      const task = await readTaskById(overseerLayout, state.currentTaskId);
+      if (!task) {
+        output.write("No current task.\n");
+        continue;
+      }
+      output.write(`${JSON.stringify(task, null, 2)}\n`);
+      continue;
+    }
+    if (trimmed === "/result") {
+      if (!state.currentTaskId) {
+        output.write("No result available.\n");
+        continue;
+      }
+      const overseerLayout = resolveOverseerLayout(process.cwd());
+      const task = await readTaskById(overseerLayout, state.currentTaskId);
+      if (!task?.result_summary) {
+        output.write("No result available.\n");
+        continue;
+      }
+      output.write(`${task.result_summary}\n`);
+      continue;
+    }
     if (trimmed === "/approve") {
       const approval = decideApproveAction(pendingProposal);
       if (approval === "none") {
@@ -247,6 +300,17 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
       const handoffResult = await createHandoff(handoffInput, { layout: storageLayout, audit });
       sessionHandoffId = handoffResult.handoff_id;
       const overseerLayout = resolveOverseerLayout(process.cwd());
+      if (state.currentTaskId) {
+        try {
+          await updateTaskRecord(overseerLayout, state.currentTaskId, {
+            handoff_id: handoffResult.handoff_id,
+            status: "approved",
+            updated_at: new Date().toISOString(),
+          });
+        } catch (error) {
+          output.write(`Task registry update failed: ${String(error)}\n`);
+        }
+      }
       await appendHandoffResult(overseerLayout, {
         run_id: handoffResult.handoff_id,
         status: "completed",
@@ -270,11 +334,36 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
         output.write(`${runTarget.errorMessage}\n`);
         continue;
       }
+      const overseerLayout = resolveOverseerLayout(process.cwd());
+      if (state.currentTaskId) {
+        try {
+          await updateTaskRecord(overseerLayout, state.currentTaskId, {
+            status: "running",
+            updated_at: new Date().toISOString(),
+          });
+        } catch (error) {
+          output.write(`Task registry update failed: ${String(error)}\n`);
+        }
+      }
       output.write(`Executing session handoff: ${runTarget.handoffId}\n`);
       const exitCode = await runExecuteHandoffFromCli(
         runTarget.handoffId,
         { stdout: output, stderr: output },
       );
+      if (state.currentTaskId) {
+        try {
+          await updateTaskRecord(overseerLayout, state.currentTaskId, {
+            status: exitCode === 0 ? "completed" : "failed",
+            result_summary:
+              exitCode === 0
+                ? `Handoff executed: ${runTarget.handoffId}`
+                : "Execution failed",
+            updated_at: new Date().toISOString(),
+          });
+        } catch (error) {
+          output.write(`Task registry update failed: ${String(error)}\n`);
+        }
+      }
       output.write(`Execution result: ${exitCode === 0 ? "completed" : "failed"}\n`);
       continue;
     }
@@ -293,6 +382,23 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
     const decision = classifyMessage(line);
     const aiPlan = safePlanRoute(line, decision);
     const actionProposal = buildActionProposal(aiPlan);
+    const now = new Date().toISOString();
+    const taskId = ulid();
+    const task: TaskRecord = {
+      task_id: taskId,
+      user_input: line,
+      route: decision,
+      ai_plan: aiPlan,
+      action_proposal: actionProposal,
+      status: "pending",
+      created_at: now,
+      updated_at: now,
+    };
+    const overseerLayout = resolveOverseerLayout(process.cwd());
+    void appendTaskRecord(overseerLayout, task).catch((error) => {
+      output.write(`Task registry write failed: ${String(error)}\n`);
+    });
+    state.currentTaskId = taskId;
     pendingProposal = {
       originalMessage: line,
       aiPlan,
@@ -300,6 +406,7 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
       executed: false,
     };
     state.routes.push({ ...decision, ai_plan: aiPlan, action_proposal: actionProposal });
+    output.write(`task: ${taskId}\n`);
     output.write("[ROUTE]\n");
     output.write(`  target:            ${decision.target}\n`);
     output.write(`  model:             ${decision.model}\n`);

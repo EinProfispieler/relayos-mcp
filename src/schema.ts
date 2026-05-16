@@ -213,6 +213,53 @@ export const AIRoutingPlan = z
   .strict();
 export type AIRoutingPlan = z.infer<typeof AIRoutingPlan>;
 
+export const RouteDecision = z
+  .object({
+    target: z.string(),
+    model: z.string(),
+    effort: z.enum(["low", "medium", "high"]),
+    mode: z.string(),
+    approval_required: z.boolean(),
+    reason: z.string(),
+  })
+  .strict();
+export type RouteDecision = z.infer<typeof RouteDecision>;
+
+export const ActionProposal = z
+  .object({
+    action: z.enum([
+      "create_handoff",
+      "review_request",
+      "request_approval",
+      "local_plan",
+      "unknown",
+    ]),
+    target: z.string().optional(),
+    model: z.string().optional(),
+    effort: z.string().optional(),
+    mode: z.string().optional(),
+    approval_required: z.boolean().optional(),
+    status: z.enum(["not_executed", "blocked_until_user_approval"]),
+  })
+  .strict();
+export type ActionProposal = z.infer<typeof ActionProposal>;
+
+export const TaskRecord = z
+  .object({
+    task_id: z.string(),
+    user_input: z.string(),
+    route: RouteDecision,
+    ai_plan: AIRoutingPlan,
+    action_proposal: ActionProposal,
+    handoff_id: z.string().optional(),
+    status: z.enum(["pending", "approved", "running", "completed", "failed"]),
+    created_at: z.string(),
+    updated_at: z.string(),
+    result_summary: z.string().optional(),
+  })
+  .strict();
+export type TaskRecord = z.infer<typeof TaskRecord>;
+
 // ---------- v0.2.0 templates ----------
 
 export const TemplateOverrides = z
