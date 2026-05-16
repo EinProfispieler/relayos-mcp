@@ -328,4 +328,46 @@ describe("relayos overseer execute-handoff", () => {
     const opts = runTargetMock.mock.calls[0]![0] as { argv?: string[] };
     expect(opts.argv).toEqual(["codex", "exec", "C:\\Users\\randy\\tmp"]);
   });
+
+  it("writes handoff results using the actual target agent label", async () => {
+    writeEnvelope("h_claude", {
+      id: "h_claude",
+      status: "recorded",
+      target_agent: "claude",
+      launch_command: "claude -p 'hi'",
+      execution_mode: "patch",
+    });
+    detectCliMock.mockResolvedValue({
+      target_binary: "claude",
+      found: true,
+      resolved_path: "/usr/bin/claude",
+    });
+    runTargetMock.mockResolvedValue({
+      started_at: new Date().toISOString(),
+      finished_at: new Date().toISOString(),
+      exit_code: 0,
+      duration_ms: 50,
+      stdout_tail: "ok",
+      stderr_tail: "",
+    });
+
+    const cap = captureIO();
+    const code = await runCli(["overseer", "execute-handoff", "h_claude"], cap.io);
+    expect(code).toBe(0);
+
+    const overseerLayout = resolveOverseerLayout(testRoot);
+    const results = readFileSync(overseerLayout.handoffResultsPath, "utf8")
+      .trim()
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map(
+        (line) =>
+          JSON.parse(line) as {
+            run_id?: string;
+            summary?: string;
+          },
+      );
+    const record = results.find((entry) => entry.run_id === "h_claude");
+    expect(record?.summary).toBe("claude execution completed for handoff h_claude");
+  });
 });

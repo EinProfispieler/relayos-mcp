@@ -1882,7 +1882,7 @@ async function runOverseerExecuteHandoff(args: string[], io: CliIO): Promise<num
     await appendHandoffResult(overseerLayout, {
       run_id: parsed.handoffId,
       status: "failed",
-      summary: `Codex execution failed for handoff ${parsed.handoffId}: ${errMsg}`,
+      summary: `${envelope.target_agent} execution failed for handoff ${parsed.handoffId}: ${errMsg}`,
     });
     io.stderr.write(`Failed to execute handoff: ${errMsg}\n`);
     return 1;
@@ -1901,7 +1901,7 @@ async function runOverseerExecuteHandoff(args: string[], io: CliIO): Promise<num
   await appendHandoffResult(overseerLayout, {
     run_id: parsed.handoffId,
     status: finalStatus as OverseerHandoffResultStatus,
-    summary: `Codex execution ${finalStatus} for handoff ${parsed.handoffId}`,
+    summary: `${envelope.target_agent} execution ${finalStatus} for handoff ${parsed.handoffId}`,
     test_result: `exit_code=${result.exit_code}`,
   });
 
