@@ -1,5 +1,9 @@
 import { type RouteDecision, classifyMessage } from "./router.js";
-import { AIRoutingPlan, type AIRoutingPlan as AIRoutingPlanType } from "./schema.js";
+import {
+  AIRoutingPlan,
+  type AIRoutingPlan as AIRoutingPlanType,
+  type ActionIntentBlock,
+} from "./schema.js";
 
 const SAFE_DEFAULT_ROUTE: RouteDecision = {
   target: "overseer",
@@ -71,4 +75,27 @@ export function safePlanRoute(message: string, route?: RouteDecision): AIRouting
       next_action: "Proceed with static fallback route only.",
     });
   }
+}
+
+export function planRouteFromActionIntent(intent: ActionIntentBlock): AIRoutingPlanType {
+  const isReleaseControl = intent.intent_type === "release_control";
+  const taskType =
+    intent.intent_type === "create_handoff"
+      ? "implementation"
+      : intent.intent_type;
+  const target = isReleaseControl ? "approval" : (intent.target ?? "overseer");
+  const mode = isReleaseControl ? "release_control" : (intent.mode ?? "plan");
+  const approvalRequired = isReleaseControl ? true : intent.approval_required;
+
+  return AIRoutingPlan.parse({
+    task_type: taskType,
+    target,
+    model: intent.model ?? "gpt-5.3-codex",
+    effort: intent.effort ?? "medium",
+    mode,
+    approval_required: approvalRequired,
+    confidence: intent.confidence,
+    reason: intent.summary,
+    next_action: intent.suggested_next_command ?? "Await explicit user instruction.",
+  });
 }
