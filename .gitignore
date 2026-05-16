@@ -7,3 +7,6 @@ coverage/
 .claude/
 docs/plans/
 .relayos/overseer/
+
+# Local RelayOS provider/user config
+.relayos/config.json

@@ -60,6 +60,7 @@ import { runChat } from "./chat.js";
 import { loadProjectConfig } from "./config.js";
 import { handleConversation, type ConversationMessage } from "./conversation.js";
 import { buildChatHelpText } from "./chat.js";
+import { runSettingsWizard } from "./settings.js";
 import { detectCli, runTarget } from "./spawn/index.js";
 import { evaluatePolicy, formatBannerLines } from "./policy.js";
 import type { Envelope, SpawnResult } from "./schema.js";
@@ -71,7 +72,7 @@ export interface CliIO {
 }
 
 function usage(): string {
-  return "usage: relayos [banner|launch|policy|checkpoint|diff-risk|report|overseer|chat] [--force] [args...]\n";
+  return "usage: relayos [banner|launch|policy|checkpoint|diff-risk|report|overseer|chat|settings] [--force] [args...]\n";
 }
 
 function readAllFromStdin(): Promise<string> {
@@ -87,7 +88,7 @@ function readAllFromStdin(): Promise<string> {
 }
 
 function isSlashCommand(input: string): boolean {
-  return /^\/(help|status|tasks|current|result|approve|run|exit)\b/.test(input.trim());
+  return /^\/(help|status|tasks|current|result|approve|run|settings|exit)\b/.test(input.trim());
 }
 
 export async function runChatSingleInput(input: string, io: CliIO): Promise<number> {
@@ -102,6 +103,10 @@ export async function runChatSingleInput(input: string, io: CliIO): Promise<numb
     }
     if (normalized === "/exit") {
       io.stdout.write("RelayOS chat session closed.\n");
+      return 0;
+    }
+    if (normalized === "/settings") {
+      io.stdout.write("/settings is interactive-only. Run `relayos chat` or `relayos settings`.\n");
       return 0;
     }
     io.stdout.write(
@@ -129,6 +134,15 @@ async function runChatWithConversationMode(args: string[], io: CliIO): Promise<n
   }
 
   return runChat(args, { showActionProposal: true });
+}
+
+async function runSettings(args: string[], io: CliIO): Promise<number> {
+  if (args.length > 0) {
+    io.stderr.write("usage: relayos settings\n");
+    return 1;
+  }
+  await runSettingsWizard(process.cwd(), { write: (text) => io.stdout.write(text) });
+  return 0;
 }
 
 function checkpointUsage(): string {
@@ -2530,6 +2544,7 @@ export async function runCli(
   if (command === "report") return runReport(rest, io);
   if (command === "overseer") return runOverseer(rest, io);
   if (command === "chat") return runChatWithConversationMode(rest, io);
+  if (command === "settings") return runSettings(rest, io);
 
   io.stderr.write(usage());
   return 1;

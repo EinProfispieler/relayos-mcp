@@ -17,7 +17,8 @@ import { resolveStorageLayout, ensureStorage } from "./storage.js";
 import { createAuditWriter } from "./audit.js";
 import { createHandoff } from "./tools/create_handoff.js";
 import { loadProjectConfig } from "./config.js";
-import { handleConversation } from "./conversation.js";
+import { handleConversation, type ConversationMessage } from "./conversation.js";
+import { runSettingsWizard } from "./settings.js";
 
 type ExitReason = "user_exit" | "eof" | "sigint";
 
@@ -27,6 +28,7 @@ interface ChatState {
   messageCount: number;
   currentTaskId: string | null;
   routes: Array<RouteDecision & { ai_plan: AIRoutingPlan; action_proposal: ActionProposal }>;
+  conversationMessages: ConversationMessage[];
 }
 
 export interface PendingActionProposal {
@@ -128,20 +130,48 @@ function newChatSessionId(): string {
 }
 
 export function buildChatHelpText(): string {
+  const menu = [
+    ["/help", "Show this command list"],
+    ["/status", "Show current chat session info"],
+    ["/tasks", "Show recent task records"],
+    ["/current", "Show current task details"],
+    ["/result", "Show current task result summary"],
+    ["/approve", "Approve the latest action proposal"],
+    ["/run", "Execute the latest approved handoff"],
+    ["/settings", "Open guided provider setup (profiles + advanced edit)"],
+    ["/exit", "Exit chat"],
+  ] as const;
   return [
-    "Slash commands:",
-    "  /help    Show this command list",
-    "  /status  Show current chat session info",
-    "  /tasks   Show recent task records",
-    "  /current Show current task details",
-    "  /result  Show current task result summary",
-    "  /approve Approve the latest action proposal",
-    "  /run     Execute the latest approved handoff",
-    "  /exit    Exit chat",
+    "Slash commands (type `/` to show the menu any time):",
+    ...menu.map(([cmd, desc]) => `  ${cmd.padEnd(9, " ")} ${desc}`),
     "",
     "Routing:",
     "  Any input not starting with '/' is treated as AI conversation.",
   ].join("\n") + "\n";
+}
+
+const KNOWN_SLASH_COMMANDS = [
+  "/help",
+  "/status",
+  "/tasks",
+  "/current",
+  "/result",
+  "/approve",
+  "/run",
+  "/settings",
+  "/exit",
+] as const;
+
+function printSlashMenu(filter: string = ""): void {
+  const prefix = filter.trim().toLowerCase();
+  const items = KNOWN_SLASH_COMMANDS.filter((cmd) => cmd.startsWith(prefix.length > 0 ? prefix : "/"));
+  if (items.length === 0) {
+    output.write(`No slash command matches: ${filter}\n`);
+    output.write("Tip: type /help to view all commands.\n");
+    return;
+  }
+  output.write("Slash menu:\n");
+  for (const cmd of items) output.write(`  ${cmd}\n`);
 }
 
 function printHelp(): void {
@@ -164,6 +194,7 @@ async function appendSessionRecord(state: ChatState, exitReason: ExitReason): Pr
     ended_at: new Date().toISOString(),
     message_count: state.messageCount,
     routes: state.routes,
+    conversation_messages: state.conversationMessages,
     exit_reason: exitReason,
   });
 
@@ -212,6 +243,7 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
     messageCount: 0,
     currentTaskId: null,
     routes: [],
+    conversationMessages: [],
   };
 
   let pendingProposal: PendingActionProposal | null = null;
@@ -241,6 +273,10 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
     if (line === null) return finalize("eof");
 
     const trimmed = line.trim();
+    if (trimmed === "/") {
+      printSlashMenu();
+      continue;
+    }
     if (trimmed === "/help") {
       printHelp();
       continue;
@@ -376,11 +412,22 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
       output.write(`Execution result: ${exitCode === 0 ? "completed" : "failed"}\n`);
       continue;
     }
+    if (trimmed === "/settings") {
+      await runSettingsWizard(process.cwd(), {
+        write: (text) => output.write(text),
+        ask: (prompt) =>
+          new Promise((resolve) => {
+            rl.question(prompt, (answer) => resolve(answer));
+          }),
+      });
+      continue;
+    }
     if (trimmed === "/exit") {
       return finalize("user_exit");
     }
 
     if (trimmed.startsWith("/")) {
+      printSlashMenu(trimmed.toLowerCase());
       output.write(`unknown command: ${trimmed}\n`);
       continue;
     }
@@ -388,8 +435,10 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
     if (trimmed.length > 0) {
       state.messageCount += 1;
     }
+    state.conversationMessages.push({ role: "user", content: line });
     const loaded = loadProjectConfig({ cwd: process.cwd() });
     const result = await handleConversation([{ role: "user", content: line }], loaded.config);
+    state.conversationMessages.push({ role: "assistant", content: result.reply });
     output.write(`${result.reply}\n`);
   }
 

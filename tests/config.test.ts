@@ -41,6 +41,55 @@ describe("loadProjectConfig", () => {
     expect(r.config.templates["codex-patch"]?.effort).toBe("max");
   });
 
+  it("accepts overseer provider abstraction fields", () => {
+    const cwd = makeDir();
+    mkdirSync(join(cwd, ".relayos"));
+    writeFileSync(
+      join(cwd, ".relayos/config.json"),
+      JSON.stringify({
+        overseer: {
+          provider: "claude-code",
+          kind: "subscription",
+          model: "claude-opus-4-7",
+          effort: "high",
+          execution_mode: "plan",
+        },
+      }),
+    );
+    const r = loadProjectConfig({ cwd, env: {} });
+    expect(r.config.overseer?.provider).toBe("claude-code");
+    expect(r.config.overseer?.kind).toBe("subscription");
+    expect(r.config.overseer?.model).toBe("claude-opus-4-7");
+    expect(r.config.overseer?.effort).toBe("high");
+    expect(r.config.overseer?.execution_mode).toBe("plan");
+  });
+
+  it("accepts local command provider fields for subscription_cli", () => {
+    const cwd = makeDir();
+    mkdirSync(join(cwd, ".relayos"));
+    writeFileSync(
+      join(cwd, ".relayos/config.json"),
+      JSON.stringify({
+        overseer: {
+          provider: "codex",
+          kind: "subscription_cli",
+          model: "gpt-5.3-codex",
+          effort: "medium",
+          execution_mode: "subscription_cli",
+          command: "codex",
+          args: ["exec", "--model", "gpt-5.3-codex"],
+          timeout_ms: 120000,
+        },
+      }),
+    );
+    const r = loadProjectConfig({ cwd, env: {} });
+    expect(r.config.overseer?.provider).toBe("codex");
+    expect(r.config.overseer?.kind).toBe("subscription_cli");
+    expect(r.config.overseer?.command).toBe("codex");
+    expect(r.config.overseer?.args).toEqual(["exec", "--model", "gpt-5.3-codex"]);
+    expect(r.config.overseer?.timeout_ms).toBe(120000);
+  });
+
   it("walks upward to find a config in a parent directory", () => {
     const root = makeDir();
     mkdirSync(join(root, ".relayos"));
