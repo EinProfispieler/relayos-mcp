@@ -3,16 +3,21 @@ import {
   AIRoutingPlan,
   type AIRoutingPlan as AIRoutingPlanType,
   type ActionIntentBlock,
+  type RelayConfig,
 } from "./schema.js";
+import { resolveModelProfiles } from "./model_profiles.js";
 
-const SAFE_DEFAULT_ROUTE: RouteDecision = {
-  target: "overseer",
-  model: "claude-sonnet-4-6",
-  effort: "medium",
-  mode: "plan",
-  approval_required: false,
-  reason: "safe fallback route",
-};
+function safeDefaultRoute(cfg?: RelayConfig): RouteDecision {
+  const profiles = resolveModelProfiles(cfg);
+  return {
+    target: "overseer",
+    model: profiles.claudeModel,
+    effort: profiles.claudeEffort,
+    mode: "plan",
+    approval_required: false,
+    reason: "safe fallback route",
+  };
+}
 
 function detectTaskType(message: string): string {
   const normalized = message.toLowerCase();
@@ -57,12 +62,13 @@ export function planRoute(message: string, route: RouteDecision): AIRoutingPlanT
   });
 }
 
-export function safePlanRoute(message: string, route?: RouteDecision): AIRoutingPlanType {
+export function safePlanRoute(message: string, cfg?: RelayConfig, route?: RouteDecision): AIRoutingPlanType {
   try {
-    const baseRoute = route ?? classifyMessage(message);
+    const profiles = resolveModelProfiles(cfg);
+    const baseRoute = route ?? classifyMessage(message, profiles);
     return planRoute(message, baseRoute);
   } catch {
-    const fallbackRoute = route ?? SAFE_DEFAULT_ROUTE;
+    const fallbackRoute = route ?? safeDefaultRoute(cfg);
     return AIRoutingPlan.parse({
       task_type: "general",
       target: fallbackRoute.target,
@@ -77,7 +83,8 @@ export function safePlanRoute(message: string, route?: RouteDecision): AIRouting
   }
 }
 
-export function planRouteFromActionIntent(intent: ActionIntentBlock): AIRoutingPlanType {
+export function planRouteFromActionIntent(intent: ActionIntentBlock, cfg?: RelayConfig): AIRoutingPlanType {
+  const profiles = resolveModelProfiles(cfg);
   const isReleaseControl = intent.intent_type === "release_control";
   const taskType =
     intent.intent_type === "create_handoff"
@@ -86,12 +93,14 @@ export function planRouteFromActionIntent(intent: ActionIntentBlock): AIRoutingP
   const target = isReleaseControl ? "approval" : (intent.target ?? "overseer");
   const mode = isReleaseControl ? "release_control" : (intent.mode ?? "plan");
   const approvalRequired = isReleaseControl ? true : intent.approval_required;
+  const defaultModel = target === "codex" ? profiles.codexModel : profiles.claudeModel;
+  const defaultEffort = target === "codex" ? profiles.codexEffort : profiles.claudeEffort;
 
   return AIRoutingPlan.parse({
     task_type: taskType,
     target,
-    model: intent.model ?? "gpt-5.3-codex",
-    effort: intent.effort ?? "medium",
+    model: intent.model ?? defaultModel,
+    effort: intent.effort ?? defaultEffort,
     mode,
     approval_required: approvalRequired,
     confidence: intent.confidence,

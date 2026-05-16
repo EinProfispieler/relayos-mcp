@@ -26,6 +26,8 @@ import { createHandoff } from "./tools/create_handoff.js";
 import { loadProjectConfig } from "./config.js";
 import { handleConversation, type ConversationMessage } from "./conversation.js";
 import { runSettingsWizard } from "./settings.js";
+import { resolveModelProfiles } from "./model_profiles.js";
+import { gitBranch, isGitRepo } from "./git.js";
 
 type ExitReason = "user_exit" | "eof" | "sigint";
 
@@ -127,6 +129,17 @@ export function buildHandoffInputFromPending(pending: PendingActionProposal): {
   };
 }
 
+function buildHandoffInputFromPendingWithProfiles(
+  pending: PendingActionProposal,
+  codexModel: string,
+  codexEffort: "low" | "medium" | "high",
+) {
+  const base = buildHandoffInputFromPending(pending);
+  const model = pending.actionProposal.model || codexModel;
+  const effort = (pending.actionProposal.effort || codexEffort) as "low" | "medium" | "high";
+  return { ...base, model, effort };
+}
+
 const CHAT_USAGE = "usage: relayos chat\n";
 interface ChatRuntimeOptions {
   showActionProposal?: boolean;
@@ -189,22 +202,26 @@ function newChatSessionId(): string {
 }
 
 export function buildChatHelpText(): string {
-  const menu = [
-    ["/help", "Show this command list"],
-    ["/status", "Show current chat session info"],
-    ["/tasks", "Show recent task records"],
-    ["/current", "Show current task details"],
-    ["/result", "Show current task result summary"],
-    ["/approve", "Approve the latest action proposal"],
-    ["/run", "Execute the latest approved handoff"],
-    ["/settings", "Open guided provider setup (profiles + advanced edit)"],
-    ["/exit", "Exit chat"],
-  ] as const;
   return [
-    "Slash commands (type `/` to show the menu any time):",
-    ...menu.map(([cmd, desc]) => `  ${cmd.padEnd(9, " ")} ${desc}`),
+    "Slash commands:",
+    "  Session",
+    "    /help      Show this command list",
+    "    /status    Show current chat session info",
+    "    /exit      Exit chat",
     "",
-    "Routing:",
+    "  Tasks",
+    "    /tasks     Show recent task records",
+    "    /current   Show current task details",
+    "    /result    Show current task result summary",
+    "",
+    "  Actions",
+    "    /approve   Approve the latest action proposal",
+    "    /run       Execute the latest approved handoff",
+    "",
+    "  Config",
+    "    /settings  Open guided provider setup (profiles + advanced edit)",
+    "",
+    "Input routing:",
     "  Any input not starting with '/' is treated as AI conversation.",
   ].join("\n") + "\n";
 }
@@ -220,6 +237,41 @@ const KNOWN_SLASH_COMMANDS = [
   "/settings",
   "/exit",
 ] as const;
+
+interface RuntimeView {
+  line: string;
+  projectDir: string;
+  branch: string;
+  codexModel: string;
+  codexEffort: "low" | "medium" | "high";
+  claudeModel: string;
+  claudeEffort: "low" | "medium" | "high";
+}
+
+function buildChatWelcome(view: RuntimeView): string {
+  const boxTop = "┌──────────────────────────────────────────────────────────────┐";
+  const boxBottom = "└──────────────────────────────────────────────────────────────┘";
+  const title = "│  RelayOS Chat                                                │";
+  const profile = `│  model: ${`${view.codexModel} ${view.codexEffort}`.padEnd(49, " ")}│`;
+  const directory = `│  directory: ${`~/${view.projectDir}`.padEnd(45, " ")}│`;
+  const branch = `│  branch: ${view.branch.padEnd(48, " ")}│`;
+  return [
+    boxTop,
+    title,
+    profile,
+    directory,
+    branch,
+    boxBottom,
+    "",
+    "Tip: Use /help for commands, /settings for provider setup.",
+    "Try: /status for runtime summary, /tasks for recent tasks.",
+    "",
+    "> Use /skills to list available skills",
+    "",
+    view.line,
+    "",
+  ].join("\n");
+}
 
 function printSlashMenu(filter: string = ""): void {
   const prefix = filter.trim().toLowerCase();
@@ -237,10 +289,71 @@ function printHelp(): void {
   output.write(buildChatHelpText());
 }
 
-function printStatus(state: ChatState): void {
-  output.write(`session_id: ${state.sessionId}\n`);
-  output.write(`started_at: ${state.startedAt}\n`);
-  output.write(`message_count: ${state.messageCount}\n`);
+function formatActionProposalCompact(proposal: ActionProposal): string[] {
+  const lines = [
+    `Action: ${proposal.action}`,
+    `Status: ${proposal.status}`,
+  ];
+  if (proposal.target) lines.push(`Target: ${proposal.target}`);
+  if (proposal.model) lines.push(`Model: ${proposal.model}`);
+  if (proposal.effort) lines.push(`Effort: ${proposal.effort}`);
+  if (proposal.mode) lines.push(`Mode: ${proposal.mode}`);
+  if (proposal.approval_required !== undefined) {
+    lines.push(`Approval: ${proposal.approval_required ? "required" : "not required"}`);
+  }
+  return lines;
+}
+
+function printStatus(
+  state: ChatState,
+  pendingProposal: PendingActionProposal | null,
+  runtimeView: RuntimeView,
+): void {
+  output.write("Status\n");
+  output.write("------\n");
+  output.write(`${runtimeView.line}\n`);
+  output.write(`session: ${state.sessionId}\n`);
+  output.write(`started: ${state.startedAt}\n`);
+  output.write(`messages: ${state.messageCount}\n`);
+  output.write(`state: ${pendingProposal && !pendingProposal.executed ? "pending_approval" : "ready"}\n`);
+  if (pendingProposal && !pendingProposal.executed) {
+    output.write(`next: /approve or /run\n`);
+  }
+}
+
+async function buildRuntimeView(cwd: string): Promise<RuntimeView> {
+  const loaded = loadProjectConfig({ cwd });
+  const profiles = resolveModelProfiles(loaded.config);
+  const repo = await isGitRepo(cwd);
+  const branch = repo ? await gitBranch(cwd) : null;
+  const projectRoot = loaded.source ? dirname(dirname(loaded.source)) : cwd;
+  const projectDir = projectRoot.split("/").filter(Boolean).slice(-1)[0] ?? ".";
+  const line = [
+    `model ${profiles.codexModel}`,
+    `effort ${profiles.codexEffort}`,
+    `claude ${profiles.claudeModel}/${profiles.claudeEffort}`,
+    `~/${projectDir}`,
+    `branch ${branch ?? "n/a"}`,
+    pendingStateLabel(null),
+  ].join(" · ");
+  return {
+    line,
+    projectDir,
+    branch: branch ?? "n/a",
+    codexModel: profiles.codexModel,
+    codexEffort: profiles.codexEffort,
+    claudeModel: profiles.claudeModel,
+    claudeEffort: profiles.claudeEffort,
+  };
+}
+
+function pendingStateLabel(pending: PendingActionProposal | null): string {
+  if (pending && !pending.executed) return "Pending";
+  return "Ready";
+}
+
+function updateRuntimeStateLine(runtimeLine: string, pending: PendingActionProposal | null): string {
+  return runtimeLine.replace(/ · (Pending|Ready)$/, ` · ${pendingStateLabel(pending)}`);
 }
 
 async function appendSessionRecord(state: ChatState, exitReason: ExitReason): Promise<void> {
@@ -308,7 +421,10 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
   let pendingProposal: PendingActionProposal | null = null;
   let sessionHandoffId: string | null = null;
 
-  output.write("RelayOS Chat - type /help for commands\n");
+  const cwd = process.cwd();
+  const runtimeView = await buildRuntimeView(cwd);
+  let runtimeLine = runtimeView.line;
+  output.write(buildChatWelcome(runtimeView));
 
   const rl = createInterface({ input, output, prompt: "RelayOS Overseer > " });
 
@@ -328,6 +444,7 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
   });
 
   while (!finished) {
+    rl.setPrompt(pendingProposal && !pendingProposal.executed ? "RelayOS Overseer (pending /approve) > " : "RelayOS Overseer > ");
     const line = await askLine(rl);
     if (line === null) return finalize("eof");
 
@@ -341,7 +458,7 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
       continue;
     }
     if (trimmed === "/status") {
-      printStatus(state);
+      printStatus(state, pendingProposal, { ...runtimeView, line: runtimeLine });
       continue;
     }
     if (trimmed === "/tasks") {
@@ -397,7 +514,13 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
         continue;
       }
 
-      const handoffInput = buildHandoffInputFromPending(pendingProposal!);
+      const loadedForProfiles = loadProjectConfig({ cwd: process.cwd() });
+      const profiles = resolveModelProfiles(loadedForProfiles.config);
+      const handoffInput = buildHandoffInputFromPendingWithProfiles(
+        pendingProposal!,
+        profiles.codexModel,
+        profiles.codexEffort,
+      );
       const storageLayout = resolveStorageLayout();
       await ensureStorage(storageLayout);
       const audit = createAuditWriter(storageLayout);
@@ -422,6 +545,7 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
       });
 
       pendingProposal!.executed = true;
+      runtimeLine = updateRuntimeStateLine(runtimeLine, pendingProposal);
 
       output.write("HANDOFF CREATED:\n");
       output.write(`  id:     ${handoffResult.handoff_id}\n`);
@@ -486,8 +610,13 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
     }
 
     if (trimmed.startsWith("/")) {
-      printSlashMenu(trimmed.toLowerCase());
-      output.write(`unknown command: ${trimmed}\n`);
+      const prefix = trimmed.toLowerCase();
+      const hasExact = KNOWN_SLASH_COMMANDS.includes(prefix as (typeof KNOWN_SLASH_COMMANDS)[number]);
+      printSlashMenu(prefix);
+      if (!hasExact) {
+        const hasMatches = KNOWN_SLASH_COMMANDS.some((cmd) => cmd.startsWith(prefix));
+        if (!hasMatches) output.write(`unknown command: ${trimmed}\n`);
+      }
       continue;
     }
 
@@ -508,7 +637,7 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
       continue;
     }
 
-    const aiPlan = planRouteFromActionIntent(actionIntent);
+    const aiPlan = planRouteFromActionIntent(actionIntent, loaded.config);
     const actionProposal = buildActionProposal(aiPlan);
     pendingProposal = {
       originalMessage: line,
@@ -516,6 +645,7 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
       actionProposal,
       executed: false,
     };
+    runtimeLine = updateRuntimeStateLine(runtimeLine, pendingProposal);
     state.routes.push({
       target: aiPlan.target,
       model: aiPlan.model,
@@ -529,6 +659,9 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
 
     if (options.showActionProposal !== false) {
       output.write("ACTION PROPOSAL:\n");
+      for (const line of formatActionProposalCompact(actionProposal)) {
+        output.write(`  ${line}\n`);
+      }
       output.write(`${JSON.stringify(actionProposal, null, 2)}\n`);
     }
   }

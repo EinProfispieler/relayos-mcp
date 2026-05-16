@@ -130,7 +130,7 @@ export async function runChatSingleInput(input: string, io: CliIO): Promise<numb
   const visibleReply = parsed.visibleReply.length > 0 ? parsed.visibleReply : result.reply;
   io.stdout.write(`${visibleReply}\n`);
   if (parsed.actionIntent && parsed.actionIntent.intent_type !== "conversation" && parsed.actionIntent.confidence >= 0.7) {
-    const plan = planRouteFromActionIntent(parsed.actionIntent);
+    const plan = planRouteFromActionIntent(parsed.actionIntent, loaded.config);
     const proposal = buildActionProposal(plan);
     io.stdout.write("ACTION PROPOSAL:\n");
     io.stdout.write(`${JSON.stringify(proposal, null, 2)}\n`);

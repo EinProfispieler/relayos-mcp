@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# User-facing chat entrypoint.
+# User-facing RelayOS shortcut CLI with basic command routing.
 SCRIPT="$0"
 while [ -h "$SCRIPT" ]; do
   LINK=$(readlink "$SCRIPT")
@@ -9,4 +9,70 @@ while [ -h "$SCRIPT" ]; do
   esac
 done
 DIR=$(cd "$(dirname "$SCRIPT")" && pwd)
-exec node "$DIR/../dist/cli.js" chat "$@"
+CLI_JS="$DIR/../dist/cli.js"
+
+print_help() {
+  cat <<'EOF'
+relays - RelayOS quick CLI
+
+Usage:
+  relays                    Start chat mode
+  relays help               Show this help
+  relays chat [args...]     Chat mode
+  relays settings           Provider/settings wizard
+  relays banner             Show RelayOS banner
+  relays status             Overseer runtime status
+  relays doctor             Overseer health checks
+  relays report             Runtime + handoff report
+  relays run <handoff_id>   Execute one recorded handoff
+
+Chat slash commands:
+  /help /status /tasks /current /result /approve /run /settings /exit
+
+Tip:
+  Unknown commands are forwarded to: relayos <command> [args...]
+EOF
+}
+
+COMMAND="${1:-}"
+if [ "$#" -eq 0 ]; then
+  exec node "$CLI_JS" chat
+fi
+
+case "$COMMAND" in
+  help|-h|--help)
+    print_help
+    exit 0
+    ;;
+  chat)
+    shift
+    exec node "$CLI_JS" chat "$@"
+    ;;
+  settings)
+    shift
+    exec node "$CLI_JS" settings "$@"
+    ;;
+  banner)
+    shift
+    exec node "$CLI_JS" banner "$@"
+    ;;
+  status)
+    shift
+    exec node "$CLI_JS" overseer status "$@"
+    ;;
+  doctor)
+    shift
+    exec node "$CLI_JS" overseer doctor "$@"
+    ;;
+  report)
+    shift
+    exec node "$CLI_JS" report "$@"
+    ;;
+  run)
+    shift
+    exec node "$CLI_JS" overseer execute-handoff "$@"
+    ;;
+  *)
+    exec node "$CLI_JS" "$@"
+    ;;
+esac
