@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planRoute, safePlanRoute } from "../src/ai_planner.js";
+import { planRoute, planRouteFromActionIntent, safePlanRoute } from "../src/ai_planner.js";
 import { classifyMessage } from "../src/router.js";
 
 describe("planRoute", () => {
@@ -64,5 +64,39 @@ describe("safePlanRoute", () => {
     } finally {
       String.prototype.toLowerCase = original;
     }
+  });
+});
+
+describe("planRouteFromActionIntent", () => {
+  it("maps create_handoff action intent to implementation plan", () => {
+    const plan = planRouteFromActionIntent({
+      intent_type: "create_handoff",
+      confidence: 0.85,
+      summary: "Fix CLI bug in router",
+      approval_required: false,
+      target: "codex",
+      mode: "patch",
+      effort: "medium",
+    });
+
+    expect(plan.task_type).toBe("implementation");
+    expect(plan.target).toBe("codex");
+    expect(plan.mode).toBe("patch");
+    expect(plan.approval_required).toBe(false);
+    expect(plan.confidence).toBe(0.85);
+  });
+
+  it("forces release_control intents to approval required", () => {
+    const plan = planRouteFromActionIntent({
+      intent_type: "release_control",
+      confidence: 0.9,
+      summary: "Commit and release changes",
+      approval_required: false,
+    });
+
+    expect(plan.task_type).toBe("release_control");
+    expect(plan.target).toBe("approval");
+    expect(plan.mode).toBe("release_control");
+    expect(plan.approval_required).toBe(true);
   });
 });

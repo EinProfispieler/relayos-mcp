@@ -11,9 +11,15 @@ import {
   readRecentTasks,
   readTaskById,
 } from "./overseer.js";
-import { ChatSessionRecord, type AIRoutingPlan } from "./schema.js";
+import {
+  ChatSessionRecord,
+  type AIRoutingPlan,
+  ActionIntentBlock,
+  type ActionIntentBlock as ActionIntentBlockType,
+} from "./schema.js";
 import { type RouteDecision } from "./router.js";
-import { type ActionProposal } from "./action_dispatch.js";
+import { buildActionProposal, type ActionProposal } from "./action_dispatch.js";
+import { planRouteFromActionIntent } from "./ai_planner.js";
 import { resolveStorageLayout, ensureStorage } from "./storage.js";
 import { createAuditWriter } from "./audit.js";
 import { createHandoff } from "./tools/create_handoff.js";
@@ -124,6 +130,58 @@ export function buildHandoffInputFromPending(pending: PendingActionProposal): {
 const CHAT_USAGE = "usage: relayos chat\n";
 interface ChatRuntimeOptions {
   showActionProposal?: boolean;
+}
+
+interface ParsedActionIntentReply {
+  visibleReply: string;
+  actionIntent: ActionIntentBlockType | null;
+}
+
+function parseBoolean(value: string): boolean | null {
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return null;
+}
+
+function parseActionIntentBlock(block: string): ActionIntentBlockType | null {
+  const lines = block.split("\n").map((line) => line.trim()).filter((line) => line.length > 0);
+  const parsed: Record<string, string> = {};
+  for (const line of lines) {
+    const idx = line.indexOf(":");
+    if (idx <= 0) continue;
+    const key = line.slice(0, idx).trim();
+    const value = line.slice(idx + 1).trim();
+    parsed[key] = value;
+  }
+
+  const approval = parseBoolean(parsed.approval_required ?? "");
+  const confidence = Number.parseFloat(parsed.confidence ?? "");
+  const candidate = {
+    intent_type: parsed.intent_type,
+    confidence,
+    summary: parsed.summary,
+    target: parsed.target,
+    model: parsed.model,
+    effort: parsed.effort,
+    mode: parsed.mode,
+    approval_required: approval,
+    suggested_next_command: parsed.suggested_next_command,
+  };
+  const result = ActionIntentBlock.safeParse(candidate);
+  return result.success ? result.data : null;
+}
+
+export function extractActionIntentFromReply(reply: string): ParsedActionIntentReply {
+  const match = reply.match(/(?:^|\n)ACTION_INTENT\s*\n([\s\S]*?)\nEND_ACTION_INTENT/);
+  if (!match) return { visibleReply: reply.trimEnd(), actionIntent: null };
+
+  const fullBlock = match[0];
+  const parsed = parseActionIntentBlock(match[1] ?? "");
+  const visibleReply = reply.replace(fullBlock, "\n").trim();
+  return {
+    visibleReply,
+    actionIntent: parsed,
+  };
 }
 
 function newChatSessionId(): string {
@@ -440,8 +498,39 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
     const loaded = loadProjectConfig({ cwd: process.cwd() });
     const projectRoot = loaded.source ? dirname(dirname(loaded.source)) : process.cwd();
     const result = await handleConversation([{ role: "user", content: line }], loaded.config, { projectRoot });
-    state.conversationMessages.push({ role: "assistant", content: result.reply });
-    output.write(`${result.reply}\n`);
+    const parsedReply = extractActionIntentFromReply(result.reply);
+    const assistantReply = parsedReply.visibleReply.length > 0 ? parsedReply.visibleReply : result.reply;
+    state.conversationMessages.push({ role: "assistant", content: assistantReply });
+    output.write(`${assistantReply}\n`);
+
+    const actionIntent = parsedReply.actionIntent;
+    if (!actionIntent || actionIntent.intent_type === "conversation" || actionIntent.confidence < 0.7) {
+      continue;
+    }
+
+    const aiPlan = planRouteFromActionIntent(actionIntent);
+    const actionProposal = buildActionProposal(aiPlan);
+    pendingProposal = {
+      originalMessage: line,
+      aiPlan,
+      actionProposal,
+      executed: false,
+    };
+    state.routes.push({
+      target: aiPlan.target,
+      model: aiPlan.model,
+      effort: aiPlan.effort as "low" | "medium" | "high",
+      mode: aiPlan.mode,
+      approval_required: aiPlan.approval_required,
+      reason: aiPlan.reason,
+      ai_plan: aiPlan,
+      action_proposal: actionProposal,
+    });
+
+    if (options.showActionProposal !== false) {
+      output.write("ACTION PROPOSAL:\n");
+      output.write(`${JSON.stringify(actionProposal, null, 2)}\n`);
+    }
   }
 
   return 0;

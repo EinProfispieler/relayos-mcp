@@ -64,6 +64,20 @@ describe("buildActionProposal", () => {
     });
   });
 
+  it("enforces approval_required from planner output", () => {
+    const proposal = buildActionProposal(
+      plan({ task_type: "implementation", mode: "patch", approval_required: true }),
+    );
+
+    expect(proposal).toEqual({
+      action: "request_approval",
+      target: "approval",
+      mode: "patch",
+      approval_required: true,
+      status: "blocked_until_user_approval",
+    });
+  });
+
   it("maps planning to local plan", () => {
     const proposal = buildActionProposal(plan({ task_type: "planning" }));
 

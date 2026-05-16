@@ -1,5 +1,5 @@
-import { appendFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { appendFile, mkdir, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
 import type { RelayConfig } from "./schema.js";
 
@@ -56,6 +56,110 @@ function isExecutableMode(mode: string | null): boolean {
   return mode === "local_command" || mode === "subscription_cli";
 }
 
+function isCodexCommand(command: string): boolean {
+  const trimmed = command.trim();
+  return trimmed === "codex" || trimmed.endsWith("/codex");
+}
+
+function hasArg(args: string[], flag: string): boolean {
+  return args.some((arg) => arg === flag || arg.startsWith(`${flag}=`));
+}
+
+function applyReadOnlyConversationArgs(cfg: ResolvedConversationProviderConfig, args: string[]): string[] {
+  if (cfg.executionMode !== "subscription_cli" || !isCodexCommand(cfg.command ?? "")) return args;
+  const out = [...args];
+  if (!hasArg(out, "--sandbox")) {
+    out.push("--sandbox", "read-only");
+  }
+  return out;
+}
+
+type SnapshotEntry = { kind: "file"; content: Buffer } | { kind: "dir" };
+
+async function walkRelative(root: string, rel = ""): Promise<string[]> {
+  const abs = rel.length > 0 ? join(root, rel) : root;
+  const entries = await readdir(abs, { withFileTypes: true });
+  const out: string[] = [];
+  for (const entry of entries) {
+    if (entry.name === ".git") continue;
+    const childRel = rel.length > 0 ? join(rel, entry.name) : entry.name;
+    out.push(childRel);
+    if (entry.isDirectory()) {
+      out.push(...await walkRelative(root, childRel));
+    }
+  }
+  return out;
+}
+
+async function snapshotProjectTree(projectRoot: string): Promise<Map<string, SnapshotEntry>> {
+  const snapshot = new Map<string, SnapshotEntry>();
+  const relPaths = await walkRelative(projectRoot);
+  for (const rel of relPaths) {
+    const abs = join(projectRoot, rel);
+    const s = await stat(abs);
+    if (s.isDirectory()) {
+      snapshot.set(rel, { kind: "dir" });
+      continue;
+    }
+    if (s.isFile()) {
+      snapshot.set(rel, { kind: "file", content: await readFile(abs) });
+    }
+  }
+  return snapshot;
+}
+
+async function rollbackProjectMutations(projectRoot: string, before: Map<string, SnapshotEntry>): Promise<boolean> {
+  const afterPaths = new Set(await walkRelative(projectRoot));
+  const beforePaths = new Set(before.keys());
+  let changed = false;
+
+  for (const rel of afterPaths) {
+    const beforeEntry = before.get(rel);
+    if (!beforeEntry) {
+      changed = true;
+      const abs = join(projectRoot, rel);
+      const s = await stat(abs);
+      if (s.isDirectory()) {
+        await rm(abs, { recursive: true, force: true });
+      } else {
+        await unlink(abs).catch(() => undefined);
+      }
+      continue;
+    }
+    if (beforeEntry.kind === "file") {
+      const abs = join(projectRoot, rel);
+      const s = await stat(abs);
+      if (!s.isFile()) {
+        changed = true;
+        await rm(abs, { recursive: true, force: true });
+        await writeFile(abs, beforeEntry.content);
+        continue;
+      }
+      const now = await readFile(abs);
+      if (!now.equals(beforeEntry.content)) {
+        changed = true;
+        await writeFile(abs, beforeEntry.content);
+      }
+    }
+  }
+
+  for (const rel of beforePaths) {
+    if (afterPaths.has(rel)) continue;
+    const beforeEntry = before.get(rel);
+    if (!beforeEntry) continue;
+    changed = true;
+    const abs = join(projectRoot, rel);
+    if (beforeEntry.kind === "dir") {
+      await mkdir(abs, { recursive: true });
+    } else {
+      await mkdir(dirname(abs), { recursive: true });
+      await writeFile(abs, beforeEntry.content);
+    }
+  }
+
+  return changed;
+}
+
 async function runLocalCommandProvider(
   cfg: ResolvedConversationProviderConfig,
   scope: ConversationScope,
@@ -71,15 +175,17 @@ async function runLocalCommandProvider(
       .replaceAll("{{model}}", cfg.model)
       .replaceAll("{{effort}}", effort)
   );
+  const safeArgv = applyReadOnlyConversationArgs(cfg, argv);
 
   // subscription_cli is typically non-interactive and should not wait on stdin.
   // If no {{input}} placeholder exists, pass user input as a positional arg.
   if (cfg.executionMode === "subscription_cli" && !hasInputPlaceholder) {
-    argv.push(scopedInput);
+    safeArgv.push(scopedInput);
   }
 
   const useStdin = cfg.executionMode === "local_command" && !hasInputPlaceholder;
 
+  const before = await snapshotProjectTree(scope.projectRoot);
   const result = await new Promise<{
     code: number | null;
     signal: NodeJS.Signals | null;
@@ -88,7 +194,7 @@ async function runLocalCommandProvider(
     timedOut: boolean;
     spawnError: string | null;
   }>((resolve) => {
-    const child = spawn(cfg.command as string, argv, {
+    const child = spawn(cfg.command as string, safeArgv, {
       shell: false,
       stdio: [useStdin ? "pipe" : "ignore", "pipe", "pipe"],
       windowsHide: true,
@@ -131,6 +237,16 @@ async function runLocalCommandProvider(
       child.stdin.end(`${scopedInput}\n`);
     }
   });
+
+  const mutated = await rollbackProjectMutations(scope.projectRoot, before);
+  if (mutated && result.code === 0 && !result.timedOut && !result.spawnError && result.stdout.trim().length > 0) {
+    const safeNotice =
+      "\n\n[safety] provider attempted to modify project files during conversation mode; changes were rolled back.";
+    return `${result.stdout.trimEnd()}${safeNotice}`;
+  }
+  if (mutated) {
+    return `provider-execution-failed: ${providerLabel} attempted to modify project files during conversation mode; changes were rolled back`;
+  }
 
   if (result.code === 0 && !result.timedOut && !result.spawnError) {
     return result.stdout.trimEnd();
@@ -236,6 +352,23 @@ function buildScopedProviderInput(projectRoot: string, userMessage: string): str
     "- Do not read, cite, summarize, or rely on files outside this project/worktree.",
     "- Do not read ~/.agent-access.md or any home-directory files unless the user explicitly approves it.",
     "- If outside-project context is needed, ask for approval before reading it.",
+    "- Do not edit files.",
+    "- Do not run shell commands.",
+    "- Do not claim any tests/builds/commands were executed.",
+    "- Always return a normal human-facing answer.",
+    "- If the user appears to be asking for project work, you may append one optional ACTION_INTENT block at the end.",
+    "- ACTION_INTENT format:",
+    "ACTION_INTENT",
+    "intent_type: conversation | create_task | create_handoff | review | release_control",
+    "confidence: 0.0-1.0",
+    "summary: one-line description of the proposed action",
+    "target: codex | claude | overseer",
+    "model: <model id>",
+    "effort: low | medium | high | xhigh | max",
+    "mode: patch | plan | review | test",
+    "approval_required: true | false",
+    "suggested_next_command: /task ... | /handoff ... | /review ...",
+    "END_ACTION_INTENT",
     "",
     "USER MESSAGE:",
     userMessage,
