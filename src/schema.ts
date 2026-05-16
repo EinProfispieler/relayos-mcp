@@ -308,6 +308,13 @@ export const RelayConfig = z
   .object({
     version: z.literal(1).optional(),
     defaults: RelayConfigDefaults.optional(),
+    overseer: z
+      .object({
+        provider: z.string().min(1).optional(),
+        model: z.string().min(1).optional(),
+      })
+      .strict()
+      .optional(),
     templates: z.record(z.string(), TemplateOverrides).default({}),
   })
   .strict();
