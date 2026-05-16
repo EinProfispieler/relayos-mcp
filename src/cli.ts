@@ -59,15 +59,13 @@ import {
 import { runChat } from "./chat.js";
 import { loadProjectConfig } from "./config.js";
 import { handleConversation, type ConversationMessage } from "./conversation.js";
-import { classifyMessage, classifyForChat } from "./router.js";
-import { safePlanRoute } from "./ai_planner.js";
-import { buildActionProposal } from "./action_dispatch.js";
+import { buildChatHelpText } from "./chat.js";
 import { detectCli, runTarget } from "./spawn/index.js";
 import { evaluatePolicy, formatBannerLines } from "./policy.js";
 import type { Envelope, SpawnResult } from "./schema.js";
 import { ensureStorage, resolveStorageLayout } from "./storage.js";
 
-interface CliIO {
+export interface CliIO {
   stdout: { write: (chunk: string) => unknown; isTTY?: boolean };
   stderr: { write: (chunk: string) => unknown };
 }
@@ -89,35 +87,45 @@ function readAllFromStdin(): Promise<string> {
 }
 
 function isSlashCommand(input: string): boolean {
-  return /^\/(help|status|tasks|current|result|approve|run)\b/.test(input.trim());
+  return /^\/(help|status|tasks|current|result|approve|run|exit)\b/.test(input.trim());
+}
+
+export async function runChatSingleInput(input: string, io: CliIO): Promise<number> {
+  const message = input.trim();
+  if (!message) return 0;
+
+  if (isSlashCommand(message)) {
+    const normalized = message.split(/\s+/, 1)[0];
+    if (normalized === "/help") {
+      io.stdout.write(buildChatHelpText());
+      return 0;
+    }
+    if (normalized === "/exit") {
+      io.stdout.write("RelayOS chat session closed.\n");
+      return 0;
+    }
+    io.stdout.write(
+      `${normalized} is supported in interactive mode. Run \`relayos chat\` and enter ${normalized}.\n`,
+    );
+    return 0;
+  }
+
+  if (message.startsWith("/")) {
+    io.stdout.write(`unknown command: ${message}\n`);
+    return 0;
+  }
+
+  const loaded = loadProjectConfig({ cwd: process.cwd() });
+  const messages: ConversationMessage[] = [{ role: "user", content: message }];
+  const result = await handleConversation(messages, loaded.config);
+  io.stdout.write(`${result.reply}\n`);
+  return 0;
 }
 
 async function runChatWithConversationMode(args: string[], io: CliIO): Promise<number> {
   if (io.stdout.isTTY !== true && args.length === 0) {
     const raw = await readAllFromStdin();
-    const message = raw.trim();
-    if (!message) return 0;
-
-    if (isSlashCommand(message)) {
-      return runChat([message], { showActionProposal: true });
-    }
-
-    const classed = classifyForChat(message);
-    if (classed === "conversation") {
-      const loaded = loadProjectConfig({ cwd: process.cwd() });
-      const messages: ConversationMessage[] = [{ role: "user", content: message }];
-      const result = await handleConversation(messages, loaded.config);
-      io.stdout.write(`${result.reply}\n`);
-      return 0;
-    }
-
-    const route = classifyMessage(message);
-    const aiPlan = safePlanRoute(message, route);
-    const actionProposal = buildActionProposal(aiPlan);
-    io.stdout.write(`ROUTE\n${JSON.stringify(route, null, 2)}\n`);
-    io.stdout.write(`AI PLAN\n${JSON.stringify(aiPlan, null, 2)}\n`);
-    io.stdout.write(`ACTION PROPOSAL\n${JSON.stringify(actionProposal, null, 2)}\n`);
-    return 0;
+    return runChatSingleInput(raw, io);
   }
 
   return runChat(args, { showActionProposal: true });

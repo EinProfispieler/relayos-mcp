@@ -6,18 +6,18 @@ import {
   ensureOverseerDir,
   resolveOverseerLayout,
   appendHandoffResult,
-  appendTaskRecord,
   updateTaskRecord,
   readRecentTasks,
   readTaskById,
 } from "./overseer.js";
-import { ChatSessionRecord, type AIRoutingPlan, type TaskRecord } from "./schema.js";
-import { classifyMessage, type RouteDecision } from "./router.js";
-import { safePlanRoute } from "./ai_planner.js";
-import { buildActionProposal, type ActionProposal } from "./action_dispatch.js";
+import { ChatSessionRecord, type AIRoutingPlan } from "./schema.js";
+import { type RouteDecision } from "./router.js";
+import { type ActionProposal } from "./action_dispatch.js";
 import { resolveStorageLayout, ensureStorage } from "./storage.js";
 import { createAuditWriter } from "./audit.js";
 import { createHandoff } from "./tools/create_handoff.js";
+import { loadProjectConfig } from "./config.js";
+import { handleConversation } from "./conversation.js";
 
 type ExitReason = "user_exit" | "eof" | "sigint";
 
@@ -127,16 +127,25 @@ function newChatSessionId(): string {
   return `chat_${ulid()}`;
 }
 
+export function buildChatHelpText(): string {
+  return [
+    "Slash commands:",
+    "  /help    Show this command list",
+    "  /status  Show current chat session info",
+    "  /tasks   Show recent task records",
+    "  /current Show current task details",
+    "  /result  Show current task result summary",
+    "  /approve Approve the latest action proposal",
+    "  /run     Execute the latest approved handoff",
+    "  /exit    Exit chat",
+    "",
+    "Routing:",
+    "  Any input not starting with '/' is treated as AI conversation.",
+  ].join("\n") + "\n";
+}
+
 function printHelp(): void {
-  output.write("Available commands:\n");
-  output.write("  /help    show available commands\n");
-  output.write("  /status  show current session info\n");
-  output.write("  /tasks   show recent tasks\n");
-  output.write("  /current show current task details\n");
-  output.write("  /result  show current task result summary\n");
-  output.write("  /approve approve latest action proposal\n");
-  output.write("  /run     execute latest open handoff via execute-handoff\n");
-  output.write("  /exit    write session record and exit\n");
+  output.write(buildChatHelpText());
 }
 
 function printStatus(state: ChatState): void {
@@ -379,66 +388,9 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
     if (trimmed.length > 0) {
       state.messageCount += 1;
     }
-    const decision = classifyMessage(line);
-    const aiPlan = safePlanRoute(line, decision);
-    const actionProposal = buildActionProposal(aiPlan);
-    const now = new Date().toISOString();
-    const taskId = ulid();
-    const task: TaskRecord = {
-      task_id: taskId,
-      user_input: line,
-      route: decision,
-      ai_plan: aiPlan,
-      action_proposal: actionProposal,
-      status: "pending",
-      created_at: now,
-      updated_at: now,
-    };
-    const overseerLayout = resolveOverseerLayout(process.cwd());
-    void appendTaskRecord(overseerLayout, task).catch((error) => {
-      output.write(`Task registry write failed: ${String(error)}\n`);
-    });
-    state.currentTaskId = taskId;
-    pendingProposal = {
-      originalMessage: line,
-      aiPlan,
-      actionProposal,
-      executed: false,
-    };
-    state.routes.push({ ...decision, ai_plan: aiPlan, action_proposal: actionProposal });
-    output.write(`task: ${taskId}\n`);
-    output.write("[ROUTE]\n");
-    output.write(`  target:            ${decision.target}\n`);
-    output.write(`  model:             ${decision.model}\n`);
-    output.write(`  effort:            ${decision.effort}\n`);
-    output.write(`  mode:              ${decision.mode}\n`);
-    output.write(`  approval_required: ${decision.approval_required}\n`);
-    output.write(`  reason:            ${decision.reason}\n`);
-    if (decision.approval_required) {
-      output.write("  ⚠ approval required before execution\n");
-    }
-    output.write("[AI PLAN]\n");
-    output.write(`  task_type:         ${aiPlan.task_type}\n`);
-    output.write(`  target:            ${aiPlan.target}\n`);
-    output.write(`  model:             ${aiPlan.model}\n`);
-    output.write(`  effort:            ${aiPlan.effort}\n`);
-    output.write(`  mode:              ${aiPlan.mode}\n`);
-    output.write(`  approval_required: ${aiPlan.approval_required}\n`);
-    output.write(`  confidence:        ${aiPlan.confidence}\n`);
-    output.write(`  reason:            ${aiPlan.reason}\n`);
-    output.write(`  next_action:       ${aiPlan.next_action}\n`);
-    if (options.showActionProposal !== false) {
-      output.write("ACTION PROPOSAL:\n");
-      output.write(`  action: ${actionProposal.action}\n`);
-      if (actionProposal.target) output.write(`  target: ${actionProposal.target}\n`);
-      if (actionProposal.model) output.write(`  model: ${actionProposal.model}\n`);
-      if (actionProposal.effort) output.write(`  effort: ${actionProposal.effort}\n`);
-      if (actionProposal.mode) output.write(`  mode: ${actionProposal.mode}\n`);
-      if (typeof actionProposal.approval_required === "boolean") {
-        output.write(`  approval_required: ${actionProposal.approval_required}\n`);
-      }
-      output.write(`  status: ${actionProposal.status}\n`);
-    }
+    const loaded = loadProjectConfig({ cwd: process.cwd() });
+    const result = await handleConversation([{ role: "user", content: line }], loaded.config);
+    output.write(`${result.reply}\n`);
   }
 
   return 0;
