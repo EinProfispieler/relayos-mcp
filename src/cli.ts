@@ -56,11 +56,13 @@ import {
   writeActiveBrief,
   writeNextAction,
 } from "./overseer.js";
-import { runChat } from "./chat.js";
+import { extractActionIntentFromReply, runChat } from "./chat.js";
 import { loadProjectConfig } from "./config.js";
 import { handleConversation, type ConversationMessage } from "./conversation.js";
 import { buildChatHelpText } from "./chat.js";
 import { runSettingsWizard } from "./settings.js";
+import { planRouteFromActionIntent } from "./ai_planner.js";
+import { buildActionProposal } from "./action_dispatch.js";
 import { detectCli, runTarget } from "./spawn/index.js";
 import { evaluatePolicy, formatBannerLines } from "./policy.js";
 import type { Envelope, SpawnResult } from "./schema.js";
@@ -124,7 +126,15 @@ export async function runChatSingleInput(input: string, io: CliIO): Promise<numb
   const messages: ConversationMessage[] = [{ role: "user", content: message }];
   const projectRoot = loaded.source ? dirname(dirname(loaded.source)) : process.cwd();
   const result = await handleConversation(messages, loaded.config, { projectRoot });
-  io.stdout.write(`${result.reply}\n`);
+  const parsed = extractActionIntentFromReply(result.reply);
+  const visibleReply = parsed.visibleReply.length > 0 ? parsed.visibleReply : result.reply;
+  io.stdout.write(`${visibleReply}\n`);
+  if (parsed.actionIntent && parsed.actionIntent.intent_type !== "conversation" && parsed.actionIntent.confidence >= 0.7) {
+    const plan = planRouteFromActionIntent(parsed.actionIntent);
+    const proposal = buildActionProposal(plan);
+    io.stdout.write("ACTION PROPOSAL:\n");
+    io.stdout.write(`${JSON.stringify(proposal, null, 2)}\n`);
+  }
   return 0;
 }
 

@@ -221,6 +221,30 @@ export const AIRoutingPlan = z
   .strict();
 export type AIRoutingPlan = z.infer<typeof AIRoutingPlan>;
 
+export const ActionIntentType = z.enum([
+  "conversation",
+  "create_task",
+  "create_handoff",
+  "review",
+  "release_control",
+]);
+export type ActionIntentType = z.infer<typeof ActionIntentType>;
+
+export const ActionIntentBlock = z
+  .object({
+    intent_type: ActionIntentType,
+    confidence: z.number().min(0).max(1),
+    summary: z.string().min(1),
+    target: z.enum(["codex", "claude", "overseer"]).optional(),
+    model: z.string().min(1).optional(),
+    effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
+    mode: z.enum(["patch", "plan", "review", "test"]).optional(),
+    approval_required: z.boolean(),
+    suggested_next_command: z.string().min(1).optional(),
+  })
+  .strict();
+export type ActionIntentBlock = z.infer<typeof ActionIntentBlock>;
+
 export const RouteDecision = z
   .object({
     target: z.string(),

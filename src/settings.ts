@@ -118,7 +118,16 @@ function codexPreset(model: string): SettingsValues {
     effort: "medium",
     execution_mode: "subscription_cli",
     command: "codex",
-    args: ["exec", "--model", "{{model}}", "-c", "model_reasoning_effort={{effort}}", "{{input}}"],
+    args: [
+      "exec",
+      "--model",
+      "{{model}}",
+      "-c",
+      "model_reasoning_effort={{effort}}",
+      "--sandbox",
+      "read-only",
+      "{{input}}",
+    ],
     timeout_ms: 120000,
   };
 }
@@ -148,7 +157,17 @@ export async function runSettingsWizard(
         ? current.execution_mode
         : "subscription_cli",
     command: current?.command ?? "codex",
-    args: current?.args ?? ["exec", "--model", "{{model}}", "-c", "model_reasoning_effort={{effort}}", "{{input}}"],
+    args:
+      current?.args ?? [
+        "exec",
+        "--model",
+        "{{model}}",
+        "-c",
+        "model_reasoning_effort={{effort}}",
+        "--sandbox",
+        "read-only",
+        "{{input}}",
+      ],
     timeout_ms: current?.timeout_ms ?? 120000,
   };
 

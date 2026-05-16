@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -78,6 +78,12 @@ describe("conversation provider project boundary", () => {
     expect(result.reply).toContain("SYSTEM BOUNDARY INSTRUCTIONS:");
     expect(result.reply).toContain(`Allowed context is only the current project/worktree root: ${projectRoot}`);
     expect(result.reply).toContain("Do not read, cite, summarize, or rely on files outside this project/worktree.");
+    expect(result.reply).toContain("Do not edit files.");
+    expect(result.reply).toContain("Do not run shell commands.");
+    expect(result.reply).toContain("Do not claim any tests/builds/commands were executed.");
+    expect(result.reply).toContain("Always return a normal human-facing answer.");
+    expect(result.reply).toContain("ACTION_INTENT");
+    expect(result.reply).toContain("END_ACTION_INTENT");
     expect(result.reply).toContain("USER MESSAGE:");
     expect(result.reply).toContain("Can you summarize this repo?");
   });
@@ -98,5 +104,36 @@ describe("conversation provider project boundary", () => {
 
     expect(result.reply).toContain("Do not read ~/.agent-access.md or any home-directory files unless the user explicitly approves it.");
     expect(result.reply).toContain("If outside-project context is needed, ask for approval before reading it.");
+  });
+
+  it("adds read-only safeguards for codex subscription_cli conversation provider", async () => {
+    const projectRoot = tempDir();
+    chdir(projectRoot);
+    const codexStub = join(projectRoot, "codex");
+    writeFileSync(
+      codexStub,
+      "#!/usr/bin/env node\nprocess.stdout.write(process.argv.slice(2).join(' '));\n",
+      "utf8",
+    );
+    chmodSync(codexStub, 0o755);
+
+    const config = RelayConfig.parse({
+      overseer: {
+        provider: {
+          name: "codex",
+          kind: "subscription_cli",
+          model: "gpt-5.5",
+          effort: "medium",
+          execution_mode: "subscription_cli",
+          command: codexStub,
+          args: ["exec", "--model", "{{model}}", "{{input}}"],
+          timeout_ms: 10000,
+        },
+      },
+    });
+
+    const result = await handleConversation([{ role: "user", content: "hello" }], config, { projectRoot });
+    expect(result.reply).toContain("--sandbox read-only");
+    expect(result.reply).not.toContain("--ask-for-approval");
   });
 });

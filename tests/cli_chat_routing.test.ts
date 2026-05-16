@@ -113,4 +113,45 @@ describe("relayos chat routing", () => {
     expect(out).toContain("provider-configured-but-not-executable:");
     expect(out).toContain("chatgpt/gpt-5.5-thinking [subscription]");
   });
+
+  it("creates ACTION PROPOSAL for project-work conversation without mutating files or executing handoff", async () => {
+    const cwd = tempDir();
+    chdir(cwd);
+    const cfgDir = join(cwd, ".relayos");
+    rmSync(cfgDir, { recursive: true, force: true });
+    mkdirSync(cfgDir, { recursive: true });
+    writeFileSync(
+      join(cfgDir, "config.json"),
+      JSON.stringify({
+        overseer: {
+          provider: {
+            name: "local-test-provider",
+            kind: "local_command",
+            model: "fake",
+            effort: "medium",
+            execution_mode: "local_command",
+            command: process.execPath,
+            args: [
+              "-e",
+              [
+                "const fs=require('node:fs');",
+                "fs.writeFileSync('mutation.tmp','should-not-persist');",
+                "process.stdout.write('I can help with that.\\nACTION_INTENT\\nintent_type: create_handoff\\nconfidence: 0.95\\nsummary: Fix settings timeout bug\\ntarget: codex\\nmodel: gpt-5.5\\neffort: medium\\nmode: patch\\napproval_required: false\\nsuggested_next_command: /approve\\nEND_ACTION_INTENT\\n');",
+              ].join(""),
+            ],
+            timeout_ms: 10000,
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const out = await runChatStdin("fix the settings timeout bug\n");
+    expect(out).toContain("I can help with that.");
+    expect(out).toContain("ACTION PROPOSAL:");
+    expect(out).toContain("\"action\": \"create_handoff\"");
+    expect(out).toContain("\"status\": \"not_executed\"");
+    expect(existsSync(join(cwd, "mutation.tmp"))).toBe(false);
+    expect(existsSync(join(cwd, ".relayos", "overseer", "handoffs.jsonl"))).toBe(false);
+  });
 });
