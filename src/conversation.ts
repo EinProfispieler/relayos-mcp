@@ -18,6 +18,10 @@ export interface ConversationResult {
   configured: boolean;
 }
 
+export interface ConversationScope {
+  projectRoot: string;
+}
+
 interface ResolvedConversationProviderConfig {
   provider: string;
   kind: "subscription" | "api" | "fallback" | "subscription_cli" | "local_command";
@@ -30,7 +34,10 @@ interface ResolvedConversationProviderConfig {
 }
 
 class ConfiguredConversationProvider implements ConversationProvider {
-  constructor(private readonly cfg: ResolvedConversationProviderConfig) {}
+  constructor(
+    private readonly cfg: ResolvedConversationProviderConfig,
+    private readonly scope: ConversationScope,
+  ) {}
 
   async chat(messages: ConversationMessage[]): Promise<string> {
     const latestUser = [...messages].reverse().find((m) => m.role === "user");
@@ -41,7 +48,7 @@ class ConfiguredConversationProvider implements ConversationProvider {
     if (!isExecutableMode(this.cfg.executionMode) || !this.cfg.command) {
       return `provider-configured-but-not-executable: ${providerLabel} is configured, but no executable command is set for execution_mode local_command/subscription_cli.`;
     }
-    return runLocalCommandProvider(this.cfg, latestUser.content, providerLabel);
+    return runLocalCommandProvider(this.cfg, this.scope, latestUser.content, providerLabel);
   }
 }
 
@@ -51,19 +58,24 @@ function isExecutableMode(mode: string | null): boolean {
 
 async function runLocalCommandProvider(
   cfg: ResolvedConversationProviderConfig,
+  scope: ConversationScope,
   userMessage: string,
   providerLabel: string,
 ): Promise<string> {
   const effort = cfg.effort ?? "medium";
+  const scopedInput = buildScopedProviderInput(scope.projectRoot, userMessage);
   const hasInputPlaceholder = cfg.args.some((arg) => arg.includes("{{input}}"));
   const argv = cfg.args.map((arg) =>
-    arg.replaceAll("{{input}}", userMessage).replaceAll("{{model}}", cfg.model).replaceAll("{{effort}}", effort)
+    arg
+      .replaceAll("{{input}}", scopedInput)
+      .replaceAll("{{model}}", cfg.model)
+      .replaceAll("{{effort}}", effort)
   );
 
   // subscription_cli is typically non-interactive and should not wait on stdin.
   // If no {{input}} placeholder exists, pass user input as a positional arg.
   if (cfg.executionMode === "subscription_cli" && !hasInputPlaceholder) {
-    argv.push(userMessage);
+    argv.push(scopedInput);
   }
 
   const useStdin = cfg.executionMode === "local_command" && !hasInputPlaceholder;
@@ -80,6 +92,7 @@ async function runLocalCommandProvider(
       shell: false,
       stdio: [useStdin ? "pipe" : "ignore", "pipe", "pipe"],
       windowsHide: true,
+      cwd: scope.projectRoot,
     });
 
     let stdout = "";
@@ -115,7 +128,7 @@ async function runLocalCommandProvider(
     });
 
     if (useStdin && child.stdin) {
-      child.stdin.end(`${userMessage}\n`);
+      child.stdin.end(`${scopedInput}\n`);
     }
   });
 
@@ -167,10 +180,13 @@ function resolveConversationProviderConfig(
   return { provider: providerName, kind, model, effort, executionMode, command, args, timeoutMs };
 }
 
-export function resolveConversationProvider(config: RelayConfig): ConversationProvider | null {
+export function resolveConversationProvider(
+  config: RelayConfig,
+  scope: ConversationScope,
+): ConversationProvider | null {
   const providerConfig = resolveConversationProviderConfig(config);
   if (!providerConfig) return null;
-  return new ConfiguredConversationProvider(providerConfig);
+  return new ConfiguredConversationProvider(providerConfig, scope);
 }
 
 async function appendConversationLog(messages: ConversationMessage[]): Promise<void> {
@@ -190,8 +206,9 @@ async function appendConversationLog(messages: ConversationMessage[]): Promise<v
 export async function handleConversation(
   messages: ConversationMessage[],
   config: RelayConfig,
+  scope: ConversationScope,
 ): Promise<ConversationResult> {
-  const provider = resolveConversationProvider(config);
+  const provider = resolveConversationProvider(config, scope);
   if (!provider) {
     await appendConversationLog(messages);
     return {
@@ -210,4 +227,17 @@ export async function handleConversation(
     providerUsed: resolved ? `${resolved.provider}/${resolved.model}/${resolved.kind}` : "configured",
     configured: true,
   };
+}
+
+function buildScopedProviderInput(projectRoot: string, userMessage: string): string {
+  return [
+    "SYSTEM BOUNDARY INSTRUCTIONS:",
+    `- Allowed context is only the current project/worktree root: ${projectRoot}`,
+    "- Do not read, cite, summarize, or rely on files outside this project/worktree.",
+    "- Do not read ~/.agent-access.md or any home-directory files unless the user explicitly approves it.",
+    "- If outside-project context is needed, ask for approval before reading it.",
+    "",
+    "USER MESSAGE:",
+    userMessage,
+  ].join("\n");
 }

@@ -10,3 +10,6 @@ docs/plans/
 
 # Local RelayOS provider/user config
 .relayos/config.json
+
+# Local Vitest cache
+.vite-temp/
