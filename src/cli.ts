@@ -97,6 +97,11 @@ export async function runChatSingleInput(input: string, io: CliIO): Promise<numb
   const message = input.trim();
   if (!message) return 0;
 
+  if (message === "/") {
+    io.stdout.write(buildChatHelpText());
+    return 0;
+  }
+
   if (isSlashCommand(message)) {
     const normalized = message.split(/\s+/, 1)[0];
     if (normalized === "/help") {

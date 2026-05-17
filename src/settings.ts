@@ -94,7 +94,10 @@ function normalizeDefaults(cwd: string): SettingsValues {
   return {
     provider: typeof provider === "string" ? provider : "codex",
     kind: KIND_OPTIONS.includes(kind as SettingsValues["kind"]) ? (kind as SettingsValues["kind"]) : "subscription_cli",
-    model: typeof model === "string" && model.trim().length > 0 ? model : "gpt-5.3-codex",
+    model:
+      typeof model === "string" && model.trim().length > 0
+        ? normalizeModelToken(model)
+        : "gpt-5.3-codex",
     effort: typeof effort === "string" && effort.trim().length > 0 ? effort : "medium",
     language: language === "chinese" ? "chinese" : "english",
     execution_mode:
@@ -118,7 +121,7 @@ function normalizeDefaults(cwd: string): SettingsValues {
     timeout_ms: typeof timeout === "number" && Number.isInteger(timeout) && timeout > 0 ? timeout : 120000,
     codex_model:
       typeof codexModel === "string" && codexModel.trim().length > 0
-        ? codexModel
+        ? normalizeModelToken(codexModel)
         : "gpt-5.5",
     codex_effort:
       codexEffort === "low" || codexEffort === "medium" || codexEffort === "high"
@@ -126,7 +129,7 @@ function normalizeDefaults(cwd: string): SettingsValues {
         : "high",
     claude_model:
       typeof claudeModel === "string" && claudeModel.trim().length > 0
-        ? claudeModel
+        ? normalizeModelToken(claudeModel)
         : "claude-sonnet-4-6",
     claude_effort:
       claudeEffort === "low" || claudeEffort === "medium" || claudeEffort === "high"
@@ -169,6 +172,17 @@ function isCanceled(value: string): boolean {
 function withFallback(input: string, fallback: string): string {
   const value = input.trim();
   return value.length > 0 ? value : fallback;
+}
+
+function normalizeModelToken(raw: string): string {
+  const input = raw.trim();
+  const lower = input.toLowerCase().replace(/\s+/g, "");
+  if (lower === "gpt5.5" || lower === "gpt-55" || lower === "gpt55") return "gpt-5.5";
+  if (lower === "gpt5.4" || lower === "gpt-54" || lower === "gpt54") return "gpt-5.4";
+  if (lower === "gpt5.3-codex" || lower === "gpt53-codex" || lower === "gpt-53-codex") {
+    return "gpt-5.3-codex";
+  }
+  return input;
 }
 
 function printHeader(io: PromptIO, defaults: SettingsValues): void {
@@ -295,7 +309,7 @@ async function runQuickFlow(cwd: string, io: PromptIO, defaults: SettingsValues)
 
   saveAndReport(cwd, io, {
     ...defaults,
-    model,
+    model: normalizeModelToken(model),
     effort,
     language,
     timeout_ms: timeoutMs,
@@ -435,16 +449,16 @@ async function runAdvancedFlow(cwd: string, io: PromptIO, defaults: SettingsValu
   saveAndReport(cwd, io, {
     provider,
     kind,
-    model,
+    model: normalizeModelToken(model),
     effort,
     language,
     execution_mode: executionMode,
     command,
     args,
     timeout_ms: timeoutMs,
-    codex_model: codexModel,
+    codex_model: normalizeModelToken(codexModel),
     codex_effort: codexEffort,
-    claude_model: claudeModel,
+    claude_model: normalizeModelToken(claudeModel),
     claude_effort: claudeEffort,
   });
 }

@@ -25,6 +25,17 @@ export function buildActionProposal(plan: AIRoutingPlan): ActionProposal {
     };
   }
 
+  // Honor an explicit approval gate from the planner regardless of task type.
+  if (plan.approval_required) {
+    return {
+      action: "request_approval",
+      target: "approval",
+      mode: plan.mode,
+      approval_required: true,
+      status: "blocked_until_user_approval",
+    };
+  }
+
   if (plan.task_type === "implementation") {
     return {
       action: "create_handoff",

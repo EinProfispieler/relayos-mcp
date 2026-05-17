@@ -1,6 +1,6 @@
 import { appendFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { createInterface, type Interface } from "node:readline";
+import { createInterface, emitKeypressEvents } from "node:readline";
 import { stdin as input, stdout as output } from "node:process";
 import { ulid } from "ulid";
 import {
@@ -28,6 +28,12 @@ import { handleConversation, type ConversationMessage } from "./conversation.js"
 import { runSettingsWizard } from "./settings.js";
 import { resolveModelProfiles } from "./model_profiles.js";
 import { gitBranch, isGitRepo } from "./git.js";
+import {
+  blue,
+  renderSlashPalette,
+  renderRuntimeLine as renderRuntimeLineFromFramework,
+  renderWelcome,
+} from "./chat_ui_framework.js";
 
 type ExitReason = "user_exit" | "eof" | "sigint";
 
@@ -201,31 +207,6 @@ function newChatSessionId(): string {
   return `chat_${ulid()}`;
 }
 
-export function buildChatHelpText(): string {
-  return [
-    "Slash commands:",
-    "  Session",
-    "    /help      Show this command list",
-    "    /status    Show current chat session info",
-    "    /exit      Exit chat",
-    "",
-    "  Tasks",
-    "    /tasks     Show recent task records",
-    "    /current   Show current task details",
-    "    /result    Show current task result summary",
-    "",
-    "  Actions",
-    "    /approve   Approve the latest action proposal",
-    "    /run       Execute the latest approved handoff",
-    "",
-    "  Config",
-    "    /settings  Open guided provider setup (profiles + advanced edit)",
-    "",
-    "Input routing:",
-    "  Any input not starting with '/' is treated as AI conversation.",
-  ].join("\n") + "\n";
-}
-
 const KNOWN_SLASH_COMMANDS = [
   "/help",
   "/status",
@@ -237,9 +218,19 @@ const KNOWN_SLASH_COMMANDS = [
   "/settings",
   "/exit",
 ] as const;
+const SLASH_COMMAND_DESCRIPTIONS: Record<(typeof KNOWN_SLASH_COMMANDS)[number], string> = {
+  "/help": "Show command help",
+  "/status": "Show runtime/session summary",
+  "/tasks": "Show recent task records",
+  "/current": "Show current task details",
+  "/result": "Show current task result summary",
+  "/approve": "Approve latest action proposal",
+  "/run": "Execute latest approved handoff",
+  "/settings": "Open provider/model settings",
+  "/exit": "Exit chat",
+};
 
 interface RuntimeView {
-  line: string;
   projectDir: string;
   branch: string;
   codexModel: string;
@@ -248,46 +239,33 @@ interface RuntimeView {
   claudeEffort: "low" | "medium" | "high";
 }
 
-function buildChatWelcome(view: RuntimeView): string {
-  const boxTop = "┌──────────────────────────────────────────────────────────────┐";
-  const boxBottom = "└──────────────────────────────────────────────────────────────┘";
-  const title = "│  RelayOS Chat                                                │";
-  const profile = `│  model: ${`${view.codexModel} ${view.codexEffort}`.padEnd(49, " ")}│`;
-  const directory = `│  directory: ${`~/${view.projectDir}`.padEnd(45, " ")}│`;
-  const branch = `│  branch: ${view.branch.padEnd(48, " ")}│`;
+function showSlashPalette(filter: string): void {
+  const normalized = filter.trim().toLowerCase();
+  const palette = renderSlashPalette(
+    KNOWN_SLASH_COMMANDS,
+    SLASH_COMMAND_DESCRIPTIONS,
+    normalized.length > 0 ? normalized : "/",
+  );
+  if (palette) output.write(`${palette}\n`);
+}
+
+export function buildChatHelpText(): string {
   return [
-    boxTop,
-    title,
-    profile,
-    directory,
-    branch,
-    boxBottom,
+    "Slash commands:",
+    "  /help      Show command help",
+    "  /status    Show runtime/session summary",
+    "  /tasks     Show recent task records",
+    "  /current   Show current task details",
+    "  /result    Show current task result summary",
+    "  /approve   Approve latest action proposal",
+    "  /run       Execute latest approved handoff",
+    "  /settings  Open provider/model settings",
+    "  /exit      Exit chat",
     "",
-    "Tip: Use /help for commands, /settings for provider setup.",
-    "Try: /status for runtime summary, /tasks for recent tasks.",
-    "",
-    "> Use /skills to list available skills",
-    "",
-    view.line,
-    "",
-  ].join("\n");
+    "Tip: type '/' then keep typing to filter slash commands.",
+  ].join("\n") + "\n";
 }
 
-function printSlashMenu(filter: string = ""): void {
-  const prefix = filter.trim().toLowerCase();
-  const items = KNOWN_SLASH_COMMANDS.filter((cmd) => cmd.startsWith(prefix.length > 0 ? prefix : "/"));
-  if (items.length === 0) {
-    output.write(`No slash command matches: ${filter}\n`);
-    output.write("Tip: type /help to view all commands.\n");
-    return;
-  }
-  output.write("Slash menu:\n");
-  for (const cmd of items) output.write(`  ${cmd}\n`);
-}
-
-function printHelp(): void {
-  output.write(buildChatHelpText());
-}
 
 function formatActionProposalCompact(proposal: ActionProposal): string[] {
   const lines = [
@@ -311,7 +289,7 @@ function printStatus(
 ): void {
   output.write("Status\n");
   output.write("------\n");
-  output.write(`${runtimeView.line}\n`);
+  output.write(`${renderRuntimeLine(runtimeView, pendingProposal)}\n`);
   output.write(`session: ${state.sessionId}\n`);
   output.write(`started: ${state.startedAt}\n`);
   output.write(`messages: ${state.messageCount}\n`);
@@ -328,16 +306,7 @@ async function buildRuntimeView(cwd: string): Promise<RuntimeView> {
   const branch = repo ? await gitBranch(cwd) : null;
   const projectRoot = loaded.source ? dirname(dirname(loaded.source)) : cwd;
   const projectDir = projectRoot.split("/").filter(Boolean).slice(-1)[0] ?? ".";
-  const line = [
-    `model ${profiles.codexModel}`,
-    `effort ${profiles.codexEffort}`,
-    `claude ${profiles.claudeModel}/${profiles.claudeEffort}`,
-    `~/${projectDir}`,
-    `branch ${branch ?? "n/a"}`,
-    pendingStateLabel(null),
-  ].join(" · ");
   return {
-    line,
     projectDir,
     branch: branch ?? "n/a",
     codexModel: profiles.codexModel,
@@ -347,13 +316,8 @@ async function buildRuntimeView(cwd: string): Promise<RuntimeView> {
   };
 }
 
-function pendingStateLabel(pending: PendingActionProposal | null): string {
-  if (pending && !pending.executed) return "Pending";
-  return "Ready";
-}
-
-function updateRuntimeStateLine(runtimeLine: string, pending: PendingActionProposal | null): string {
-  return runtimeLine.replace(/ · (Pending|Ready)$/, ` · ${pendingStateLabel(pending)}`);
+function renderRuntimeLine(runtimeView: RuntimeView, pending: PendingActionProposal | null): string {
+  return renderRuntimeLineFromFramework(runtimeView, Boolean(pending && !pending.executed));
 }
 
 async function appendSessionRecord(state: ChatState, exitReason: ExitReason): Promise<void> {
@@ -374,24 +338,130 @@ async function appendSessionRecord(state: ChatState, exitReason: ExitReason): Pr
   await appendFile(sessionsPath, `${JSON.stringify(record)}\n`, "utf8");
 }
 
-function askLine(rl: Interface): Promise<string | null> {
+function askLineFallback(prompt: string): Promise<string | null> {
   return new Promise((resolve) => {
-    const onLine = (line: string): void => {
-      cleanup();
-      resolve(line);
-    };
-    const onClose = (): void => {
-      cleanup();
-      resolve(null);
-    };
-    const cleanup = (): void => {
-      rl.off("line", onLine);
-      rl.off("close", onClose);
+    const rl = createInterface({ input, output });
+    rl.question(prompt, (answer) => {
+      rl.close();
+      resolve(answer);
+    });
+    rl.once("close", () => resolve(null));
+  });
+}
+
+function askLineWithSample2StyleTui(prompt: string): Promise<string | null> {
+  if (!input.isTTY || !output.isTTY) {
+    return askLineFallback(prompt);
+  }
+
+  emitKeypressEvents(input);
+  input.setRawMode(true);
+
+  return new Promise((resolve) => {
+    let buffer = "";
+    let done = false;
+    const ttyColumns = Math.max(20, output.columns ?? 80);
+    const stripAnsi = (text: string): string =>
+      text.replace(/\u001B\[[0-9;?]*[ -/]*[@-~]/g, "");
+    const countVisualLines = (text: string): number => {
+      let count = 0;
+      for (const logical of text.split("\n")) {
+        const visible = stripAnsi(logical);
+        if (visible.length === 0) {
+          count += 1;
+          continue;
+        }
+        count += Math.max(1, Math.ceil(visible.length / ttyColumns));
+      }
+      return Math.max(1, count);
     };
 
-    rl.once("line", onLine);
-    rl.once("close", onClose);
-    rl.prompt();
+    const render = (): void => {
+      if (done) return;
+      const filter = buffer.trimStart().toLowerCase();
+      const palette = filter.startsWith("/")
+        ? (renderSlashPalette(
+          KNOWN_SLASH_COMMANDS,
+          SLASH_COMMAND_DESCRIPTIONS,
+          filter.length > 0 ? filter : "/",
+        ) ?? "")
+        : "";
+      output.write("\r\u001B[2K");
+      output.write(`${prompt}${buffer}`);
+      output.write("\u001B[J");
+      if (palette.length > 0) {
+        output.write(`\n${palette}`);
+        const overlayLines = countVisualLines(palette) + 1;
+        output.write(`\u001B[${overlayLines}A\r`);
+        output.write("\u001B[2K");
+        output.write(`${prompt}${buffer}`);
+      }
+    };
+
+    const finish = (value: string | null): void => {
+      if (done) return;
+      done = true;
+      input.off("keypress", onKeypress);
+      input.off("end", onEnd);
+      input.setRawMode(false);
+      resolve(value);
+    };
+
+    const onEnd = (): void => finish(null);
+
+    const onKeypress = (chunk: string, key: { name?: string; ctrl?: boolean; meta?: boolean }): void => {
+      if (done) return;
+
+      if (key.ctrl && key.name === "c") {
+        output.write("\n");
+        finish(null);
+        process.kill(process.pid, "SIGINT");
+        return;
+      }
+      if (key.ctrl && key.name === "d") {
+        if (buffer.length === 0) {
+          output.write("\n");
+          finish(null);
+          return;
+        }
+      }
+
+      if (key.name === "return" || key.name === "enter" || chunk === "\r" || chunk === "\n") {
+        output.write("\r\u001B[2K");
+        output.write(`${prompt}${buffer}`);
+        output.write("\u001B[J");
+        output.write("\n");
+        finish(buffer);
+        return;
+      }
+
+      if (key.name === "backspace") {
+        buffer = buffer.slice(0, -1);
+        render();
+        return;
+      }
+
+      if (key.ctrl || key.meta) return;
+      if (chunk && chunk.length > 0 && chunk >= " ") {
+        buffer += chunk;
+        render();
+      }
+    };
+
+    input.on("keypress", onKeypress);
+    input.once("end", onEnd);
+
+    render();
+  });
+}
+
+function askQuestion(prompt: string): Promise<string> {
+  return new Promise((resolve) => {
+    const rl = createInterface({ input, output });
+    rl.question(prompt, (answer) => {
+      rl.close();
+      resolve(answer);
+    });
   });
 }
 
@@ -422,17 +492,14 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
   let sessionHandoffId: string | null = null;
 
   const cwd = process.cwd();
-  const runtimeView = await buildRuntimeView(cwd);
-  let runtimeLine = runtimeView.line;
-  output.write(buildChatWelcome(runtimeView));
-
-  const rl = createInterface({ input, output, prompt: "RelayOS Overseer > " });
+  let runtimeView = await buildRuntimeView(cwd);
+  output.write(renderWelcome(runtimeView, { versionTag: "v0.6.0" }));
+  const promptText = `${blue("›")} `;
 
   let finished = false;
   const finalize = async (reason: ExitReason): Promise<number> => {
     if (finished) return 0;
     finished = true;
-    rl.close();
     await appendSessionRecord(state, reason);
     return 0;
   };
@@ -444,22 +511,32 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
   });
 
   while (!finished) {
-    rl.setPrompt(pendingProposal && !pendingProposal.executed ? "RelayOS Overseer (pending /approve) > " : "RelayOS Overseer > ");
-    const line = await askLine(rl);
+    const line = await askLineWithSample2StyleTui(promptText);
     if (line === null) return finalize("eof");
 
-    const trimmed = line.trim();
+    let trimmed = line.trim();
     if (trimmed === "/") {
-      printSlashMenu();
+      output.write(buildChatHelpText());
       continue;
     }
-    if (trimmed === "/help") {
-      printHelp();
-      continue;
-    }
-    if (trimmed === "/status") {
-      printStatus(state, pendingProposal, { ...runtimeView, line: runtimeLine });
-      continue;
+    if (trimmed.startsWith("/")) {
+      const prefix = trimmed.toLowerCase();
+      const hasExact = KNOWN_SLASH_COMMANDS.includes(prefix as (typeof KNOWN_SLASH_COMMANDS)[number]);
+      if (!hasExact) {
+        const matches = KNOWN_SLASH_COMMANDS.filter((cmd) => cmd.startsWith(prefix));
+        if (matches.length === 1) {
+          trimmed = matches[0]!;
+        } else {
+          if (matches.length === 0) {
+            output.write(`unknown command: ${trimmed}\n`);
+          } else {
+            showSlashPalette(prefix);
+          }
+          continue;
+        }
+      } else {
+        trimmed = prefix;
+      }
     }
     if (trimmed === "/tasks") {
       const overseerLayout = resolveOverseerLayout(process.cwd());
@@ -545,7 +622,6 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
       });
 
       pendingProposal!.executed = true;
-      runtimeLine = updateRuntimeStateLine(runtimeLine, pendingProposal);
 
       output.write("HANDOFF CREATED:\n");
       output.write(`  id:     ${handoffResult.handoff_id}\n`);
@@ -598,25 +674,21 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
     if (trimmed === "/settings") {
       await runSettingsWizard(process.cwd(), {
         write: (text) => output.write(text),
-        ask: (prompt) =>
-          new Promise((resolve) => {
-            rl.question(prompt, (answer) => resolve(answer));
-          }),
+        ask: (prompt) => askQuestion(prompt),
       });
+      runtimeView = await buildRuntimeView(cwd);
       continue;
     }
     if (trimmed === "/exit") {
       return finalize("user_exit");
     }
 
-    if (trimmed.startsWith("/")) {
-      const prefix = trimmed.toLowerCase();
-      const hasExact = KNOWN_SLASH_COMMANDS.includes(prefix as (typeof KNOWN_SLASH_COMMANDS)[number]);
-      printSlashMenu(prefix);
-      if (!hasExact) {
-        const hasMatches = KNOWN_SLASH_COMMANDS.some((cmd) => cmd.startsWith(prefix));
-        if (!hasMatches) output.write(`unknown command: ${trimmed}\n`);
-      }
+    if (trimmed === "/help") {
+      output.write(buildChatHelpText());
+      continue;
+    }
+    if (trimmed === "/status") {
+      printStatus(state, pendingProposal, runtimeView);
       continue;
     }
 
@@ -645,7 +717,6 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
       actionProposal,
       executed: false,
     };
-    runtimeLine = updateRuntimeStateLine(runtimeLine, pendingProposal);
     state.routes.push({
       target: aiPlan.target,
       model: aiPlan.model,

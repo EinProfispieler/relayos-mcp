@@ -33,6 +33,17 @@ interface ResolvedConversationProviderConfig {
   timeoutMs: number;
 }
 
+function normalizeModelId(input: string): string {
+  const raw = input.trim();
+  const lower = raw.toLowerCase().replace(/\s+/g, "");
+  if (lower === "gpt5.5" || lower === "gpt-55" || lower === "gpt55") return "gpt-5.5";
+  if (lower === "gpt5.4" || lower === "gpt-54" || lower === "gpt54") return "gpt-5.4";
+  if (lower === "gpt5.3-codex" || lower === "gpt53-codex" || lower === "gpt-53-codex") {
+    return "gpt-5.3-codex";
+  }
+  return raw;
+}
+
 class ConfiguredConversationProvider implements ConversationProvider {
   constructor(
     private readonly cfg: ResolvedConversationProviderConfig,
@@ -69,7 +80,8 @@ function applyReadOnlyConversationArgs(cfg: ResolvedConversationProviderConfig, 
   if (cfg.executionMode !== "subscription_cli" || !isCodexCommand(cfg.command ?? "")) return args;
   const out = [...args];
   if (!hasArg(out, "--sandbox")) {
-    out.push("--sandbox", "read-only");
+    const insertAt = out.length >= 1 ? 1 : 0;
+    out.splice(insertAt, 0, "--sandbox", "read-only");
   }
   return out;
 }
@@ -184,6 +196,7 @@ async function runLocalCommandProvider(
   }
 
   const useStdin = cfg.executionMode === "local_command" && !hasInputPlaceholder;
+  const shouldPipeAndCloseStdin = cfg.executionMode === "subscription_cli" || useStdin;
 
   const before = await snapshotProjectTree(scope.projectRoot);
   const result = await new Promise<{
@@ -196,7 +209,7 @@ async function runLocalCommandProvider(
   }>((resolve) => {
     const child = spawn(cfg.command as string, safeArgv, {
       shell: false,
-      stdio: [useStdin ? "pipe" : "ignore", "pipe", "pipe"],
+      stdio: [shouldPipeAndCloseStdin ? "pipe" : "ignore", "pipe", "pipe"],
       windowsHide: true,
       cwd: scope.projectRoot,
     });
@@ -233,8 +246,9 @@ async function runLocalCommandProvider(
       resolve({ code, signal, stdout, stderr, timedOut, spawnError });
     });
 
-    if (useStdin && child.stdin) {
-      child.stdin.end(`${scopedInput}\n`);
+    if (child.stdin) {
+      if (useStdin) child.stdin.end(`${scopedInput}\n`);
+      else child.stdin.end();
     }
   });
 
@@ -293,7 +307,16 @@ function resolveConversationProviderConfig(
   const timeoutMs = typeof providerValue === "object"
     ? providerValue.timeout_ms ?? 120000
     : config.overseer?.timeout_ms ?? 120000;
-  return { provider: providerName, kind, model, effort, executionMode, command, args, timeoutMs };
+  return {
+    provider: providerName,
+    kind,
+    model: normalizeModelId(model),
+    effort,
+    executionMode,
+    command,
+    args,
+    timeoutMs,
+  };
 }
 
 export function resolveConversationProvider(
