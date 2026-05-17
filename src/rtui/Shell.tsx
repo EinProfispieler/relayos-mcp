@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { Box, Text, useApp } from "ink";
 import { useEffect, useRef, useState } from "react";
 import { useRTUI } from "./state/context.js";
 import { ScrollbackArea } from "./screens/ScrollbackArea.js";
@@ -8,6 +8,7 @@ import { StatusLine } from "./screens/StatusLine.js";
 import { SlashPalette } from "./screens/SlashPalette.js";
 import { WelcomeBanner } from "./screens/WelcomeBanner.js";
 import { runCliCommand } from "./commands/runner.js";
+import { SLASH_COMMANDS } from "./commands/registry.js";
 import { buildEchoReply } from "./runtime/echo.js";
 import type { ScrollbackItem } from "./state/types.js";
 
@@ -17,6 +18,7 @@ function genId(): string {
 
 export function Shell() {
   const { state, dispatch } = useRTUI();
+  const { exit } = useApp();
   const lastSubmittedCount = useRef(state.session.messageCount);
   const [recent, setRecent] = useState<string[]>([]);
 
@@ -30,10 +32,51 @@ export function Shell() {
     const userItem: ScrollbackItem = { id: genId(), type: "user_input", text: submitted };
     dispatch({ type: "SCROLLBACK_APPEND", item: userItem });
 
+    if (submitted.startsWith("/")) {
+      const cmd = SLASH_COMMANDS.find((c) => c.name === submitted.trim());
+      if (!cmd) {
+        dispatch({
+          type: "SCROLLBACK_APPEND",
+          item: { id: genId(), type: "error", text: `Unknown command: ${submitted}` },
+        });
+        return;
+      }
+      if (cmd.kind === "disabled") {
+        dispatch({
+          type: "SCROLLBACK_APPEND",
+          item: { id: genId(), type: "system_note", text: `${cmd.name} is not available yet.` },
+        });
+        return;
+      }
+      if (cmd.kind === "local") {
+        if (cmd.localHandler === "exit") {
+          exit();
+          return;
+        }
+        if (cmd.localHandler === "help") {
+          dispatch({
+            type: "SCROLLBACK_APPEND",
+            item: {
+              id: `help-${Date.now().toString(36)}`,
+              type: "system_note",
+              text: SLASH_COMMANDS
+                .map((c) => `  ${c.name.padEnd(10)} ${c.description}`)
+                .join("\n"),
+            },
+          });
+        }
+        return;
+      }
+      if (cmd.kind === "cli" && cmd.argv) {
+        void runCliCommand({ commandName: cmd.name, argv: cmd.argv, dispatch });
+        return;
+      }
+    }
+
     const reply = buildEchoReply(submitted);
     const replyItem: ScrollbackItem = { id: genId(), type: "assistant_text", text: reply };
     dispatch({ type: "SCROLLBACK_APPEND", item: replyItem });
-  }, [state.session.messageCount, state.input.history, dispatch]);
+  }, [state.session.messageCount, state.input.history, dispatch, exit]);
 
   useEffect(() => {
     const collected: string[] = [];
