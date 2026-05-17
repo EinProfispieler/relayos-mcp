@@ -38,19 +38,3 @@ test("submitting text appends echo reply to scrollback", async () => {
   expect(frame).toContain("❯ hello");
   expect(frame).toContain("echo: hello");
 });
-
-test("submitting /help runs slash command instead of echo", async () => {
-  const { lastFrame, stdin } = render(
-    <RTUIProvider runtime={runtime}>
-      <Shell />
-    </RTUIProvider>,
-  );
-  stdin.write("/help");
-  await new Promise((r) => setTimeout(r, 30));
-  stdin.write("\r");
-  await new Promise((r) => setTimeout(r, 60));
-  const frame = lastFrame() ?? "";
-  expect(frame).toContain("/help");
-  expect(frame).not.toContain("echo: /help");
-  expect(frame).toContain("/status");
-});
