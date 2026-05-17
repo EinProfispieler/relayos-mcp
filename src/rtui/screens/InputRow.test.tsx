@@ -2,6 +2,7 @@ import { test, expect } from "bun:test";
 import { render } from "ink-testing-library";
 import { RTUIProvider } from "../state/context.js";
 import { InputRow } from "./InputRow.js";
+import { SlashPalette } from "./SlashPalette.js";
 import type { RuntimeView } from "../state/types.js";
 
 const runtime: RuntimeView = {
@@ -43,4 +44,31 @@ test("Enter clears the input", async () => {
   stdin.write("\r");
   await new Promise((r) => setTimeout(r, 30));
   expect(lastFrame()).not.toContain("hello");
+});
+
+test("typing / opens the slash palette", async () => {
+  const { stdin, lastFrame } = render(
+    <RTUIProvider runtime={runtime}>
+      <InputRow />
+      <SlashPalette />
+    </RTUIProvider>,
+  );
+  stdin.write("/");
+  await new Promise((r) => setTimeout(r, 30));
+  expect(lastFrame() ?? "").toContain("/help");
+});
+
+test("backspacing past leading / closes the palette", async () => {
+  const { stdin, lastFrame } = render(
+    <RTUIProvider runtime={runtime}>
+      <InputRow />
+      <SlashPalette />
+    </RTUIProvider>,
+  );
+  stdin.write("/");
+  await new Promise((r) => setTimeout(r, 30));
+  // Backspace (DEL char)
+  stdin.write("\x7f");
+  await new Promise((r) => setTimeout(r, 30));
+  expect(lastFrame() ?? "").not.toContain("/help");
 });
