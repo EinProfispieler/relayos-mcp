@@ -1,4 +1,4 @@
-import { Box, Static, Text } from "ink";
+import { Box, Text } from "ink";
 import { useEffect, useRef, useState } from "react";
 import { useRTUI } from "./state/context.js";
 import { ScrollbackArea } from "./screens/ScrollbackArea.js";
@@ -51,9 +51,7 @@ export function Shell() {
 
   return (
     <Box flexDirection="column">
-      <Static items={[{ id: "banner" }]}>
-        {() => <WelcomeBanner key="banner" recent={recent} />}
-      </Static>
+      <WelcomeBanner recent={recent} />
       <ScrollbackArea items={state.scrollback} />
       {state.cli.running ? (
         <Box flexDirection="column">

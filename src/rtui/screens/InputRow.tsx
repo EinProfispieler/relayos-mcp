@@ -52,8 +52,9 @@ export function InputRow() {
     const next = value.slice(0, cursor) + char + value.slice(cursor);
     const nextCursor = cursor + char.length;
     dispatch({ type: "INPUT_CHANGED", value: next, cursor: nextCursor });
-    if (!paletteVisible && next === "/") {
+    if (!paletteVisible && next.startsWith("/")) {
       dispatch({ type: "SLASH_OPEN" });
+      if (next.length > 1) dispatch({ type: "SLASH_QUERY", query: next });
     } else if (paletteVisible && next.startsWith("/")) {
       dispatch({ type: "SLASH_QUERY", query: next });
     }

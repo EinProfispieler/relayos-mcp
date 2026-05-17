@@ -68,12 +68,11 @@ export async function runCliCommand(opts: RunCliCommandOptions): Promise<void> {
     child.on("error", () => resolve(-1));
   });
 
-  await Promise.all([
+  const [, , exitCode] = await Promise.all([
     drain(child.stdout, ""),
     drain(child.stderr, "[stderr] "),
     exited,
   ]);
 
-  const exitCode = await exited;
   dispatch({ type: "CLI_COMMAND_COMPLETE", exitCode });
 }

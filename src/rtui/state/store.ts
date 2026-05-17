@@ -130,9 +130,6 @@ export function reducer(state: RTUIState, action: RTUIAction): RTUIState {
       return { ...state, palette: { ...state.palette, selectedIndex: next } };
     }
 
-    case "SLASH_SELECT":
-      return state;
-
     case "CLI_COMMAND_START":
       return {
         ...state,

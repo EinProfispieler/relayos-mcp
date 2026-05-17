@@ -1,6 +1,6 @@
 import { Box, Text, useApp, useInput } from "ink";
 import { useSlashOverlay } from "../hooks/useSlashOverlay.js";
-import { isSelectable, type SlashCommand } from "../commands/registry.js";
+import { SLASH_COMMANDS, isSelectable, type SlashCommand } from "../commands/registry.js";
 import { useRTUI } from "../state/context.js";
 import { runCliCommand } from "../commands/runner.js";
 
@@ -38,7 +38,7 @@ export function SlashPalette() {
               item: {
                 id: `help-${Date.now().toString(36)}`,
                 type: "system_note",
-                text: filtered
+                text: SLASH_COMMANDS
                   .map((c) => `  ${c.name.padEnd(10)} ${c.description}`)
                   .join("\n"),
               },

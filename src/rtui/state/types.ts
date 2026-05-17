@@ -83,7 +83,6 @@ export type RTUIAction =
   | { type: "SLASH_QUERY"; query: string }
   | { type: "SLASH_CLOSE" }
   | { type: "SLASH_MOVE"; delta: number; visibleCount: number }
-  | { type: "SLASH_SELECT" }
   | { type: "CLI_COMMAND_START"; commandName: string; argv: readonly string[] }
   | { type: "CLI_COMMAND_QUEUE"; commandName: string; argv: readonly string[] }
   | { type: "CLI_OUTPUT_LINE"; line: string }
