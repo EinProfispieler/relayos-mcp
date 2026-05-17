@@ -1,5 +1,4 @@
 import type { RTUIAction, RTUIState, RuntimeView, ScrollbackItem } from "./types.js";
-import { filterCommands } from "../commands/registry.js";
 
 const HISTORY_LIMIT = 500;
 
@@ -121,17 +120,12 @@ export function reducer(state: RTUIState, action: RTUIAction): RTUIState {
       };
 
     case "SLASH_MOVE": {
-      // Use the current state's query to recalculate visible count
-      // This handles the case where setQuery was called immediately before move
-      const currentFiltered = filterCommands(state.palette.query);
-      const visibleCount = currentFiltered.length;
-
-      if (visibleCount <= 0) {
+      if (action.visibleCount <= 0) {
         return { ...state, palette: { ...state.palette, selectedIndex: 0 } };
       }
       const next = Math.max(
         0,
-        Math.min(visibleCount - 1, state.palette.selectedIndex + action.delta),
+        Math.min(action.visibleCount - 1, state.palette.selectedIndex + action.delta),
       );
       return { ...state, palette: { ...state.palette, selectedIndex: next } };
     }

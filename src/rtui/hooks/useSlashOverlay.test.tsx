@@ -14,10 +14,16 @@ const runtime: RuntimeView = {
   isGitRepo: true,
 };
 
-function Probe({ trigger }: { trigger: (api: ReturnType<typeof useSlashOverlay>) => void }) {
+function Probe({
+  step,
+  trigger,
+}: {
+  step: number;
+  trigger: (api: ReturnType<typeof useSlashOverlay>, step: number) => void;
+}) {
   const api = useSlashOverlay();
   const { state } = useRTUI();
-  useEffect(() => { trigger(api); }, []);
+  useEffect(() => { trigger(api, step); }, [step]);
   const names = api.filtered.map((c) => c.name).join(",");
   return <Text>{`visible=${state.palette.visible} sel=${state.palette.selectedIndex} names=${names}`}</Text>;
 }
@@ -25,7 +31,7 @@ function Probe({ trigger }: { trigger: (api: ReturnType<typeof useSlashOverlay>)
 test("open() shows full registry and visible=true", async () => {
   const { lastFrame } = render(
     <RTUIProvider runtime={runtime}>
-      <Probe trigger={(api) => api.open()} />
+      <Probe step={1} trigger={(api) => api.open()} />
     </RTUIProvider>,
   );
   await new Promise((r) => setTimeout(r, 5));
@@ -34,19 +40,38 @@ test("open() shows full registry and visible=true", async () => {
   expect(lastFrame()).toContain("/exit");
 });
 
-test("setQuery filters and move() clamps", async () => {
+test("setQuery filters; move() after filter clamps to filtered length; close() hides palette", async () => {
+  const trigger = (api: ReturnType<typeof useSlashOverlay>, step: number) => {
+    if (step === 1) {
+      api.open();
+      api.setQuery("/r");
+    } else if (step === 2) {
+      api.move(10);
+    } else if (step === 3) {
+      api.close();
+    }
+  };
   const { lastFrame, rerender } = render(
     <RTUIProvider runtime={runtime}>
-      <Probe trigger={(api) => { api.open(); api.setQuery("/r"); api.move(10); }} />
+      <Probe step={1} trigger={trigger} />
     </RTUIProvider>,
   );
   await new Promise((r) => setTimeout(r, 5));
-  // /r matches /recent /results /run → 3 items, last index 2
+  // /r matches /recent /results /run → 3 items
   expect(lastFrame()).toContain("names=/recent,/results,/run");
-  expect(lastFrame()).toContain("sel=2");
+
   rerender(
     <RTUIProvider runtime={runtime}>
-      <Probe trigger={(api) => { api.open(); api.setQuery("/r"); api.move(10); api.close(); }} />
+      <Probe step={2} trigger={trigger} />
+    </RTUIProvider>,
+  );
+  await new Promise((r) => setTimeout(r, 5));
+  // move(10) sees the post-filter render's filtered.length=3 → clamped to 2
+  expect(lastFrame()).toContain("sel=2");
+
+  rerender(
+    <RTUIProvider runtime={runtime}>
+      <Probe step={3} trigger={trigger} />
     </RTUIProvider>,
   );
   await new Promise((r) => setTimeout(r, 5));
