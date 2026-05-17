@@ -40,6 +40,23 @@ export interface InputState {
   historyIndex: number | null;
 }
 
+export interface PaletteState {
+  visible: boolean;
+  query: string;
+  selectedIndex: number;
+}
+
+export interface CliCommandRef {
+  commandName: string;
+  argv: readonly string[];
+}
+
+export interface CliState {
+  running: CliCommandRef | null;
+  queue: readonly CliCommandRef[];
+  streamingLines: readonly string[];
+}
+
 export interface RTUIState {
   session: SessionInfo;
   runtime: RuntimeView;
@@ -47,6 +64,8 @@ export interface RTUIState {
   live: LiveState;
   input: InputState;
   status: Status;
+  palette: PaletteState;
+  cli: CliState;
 }
 
 export type RTUIAction =
@@ -59,4 +78,13 @@ export type RTUIAction =
   | { type: "LIVE_SET_STREAM"; text: string | null }
   | { type: "LIVE_CLEAR" }
   | { type: "STATUS_SET"; status: Status }
-  | { type: "RUNTIME_UPDATED"; runtime: RuntimeView };
+  | { type: "RUNTIME_UPDATED"; runtime: RuntimeView }
+  | { type: "SLASH_OPEN" }
+  | { type: "SLASH_QUERY"; query: string }
+  | { type: "SLASH_CLOSE" }
+  | { type: "SLASH_MOVE"; delta: number; visibleCount: number }
+  | { type: "SLASH_SELECT" }
+  | { type: "CLI_COMMAND_START"; commandName: string; argv: readonly string[] }
+  | { type: "CLI_COMMAND_QUEUE"; commandName: string; argv: readonly string[] }
+  | { type: "CLI_OUTPUT_LINE"; line: string }
+  | { type: "CLI_COMMAND_COMPLETE"; exitCode: number };
