@@ -59,3 +59,32 @@ test("renders empty-state when filter matches nothing", async () => {
   await new Promise((r) => setTimeout(r, 5));
   expect(lastFrame() ?? "").toContain("no matching commands");
 });
+
+test("Down arrow advances selectedIndex", async () => {
+  const { stdin, lastFrame } = render(
+    <RTUIProvider runtime={runtime}>
+      <Seed query="/" sel={0} />
+      <SlashPalette />
+    </RTUIProvider>,
+  );
+  await new Promise((r) => setTimeout(r, 30));
+  stdin.write("\x1b[B"); // Down arrow
+  await new Promise((r) => setTimeout(r, 30));
+  const frame = lastFrame() ?? "";
+  const lines = frame.split("\n");
+  const highlightedLine = lines.find((l) => l.includes("❯ /status"));
+  expect(highlightedLine).toBeDefined();
+});
+
+test("Escape closes the palette", async () => {
+  const { stdin, lastFrame } = render(
+    <RTUIProvider runtime={runtime}>
+      <Seed query="/" sel={0} />
+      <SlashPalette />
+    </RTUIProvider>,
+  );
+  await new Promise((r) => setTimeout(r, 30));
+  stdin.write("\x1b"); // Esc
+  await new Promise((r) => setTimeout(r, 30));
+  expect(lastFrame() ?? "").not.toContain("/help");
+});
