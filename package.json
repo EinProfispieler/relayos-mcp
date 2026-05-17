@@ -35,19 +35,28 @@
   ],
   "scripts": {
     "build": "tsup",
+    "build:rtui": "bun build src/rtui/index.tsx --outdir dist --target bun --format esm --external react-devtools-core",
     "dev": "tsx src/index.ts",
+    "dev:rtui": "bun --watch run src/rtui/index.tsx",
     "test": "vitest run",
+    "test:rtui": "bun test src/rtui/",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "prepack": "npm run build"
+    "prepack": "npm run build && npm run build:rtui"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.20.0",
+    "ink": "^7.0.3",
+    "react": "^19.2.6",
+    "react-devtools-core": "^7.0.1",
     "ulid": "^2.4.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/react": "^19.2.0",
+    "bun-types": "^1.3.0",
+    "ink-testing-library": "^4.0.0",
     "tsup": "^8.3.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
