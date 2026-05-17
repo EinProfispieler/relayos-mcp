@@ -189,3 +189,90 @@ describe("SLASH_CLOSE", () => {
     expect(s.palette.selectedIndex).toBe(0);
   });
 });
+
+describe("CLI_COMMAND_START", () => {
+  test("sets running and clears streamingLines", () => {
+    const s = reducer(baseState(), {
+      type: "CLI_COMMAND_START",
+      commandName: "/status",
+      argv: ["overseer", "status"],
+    });
+    expect(s.cli.running).toEqual({ commandName: "/status", argv: ["overseer", "status"] });
+    expect(s.cli.streamingLines).toEqual([]);
+  });
+});
+
+describe("CLI_COMMAND_QUEUE", () => {
+  test("appends to queue when something is running", () => {
+    let s = reducer(baseState(), {
+      type: "CLI_COMMAND_START",
+      commandName: "/status",
+      argv: ["overseer", "status"],
+    });
+    s = reducer(s, {
+      type: "CLI_COMMAND_QUEUE",
+      commandName: "/recent",
+      argv: ["overseer", "recent"],
+    });
+    expect(s.cli.queue).toHaveLength(1);
+    expect(s.cli.queue[0]?.commandName).toBe("/recent");
+  });
+});
+
+describe("CLI_OUTPUT_LINE", () => {
+  test("appends a line to streamingLines", () => {
+    let s = reducer(baseState(), {
+      type: "CLI_COMMAND_START",
+      commandName: "/status",
+      argv: ["overseer", "status"],
+    });
+    s = reducer(s, { type: "CLI_OUTPUT_LINE", line: "hello" });
+    s = reducer(s, { type: "CLI_OUTPUT_LINE", line: "world" });
+    expect(s.cli.streamingLines).toEqual(["hello", "world"]);
+  });
+});
+
+describe("CLI_COMMAND_COMPLETE", () => {
+  test("flushes streamingLines into scrollback and clears running", () => {
+    let s = reducer(baseState(), {
+      type: "CLI_COMMAND_START",
+      commandName: "/status",
+      argv: ["overseer", "status"],
+    });
+    s = reducer(s, { type: "CLI_OUTPUT_LINE", line: "line A" });
+    s = reducer(s, { type: "CLI_OUTPUT_LINE", line: "line B" });
+    s = reducer(s, { type: "CLI_COMMAND_COMPLETE", exitCode: 0 });
+    expect(s.cli.running).toBeNull();
+    expect(s.cli.streamingLines).toEqual([]);
+    const lastTwo = s.scrollback.slice(-2);
+    expect(lastTwo[0]).toMatchObject({ type: "system_note", text: expect.stringContaining("line A") });
+    expect(lastTwo[1]).toMatchObject({ type: "system_note", text: expect.stringContaining("line B") });
+  });
+
+  test("with non-zero exitCode appends an error note", () => {
+    let s = reducer(baseState(), {
+      type: "CLI_COMMAND_START",
+      commandName: "/status",
+      argv: ["overseer", "status"],
+    });
+    s = reducer(s, { type: "CLI_COMMAND_COMPLETE", exitCode: 2 });
+    const last = s.scrollback[s.scrollback.length - 1];
+    expect(last).toMatchObject({ type: "error", text: expect.stringContaining("exit 2") });
+  });
+
+  test("promotes next queued command into running", () => {
+    let s = reducer(baseState(), {
+      type: "CLI_COMMAND_START",
+      commandName: "/status",
+      argv: ["overseer", "status"],
+    });
+    s = reducer(s, {
+      type: "CLI_COMMAND_QUEUE",
+      commandName: "/recent",
+      argv: ["overseer", "recent"],
+    });
+    s = reducer(s, { type: "CLI_COMMAND_COMPLETE", exitCode: 0 });
+    expect(s.cli.running).toEqual({ commandName: "/recent", argv: ["overseer", "recent"] });
+    expect(s.cli.queue).toEqual([]);
+  });
+});

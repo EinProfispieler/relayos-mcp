@@ -1,9 +1,13 @@
-import type { RTUIAction, RTUIState, RuntimeView } from "./types.js";
+import type { RTUIAction, RTUIState, RuntimeView, ScrollbackItem } from "./types.js";
 
 const HISTORY_LIMIT = 500;
 
 function newSessionId(): string {
   return `rtui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function newItemId(): string {
+  return `cli-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export function initialState(runtime: RuntimeView): RTUIState {
@@ -130,10 +134,54 @@ export function reducer(state: RTUIState, action: RTUIAction): RTUIState {
       return state;
 
     case "CLI_COMMAND_START":
+      return {
+        ...state,
+        cli: {
+          running: { commandName: action.commandName, argv: action.argv },
+          queue: state.cli.queue,
+          streamingLines: [],
+        },
+      };
+
     case "CLI_COMMAND_QUEUE":
+      return {
+        ...state,
+        cli: {
+          ...state.cli,
+          queue: [...state.cli.queue, { commandName: action.commandName, argv: action.argv }],
+        },
+      };
+
     case "CLI_OUTPUT_LINE":
-    case "CLI_COMMAND_COMPLETE":
-      return state;
+      return {
+        ...state,
+        cli: { ...state.cli, streamingLines: [...state.cli.streamingLines, action.line] },
+      };
+
+    case "CLI_COMMAND_COMPLETE": {
+      const flushed: ScrollbackItem[] = state.cli.streamingLines.map((line) => ({
+        id: newItemId(),
+        type: "system_note" as const,
+        text: line,
+      }));
+      if (action.exitCode !== 0) {
+        flushed.push({
+          id: newItemId(),
+          type: "error" as const,
+          text: `(exit ${action.exitCode})`,
+        });
+      }
+      const [nextRunning, ...restQueue] = state.cli.queue;
+      return {
+        ...state,
+        scrollback: [...state.scrollback, ...flushed],
+        cli: {
+          running: nextRunning ?? null,
+          queue: restQueue,
+          streamingLines: [],
+        },
+      };
+    }
 
     default: {
       const _exhaustive: never = action;
