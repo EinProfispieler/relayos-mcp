@@ -13,3 +13,8 @@ docs/plans/
 
 # Local Vitest cache
 .vite-temp/
+
+# Leaked Anthropic source - reference only, never commit
+sample2/
+samplecode/
+SAMPLE2_SAMPLECODE_GUIDE.md
