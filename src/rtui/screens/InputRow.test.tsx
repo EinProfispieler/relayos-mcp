@@ -72,3 +72,18 @@ test("backspacing past leading / closes the palette", async () => {
   await new Promise((r) => setTimeout(r, 30));
   expect(lastFrame() ?? "").not.toContain("/help");
 });
+
+test("Esc closes the palette when InputRow is also mounted", async () => {
+  const { stdin, lastFrame } = render(
+    <RTUIProvider runtime={runtime}>
+      <InputRow />
+      <SlashPalette />
+    </RTUIProvider>,
+  );
+  stdin.write("/");
+  await new Promise((r) => setTimeout(r, 30));
+  expect(lastFrame() ?? "").toContain("/help");
+  stdin.write("\x1b"); // Esc
+  await new Promise((r) => setTimeout(r, 60));
+  expect(lastFrame() ?? "").not.toContain("/help");
+});

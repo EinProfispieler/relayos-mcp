@@ -49,9 +49,11 @@ export function Shell() {
     });
   }, []);
 
+  const showBanner = state.session.messageCount === 0 && state.scrollback.length === 0;
+
   return (
     <Box flexDirection="column">
-      <WelcomeBanner recent={recent} />
+      {showBanner ? <WelcomeBanner recent={recent} /> : null}
       <ScrollbackArea items={state.scrollback} />
       {state.cli.running ? (
         <Box flexDirection="column">
@@ -66,11 +68,11 @@ export function Shell() {
         streaming={state.live.streaming}
         progress={state.live.progress}
       />
+      <SlashPalette />
       <Box marginTop={1} flexDirection="column">
         <InputRow />
         <StatusLine />
       </Box>
-      <SlashPalette />
     </Box>
   );
 }
