@@ -1,5 +1,7 @@
 #!/usr/bin/env sh
-# User-facing RelayOS shortcut CLI with basic command routing.
+# User-facing RelayOS shortcut CLI.
+# Chat mode (default + `chat`) → dist/rtui.js (React + Ink TUI, requires bun)
+# All other subcommands → dist/cli.js (existing Node-based CLI)
 SCRIPT="$0"
 while [ -h "$SCRIPT" ]; do
   LINK=$(readlink "$SCRIPT")
@@ -10,43 +12,41 @@ while [ -h "$SCRIPT" ]; do
 done
 DIR=$(cd "$(dirname "$SCRIPT")" && pwd)
 CLI_JS="$DIR/../dist/cli.js"
+RTUI_JS="$DIR/../dist/rtui.js"
 
 print_help() {
   cat <<'EOF'
 relays - RelayOS quick CLI
 
 Usage:
-  relays                    Start chat mode
+  relays                    Start RTUI chat mode (requires bun)
+  relays chat [args...]     Same as above
   relays help               Show this help
-  relays chat [args...]     Chat mode
-  relays settings           Provider/settings wizard
-  relays banner             Show RelayOS banner
-  relays status             Overseer runtime status
-  relays doctor             Overseer health checks
-  relays report             Runtime + handoff report
-  relays run <handoff_id>   Execute one recorded handoff
+  relays settings           Provider/settings wizard (Node)
+  relays banner             Show RelayOS banner (Node)
+  relays status             Overseer runtime status (Node)
+  relays doctor             Overseer health checks (Node)
+  relays report             Runtime + handoff report (Node)
+  relays run <handoff_id>   Execute one recorded handoff (Node)
 
-Chat slash commands:
-  /help /status /tasks /current /result /approve /run /settings /exit
-
-Tip:
-  Unknown commands are forwarded to: relayos <command> [args...]
+Unknown commands are forwarded to: relayos <command> [args...]
 EOF
 }
 
-COMMAND="${1:-}"
+# Default + `chat` route to the new RTUI bundle via bun.
 if [ "$#" -eq 0 ]; then
-  exec node "$CLI_JS" chat
+  exec bun "$RTUI_JS"
 fi
 
+COMMAND="$1"
 case "$COMMAND" in
+  chat)
+    shift
+    exec bun "$RTUI_JS" "$@"
+    ;;
   help|-h|--help)
     print_help
     exit 0
-    ;;
-  chat)
-    shift
-    exec node "$CLI_JS" chat "$@"
     ;;
   settings)
     shift
