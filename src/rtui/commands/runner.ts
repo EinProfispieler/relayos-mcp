@@ -1,4 +1,6 @@
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RTUIAction } from "../state/types.js";
 
@@ -17,7 +19,25 @@ export interface RunCliCommandOptions {
   nodeBin?: string;
 }
 
-const DEFAULT_CLI_JS_PATH = fileURLToPath(new URL("../../../dist/cli.js", import.meta.url));
+function resolveDefaultCliJsPath(): string {
+  // Bundled layout: dist/rtui.js, sibling dist/cli.js.
+  // Source layout: src/rtui/commands/runner.ts, project-root dist/cli.js.
+  // Walk up from this module's directory, trying sibling cli.js and child dist/cli.js.
+  let dir = dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 8; i++) {
+    const sibling = join(dir, "cli.js");
+    if (existsSync(sibling)) return sibling;
+    const inDist = join(dir, "dist", "cli.js");
+    if (existsSync(inDist)) return inDist;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  // Fallback: the original source-layout guess. Will fail loudly downstream.
+  return fileURLToPath(new URL("../../../dist/cli.js", import.meta.url));
+}
+
+const DEFAULT_CLI_JS_PATH = resolveDefaultCliJsPath();
 
 export async function runCliCommand(opts: RunCliCommandOptions): Promise<void> {
   const {
