@@ -18,6 +18,8 @@ export function initialState(runtime: RuntimeView): RTUIState {
     live: { spinner: null, streaming: null, progress: null },
     input: { value: "", cursor: 0, history: [], historyIndex: null },
     status: "idle",
+    palette: { visible: false, query: "", selectedIndex: 0 },
+    cli: { running: null, queue: [], streamingLines: [] },
   };
 }
 
@@ -94,6 +96,44 @@ export function reducer(state: RTUIState, action: RTUIAction): RTUIState {
 
     case "RUNTIME_UPDATED":
       return { ...state, runtime: action.runtime };
+
+    case "SLASH_OPEN":
+      return {
+        ...state,
+        palette: { visible: true, query: "", selectedIndex: 0 },
+      };
+
+    case "SLASH_QUERY":
+      return {
+        ...state,
+        palette: { ...state.palette, query: action.query, selectedIndex: 0 },
+      };
+
+    case "SLASH_CLOSE":
+      return {
+        ...state,
+        palette: { visible: false, query: "", selectedIndex: 0 },
+      };
+
+    case "SLASH_MOVE": {
+      if (action.visibleCount <= 0) {
+        return { ...state, palette: { ...state.palette, selectedIndex: 0 } };
+      }
+      const next = Math.max(
+        0,
+        Math.min(action.visibleCount - 1, state.palette.selectedIndex + action.delta),
+      );
+      return { ...state, palette: { ...state.palette, selectedIndex: next } };
+    }
+
+    case "SLASH_SELECT":
+      return state;
+
+    case "CLI_COMMAND_START":
+    case "CLI_COMMAND_QUEUE":
+    case "CLI_OUTPUT_LINE":
+    case "CLI_COMMAND_COMPLETE":
+      return state;
 
     default: {
       const _exhaustive: never = action;

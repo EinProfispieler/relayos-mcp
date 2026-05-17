@@ -143,3 +143,49 @@ describe("HISTORY_PREV/NEXT", () => {
     expect(next.input.value).toBe("");
   });
 });
+
+describe("SLASH_OPEN", () => {
+  test("sets palette visible with empty query", () => {
+    const s = reducer(baseState(), { type: "SLASH_OPEN" });
+    expect(s.palette.visible).toBe(true);
+    expect(s.palette.query).toBe("");
+    expect(s.palette.selectedIndex).toBe(0);
+  });
+});
+
+describe("SLASH_QUERY", () => {
+  test("updates query and resets selectedIndex", () => {
+    let s = reducer(baseState(), { type: "SLASH_OPEN" });
+    s = reducer(s, { type: "SLASH_MOVE", delta: 2, visibleCount: 5 });
+    s = reducer(s, { type: "SLASH_QUERY", query: "/st" });
+    expect(s.palette.query).toBe("/st");
+    expect(s.palette.selectedIndex).toBe(0);
+  });
+});
+
+describe("SLASH_MOVE", () => {
+  test("clamps selectedIndex within [0, visibleCount-1]", () => {
+    let s = reducer(baseState(), { type: "SLASH_OPEN" });
+    s = reducer(s, { type: "SLASH_MOVE", delta: 10, visibleCount: 3 });
+    expect(s.palette.selectedIndex).toBe(2);
+    s = reducer(s, { type: "SLASH_MOVE", delta: -10, visibleCount: 3 });
+    expect(s.palette.selectedIndex).toBe(0);
+  });
+
+  test("with visibleCount 0 keeps selectedIndex at 0", () => {
+    let s = reducer(baseState(), { type: "SLASH_OPEN" });
+    s = reducer(s, { type: "SLASH_MOVE", delta: 1, visibleCount: 0 });
+    expect(s.palette.selectedIndex).toBe(0);
+  });
+});
+
+describe("SLASH_CLOSE", () => {
+  test("hides palette and resets query", () => {
+    let s = reducer(baseState(), { type: "SLASH_OPEN" });
+    s = reducer(s, { type: "SLASH_QUERY", query: "/he" });
+    s = reducer(s, { type: "SLASH_CLOSE" });
+    expect(s.palette.visible).toBe(false);
+    expect(s.palette.query).toBe("");
+    expect(s.palette.selectedIndex).toBe(0);
+  });
+});
