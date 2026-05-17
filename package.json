@@ -35,7 +35,7 @@
   ],
   "scripts": {
     "build": "tsup",
-    "build:rtui": "bun build src/rtui/index.tsx --outdir dist --target bun --format esm --external react-devtools-core",
+    "build:rtui": "bun build src/rtui/index.tsx --outfile dist/rtui.js --target bun --format esm --external react-devtools-core",
     "dev": "tsx src/index.ts",
     "dev:rtui": "bun --watch run src/rtui/index.tsx",
     "test": "vitest run",
