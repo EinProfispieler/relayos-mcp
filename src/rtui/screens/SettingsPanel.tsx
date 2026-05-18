@@ -73,29 +73,31 @@ export function SettingsPanel({ onClose }: Props) {
   };
 
   const handleImport = (detected: DetectedProvider) => {
+    const newApiBase = defaultApiBase(detected.provider);
     setDraft((d) => ({
       ...d,
       provider: detected.provider,
       kind: detected.kind,
       model: detected.model,
-      api_base: defaultApiBase(detected.provider),
+      api_base: newApiBase,
       api_key_env: detected.api_key_env ?? "",
     }));
     setPool((p) => {
-      const existing = p.find((e) => e.name === detected.provider);
-      if (existing) return p;
-      return [
-        ...p,
-        {
-          id: `p_${detected.provider}`,
-          name: detected.provider,
-          kind: detected.kind,
-          model: detected.model,
-          effort: "medium",
-          api_base: detected.kind === "api" ? defaultApiBase(detected.provider) : undefined,
-          api_key_env: detected.api_key_env,
-        },
-      ];
+      // Update (or replace) the p1 slot to reflect the newly imported primary provider.
+      // Remove any secondary entry that happens to be the same provider so we never
+      // end up with two entries for the same provider name.
+      const newP1: PoolEntry = {
+        id: "p1",
+        name: detected.provider,
+        kind: detected.kind,
+        model: detected.model,
+        effort: "medium",
+        api_base: detected.kind === "api" ? newApiBase : undefined,
+        api_key_env: detected.api_key_env,
+      };
+      const rest = p
+        .filter((e) => e.id !== "p1" && e.name !== detected.provider);
+      return [newP1, ...rest];
     });
     setActiveSection(0);
     setMessage("Imported — review in Provider tab, then Save");
@@ -166,7 +168,9 @@ export function SettingsPanel({ onClose }: Props) {
 
       {/* Keyboard legend */}
       <Text dimColor>
-        {"↑↓ navigate  ← → change  Enter edit  Tab section  s save  Esc close"}
+        {"↑↓ navigate  ← → change  Enter edit  Tab section  "}
+        <Text color={colors.accent} bold>{"[s]"}</Text>
+        <Text dimColor>{" save  Esc close"}</Text>
       </Text>
 
       {/* Secret status */}

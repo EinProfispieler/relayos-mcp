@@ -25,7 +25,7 @@ interface Props {
 const PROVIDER_FIELDS = ["provider", "kind", "model", "effort"] as const;
 type ProviderField = (typeof PROVIDER_FIELDS)[number];
 
-export function ProviderSection({ draft, setDraft, setMessage, isActive }: Props) {
+export function ProviderSection({ draft, setDraft, setPool, setMessage, isActive }: Props) {
   const [cursor, setCursor] = useState(0);
   const [modelOptions, setModelOptions] = useState<string[]>(
     ensureModelInList(defaultModelsForProvider(draft.provider), draft.model),
@@ -63,13 +63,32 @@ export function ProviderSection({ draft, setDraft, setMessage, isActive }: Props
       if (currentField === "provider") {
         const nextProvider = cycle(["codex", "claude", "glm"] as const, draft.provider, delta);
         const defaults = defaultModelsForProvider(nextProvider);
-        setModelOptions(ensureModelInList(defaults, defaults[0] ?? draft.model));
+        const nextModel = defaults[0] ?? draft.model;
+        const nextApiBase = defaultApiBase(nextProvider);
+        setModelOptions(ensureModelInList(defaults, nextModel));
         setDraft((d) => ({
           ...d,
           provider: nextProvider,
-          model: defaults[0] ?? d.model,
-          api_base: defaultApiBase(nextProvider),
+          model: nextModel,
+          api_base: nextApiBase,
         }));
+        // Keep pool's p1 entry in sync so Advanced tab's provider order never
+        // shows a stale / duplicate entry for the same provider name.
+        setPool((p) => {
+          const existing = p.find((e) => e.id === "p1");
+          const newP1: PoolEntry = {
+            id: "p1",
+            name: nextProvider,
+            model: nextModel,
+            effort: existing?.effort ?? "medium",
+            kind: existing?.kind ?? "subscription_cli",
+            api_base: nextApiBase,
+            api_key_env: existing?.api_key_env,
+          };
+          // Remove any secondary entry that already represents the same provider.
+          const rest = p.filter((e) => e.id !== "p1" && e.name !== nextProvider);
+          return [newP1, ...rest];
+        });
       }
 
       if (currentField === "kind") {

@@ -43,12 +43,22 @@ export function AdvancedSection({
 
   const currentField = ADVANCED_FIELDS[cursor] as AdvancedField;
 
-  const orderedLabels = orderIds.map((id) => {
-    const p = id === "p1"
-      ? { name: draft.provider, model: draft.model }
-      : pool.find((x) => x.id === id) ?? { name: "unknown", model: "unknown" };
-    return `${id}:${p.name}/${p.model}`;
-  });
+  // Build labels from pool (pool.p1 is kept in sync by ProviderSection / handleImport).
+  // Deduplicate by provider name so a stale secondary entry for the same provider
+  // never shows up alongside the primary.
+  const seenProviders = new Set<string>();
+  const orderedLabels = (() => {
+    const entries: string[] = [];
+    for (const id of orderIds) {
+      const p = pool.find((x) => x.id === id) ??
+        (id === "p1" ? { name: draft.provider, model: draft.model } : undefined);
+      if (!p) continue;
+      if (seenProviders.has(p.name)) continue;
+      seenProviders.add(p.name);
+      entries.push(`${id}:${p.name}/${p.model}`);
+    }
+    return entries;
+  })();
 
   useInput((input, key) => {
     if (!isActive) return;
