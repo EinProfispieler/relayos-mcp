@@ -12,7 +12,7 @@ import { WelcomeBanner } from "./screens/WelcomeBanner.js";
 import { SettingsPanel } from "./screens/SettingsPanel.js";
 import { SetupWizard } from "./screens/SetupWizard.js";
 import { runCliCommand } from "./commands/runner.js";
-import type { PendingHandoff, ScrollbackItem } from "./state/types.js";
+import type { PendingHandoff, ProjectPlanView, ScrollbackItem } from "./state/types.js";
 import { runChatTurn, type ChatTurnResult, type ChatTurnIO } from "../chat.js";
 import { loadProjectConfig } from "../config.js";
 
@@ -106,6 +106,64 @@ export function Shell() {
     }).then(() => {
       dispatch({ type: "STATUS_SET", status: "idle" });
     });
+  };
+
+  // ── plan flow: execute the plan handoff, then extract the PROJECT_PLAN ──
+  const runPlanFlow = (handoffId: string) => {
+    dispatch({ type: "STATUS_SET", status: "executing" });
+    appendNote(dispatch, `Planning the project… (handoff ${handoffId})`);
+    void runCliCommand({
+      commandName: "execute-handoff",
+      argv: ["overseer", "execute-handoff", handoffId],
+      dispatch,
+    })
+      .then(async () => {
+        const planLines: string[] = [];
+        await runCliCommand({
+          commandName: "plan-extract",
+          argv: ["overseer", "plan-extract", handoffId],
+          dispatch: (action) => {
+            if (action.type === "CLI_OUTPUT_LINE") planLines.push(action.line);
+          },
+        });
+        const planLine = planLines.find((l) => l.startsWith("@@RELAYOS_PLAN@@ "));
+        if (!planLine) {
+          appendError(dispatch, "Could not extract a project plan from the planning output.");
+          dispatch({ type: "STATUS_SET", status: "idle" });
+          return;
+        }
+        try {
+          const raw = JSON.parse(planLine.slice("@@RELAYOS_PLAN@@ ".length)) as {
+            plan_id: string;
+            goal: string;
+            questions?: string[];
+            tasks?: Array<Record<string, string>>;
+          };
+          const view: ProjectPlanView = {
+            planId: raw.plan_id,
+            goal: raw.goal,
+            questions: raw.questions ?? [],
+            tasks: (raw.tasks ?? []).map((t) => ({
+              id: t.id ?? "",
+              title: t.title ?? "",
+              target: t.target ?? "",
+              model: t.model ?? "",
+              effort: t.effort ?? "",
+              mode: t.mode ?? "",
+              status: t.status ?? "pending",
+            })),
+          };
+          dispatch({ type: "PROJECT_PLAN_SET", plan: view });
+          dispatch({
+            type: "SCROLLBACK_APPEND",
+            item: { id: genId(), type: "plan_summary", plan: view },
+          });
+          dispatch({ type: "STATUS_SET", status: "awaiting_answers" });
+        } catch {
+          appendError(dispatch, "Planning output was malformed.");
+          dispatch({ type: "STATUS_SET", status: "idle" });
+        }
+      });
   };
 
   // ── slash command handler (direct-typed) ──────────────────────────────
@@ -204,6 +262,17 @@ export function Shell() {
         type: "SCROLLBACK_APPEND",
         item: { id: genId(), type: "timing_note", ms: elapsed },
       });
+
+      // project_plan turn → run the plan flow (execute + extract), then stop.
+      if (result.handoff_kind === "plan") {
+        if (result.handoff_id) {
+          runPlanFlow(result.handoff_id);
+        } else {
+          appendError(dispatch, "Plan handoff could not be created.");
+          dispatch({ type: "STATUS_SET", status: "idle" });
+        }
+        return;
+      }
 
       // Show proposal note
       if (result.action_proposal) {

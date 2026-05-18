@@ -68,7 +68,12 @@ import { renderCodexTarget } from "./render/codex.js";
 import { renderClaudeTarget } from "./render/claude.js";
 import { evaluatePolicy, formatBannerLines } from "./policy.js";
 import type { Envelope, SpawnResult } from "./schema.js";
-import { ensureStorage, resolveStorageLayout } from "./storage.js";
+import { ensureStorage, resolveStorageLayout, stdoutLogPath } from "./storage.js";
+import {
+  parseProjectPlanBlock,
+  buildProjectPlan,
+  persistProjectPlan,
+} from "./project_plan.js";
 
 export interface CliIO {
   stdout: { write: (chunk: string) => unknown; isTTY?: boolean };
@@ -2077,6 +2082,48 @@ export async function runOverseerExecuteHandoffById(
   return runOverseerExecuteHandoff([handoffId], io);
 }
 
+/**
+ * Parse the `<PROJECT_PLAN>` block from a completed plan handoff's output,
+ * persist it as a ProjectPlan, and emit it on an `@@RELAYOS_PLAN@@` line.
+ */
+async function runOverseerPlanExtract(args: string[], io: CliIO): Promise<number> {
+  const handoffId = args.find((a) => !a.startsWith("--"));
+  if (!handoffId) {
+    io.stderr.write("Usage: relayos overseer plan-extract <handoff_id>\n");
+    return 1;
+  }
+
+  const layout = resolveStorageLayout();
+  const envPath = join(layout.envelopesDir, `${handoffId}.json`);
+  if (!existsSync(envPath)) {
+    io.stderr.write(`Handoff not found: ${handoffId}\n`);
+    return 1;
+  }
+
+  const envelope = JSON.parse(readFileSync(envPath, "utf8")) as Envelope;
+  // Prefer the full stdout log; fall back to the captured tail on the envelope.
+  const logPath = stdoutLogPath(layout, handoffId);
+  const output = existsSync(logPath)
+    ? readFileSync(logPath, "utf8")
+    : envelope.spawn?.stdout_tail ?? "";
+
+  const parsed = parseProjectPlanBlock(output);
+  if (!parsed) {
+    io.stderr.write(
+      `No valid PROJECT_PLAN block found in handoff ${handoffId} output.\n`,
+    );
+    return 1;
+  }
+
+  const plan = buildProjectPlan(parsed, handoffId);
+  const overseerLayout = resolveOverseerLayout(process.cwd());
+  const planPath = persistProjectPlan(overseerLayout, plan);
+
+  io.stdout.write("@@RELAYOS_PLAN@@ " + JSON.stringify(plan) + "\n");
+  io.stdout.write(`Plan saved: ${planPath}\n`);
+  return 0;
+}
+
 async function runOverseerHandoffResult(args: string[], io: CliIO): Promise<number> {
   const [sub, ...rest] = args;
   if (sub === "add") {
@@ -2585,6 +2632,7 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "handoff-result") return runOverseerHandoffResult(rest, io);
   if (sub === "handoff-results") return runOverseerHandoffResults(rest, io);
   if (sub === "execute-handoff") return runOverseerExecuteHandoff(rest, io);
+  if (sub === "plan-extract") return runOverseerPlanExtract(rest, io);
   if (sub === "next") return runOverseerNext(rest, io);
   if (sub === "start") return runOverseerStart(rest, io);
   if (sub === "mode") return runOverseerMode(rest, io);
@@ -2598,8 +2646,9 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "branch") return runOverseerBranch(rest, io);
   if (sub === "progress") return runOverseerProgress(rest, io);
   io.stderr.write(
-    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|capabilities|summary|memory-index|doctor|role-profile|wake-instructions|init|note|decision|decisions|handoff-result|handoff-results|execute-handoff|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n" +
+    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|capabilities|summary|memory-index|doctor|role-profile|wake-instructions|init|note|decision|decisions|handoff-result|handoff-results|execute-handoff|plan-extract|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n" +
       "  overseer execute-handoff <id>   launch Codex for a recorded handoff and capture result\n" +
+      "  overseer plan-extract <id>      parse the PROJECT_PLAN block from a completed plan handoff\n" +
       "  overseer execute-handoff --dry-run <id>  print launch_command without executing\n",
   );
   return 1;

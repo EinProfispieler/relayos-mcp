@@ -28,6 +28,7 @@ export function initialState(runtime: RuntimeView): RTUIState {
     wizardOpen: false,
     mode: "step" as ChatMode,
     pendingHandoff: null,
+    projectPlan: null,
   };
 }
 
@@ -204,6 +205,12 @@ export function reducer(state: RTUIState, action: RTUIAction): RTUIState {
 
     case "PENDING_HANDOFF_CLEAR":
       return { ...state, pendingHandoff: null };
+
+    case "PROJECT_PLAN_SET":
+      return { ...state, projectPlan: action.plan };
+
+    case "PROJECT_PLAN_CLEAR":
+      return { ...state, projectPlan: null };
 
     default: {
       const _exhaustive: never = action;

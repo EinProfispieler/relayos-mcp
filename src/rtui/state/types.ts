@@ -4,6 +4,7 @@ export type Status =
   | "idle"
   | "thinking"
   | "awaiting_approval"
+  | "awaiting_answers"
   | "executing";
 
 export interface RuntimeView {
@@ -20,12 +21,30 @@ export interface SessionInfo {
   messageCount: number;
 }
 
+export interface ProjectPlanTaskView {
+  id: string;
+  title: string;
+  target: string;
+  model: string;
+  effort: string;
+  mode: string;
+  status: string;
+}
+
+export interface ProjectPlanView {
+  planId: string;
+  goal: string;
+  questions: string[];
+  tasks: ProjectPlanTaskView[];
+}
+
 export type ScrollbackItem =
   | { id: string; type: "user_input"; text: string }
   | { id: string; type: "assistant_text"; text: string }
   | { id: string; type: "system_note"; text: string }
   | { id: string; type: "timing_note"; ms: number }
   | { id: string; type: "error"; text: string }
+  | { id: string; type: "plan_summary"; plan: ProjectPlanView }
   | { id: string; type: "divider" };
 
 export interface LiveState {
@@ -79,6 +98,7 @@ export interface RTUIState {
   wizardOpen: boolean;
   mode: ChatMode;
   pendingHandoff: PendingHandoff | null;
+  projectPlan: ProjectPlanView | null;
 }
 
 export type RTUIAction =
@@ -106,4 +126,6 @@ export type RTUIAction =
   | { type: "WIZARD_CLOSE" }
   | { type: "MODE_SET"; mode: ChatMode }
   | { type: "PENDING_HANDOFF_SET"; handoff: PendingHandoff }
-  | { type: "PENDING_HANDOFF_CLEAR" };
+  | { type: "PENDING_HANDOFF_CLEAR" }
+  | { type: "PROJECT_PLAN_SET"; plan: ProjectPlanView }
+  | { type: "PROJECT_PLAN_CLEAR" };

@@ -6,6 +6,7 @@ function statusLabel(status: string): string {
   switch (status) {
     case "thinking": return "Thinking";
     case "awaiting_approval": return "Awaiting approval";
+    case "awaiting_answers": return "Awaiting answers";
     case "executing": return "Executing";
     default: return "Ready";
   }

@@ -11,6 +11,7 @@ export interface OverseerLayout {
   handoffResultsPath: string;
   tasksPath: string;
   nextActionPath: string;
+  plansDir: string;
 }
 
 export function resolveOverseerLayout(cwd: string): OverseerLayout {
@@ -22,6 +23,7 @@ export function resolveOverseerLayout(cwd: string): OverseerLayout {
     handoffResultsPath: join(dir, "handoff_results.jsonl"),
     tasksPath: join(dir, "tasks.jsonl"),
     nextActionPath: join(dir, "next_action.md"),
+    plansDir: join(dir, "plans"),
   };
 }
 

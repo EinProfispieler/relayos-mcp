@@ -323,3 +323,38 @@ describe("PENDING_HANDOFF_SET / CLEAR", () => {
     expect(s.pendingHandoff).toBeNull();
   });
 });
+
+describe("PROJECT_PLAN_SET / CLEAR", () => {
+  const plan = {
+    planId: "plan_1",
+    goal: "build a thing",
+    questions: ["q1?"],
+    tasks: [
+      {
+        id: "t1",
+        title: "do t1",
+        target: "codex",
+        model: "gpt-5.5",
+        effort: "medium",
+        mode: "patch",
+        status: "pending",
+      },
+    ],
+  };
+
+  test("initialState has null projectPlan", () => {
+    expect(baseState().projectPlan).toBeNull();
+  });
+
+  test("PROJECT_PLAN_SET stores the plan", () => {
+    const next = reducer(baseState(), { type: "PROJECT_PLAN_SET", plan });
+    expect(next.projectPlan).toEqual(plan);
+  });
+
+  test("PROJECT_PLAN_CLEAR removes the plan", () => {
+    let s = reducer(baseState(), { type: "PROJECT_PLAN_SET", plan });
+    expect(s.projectPlan).not.toBeNull();
+    s = reducer(s, { type: "PROJECT_PLAN_CLEAR" });
+    expect(s.projectPlan).toBeNull();
+  });
+});

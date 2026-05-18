@@ -809,6 +809,77 @@ export interface ChatTurnResult {
   handoff_id: string | null;
   handoff_title: string | null;
   needs_approval: boolean;
+  /** "plan" for a project-plan handoff, "task" for a normal work handoff. */
+  handoff_kind: "plan" | "task" | null;
+}
+
+const PROJECT_PLAN_FORMAT = [
+  "PROJECT_PLAN",
+  "goal: <one-line goal>",
+  "questions:",
+  "  - <open question the user must answer>",
+  "tasks:",
+  "  - id: t1",
+  "    title: <short title>",
+  "    target: codex | claude",
+  "    model: <model id>",
+  "    effort: low | medium | high | xhigh | max",
+  "    mode: patch | review | test | plan",
+  "    description: <what this task does>",
+  "    depends_on: []",
+  "reporting: <how each task reports back — write_handoff_result with status, summary, tests, blockers>",
+  "END_PROJECT_PLAN",
+].join("\n");
+
+/** Build a read-only plan handoff for a project_plan intent. */
+export function buildPlanHandoffInput(
+  message: string,
+  intent: ActionIntentBlockType,
+  cfg?: RelayConfig,
+): {
+  source_agent: "claude";
+  target_agent: "codex" | "claude";
+  model: string;
+  effort: Effort;
+  execution_mode: "plan";
+  task_title: string;
+  task_description: string;
+  expected_output: string[];
+  auto_spawn: false;
+} {
+  const target: "codex" | "claude" = intent.target === "codex" ? "codex" : "claude";
+  const profile = resolveProviderProfile(cfg, target);
+  const model = intent.model || profile.model;
+  const effort: Effort = asEffort(intent.effort) ?? profile.effort;
+
+  return {
+    source_agent: "claude",
+    target_agent: target,
+    model,
+    effort,
+    execution_mode: "plan",
+    task_title: `Plan: ${toTaskTitle(message)}`,
+    task_description: [
+      "You are the planning agent for a new project / feature. Research the",
+      "project, then break the work into a concrete todo list. You may use your",
+      "own planning skills. Do NOT modify any files — this is a read-only plan.",
+      "",
+      "User request:",
+      message,
+      "",
+      "End your output with exactly one PROJECT_PLAN block in this format:",
+      "",
+      PROJECT_PLAN_FORMAT,
+      "",
+      "Each task must carry full dispatch data: target (codex for",
+      "implementation, claude for review/planning), model, effort, mode, and a",
+      "clear description. List any open questions the user must answer.",
+    ].join("\n"),
+    expected_output: [
+      "A PROJECT_PLAN block with goal, questions, a routed task list, and reporting rule",
+    ],
+    auto_spawn: false,
+  };
 }
 
 /**
@@ -825,8 +896,19 @@ export async function runChatTurn(
 ): Promise<number> {
   const converse = deps?.conversation ?? handleConversation;
 
-  const emit = (result: ChatTurnResult) => {
-    io.stdout.write("@@RELAYOS_TURN@@ " + JSON.stringify(result) + "\n");
+  const emit = (result: Partial<ChatTurnResult> & { reply: string }) => {
+    const full: ChatTurnResult = {
+      reply: result.reply,
+      provider_used: result.provider_used ?? null,
+      provider_latency_ms: result.provider_latency_ms ?? null,
+      ai_plan: result.ai_plan ?? null,
+      action_proposal: result.action_proposal ?? null,
+      handoff_id: result.handoff_id ?? null,
+      handoff_title: result.handoff_title ?? null,
+      needs_approval: result.needs_approval ?? false,
+      handoff_kind: result.handoff_kind ?? null,
+    };
+    io.stdout.write("@@RELAYOS_TURN@@ " + JSON.stringify(full) + "\n");
   };
 
   const msg = message.trim();
@@ -896,6 +978,34 @@ export async function runChatTurn(
   }
 
   const loaded = loadProjectConfig({ cwd: process.cwd() });
+
+  // project_plan intent → dispatch a read-only plan handoff (the plan agent
+  // produces a todo list + open questions; no work is executed this turn).
+  if (actionIntent.intent_type === "project_plan") {
+    let planHandoffId: string | null = null;
+    let planHandoffTitle: string | null = null;
+    try {
+      const planInput = buildPlanHandoffInput(msg, actionIntent, loaded.config);
+      const storageLayout = resolveStorageLayout();
+      await ensureStorage(storageLayout);
+      const audit = createAuditWriter(storageLayout);
+      const handoffResult = await createHandoff(planInput, { layout: storageLayout, audit });
+      planHandoffId = handoffResult.handoff_id;
+      planHandoffTitle = planInput.task_title;
+    } catch (err) {
+      io.stderr.write(`chat-turn: plan handoff creation error: ${String(err)}\n`);
+    }
+    emit({
+      reply: assistantReply,
+      provider_used: providerUsed,
+      provider_latency_ms: providerLatencyMs,
+      handoff_id: planHandoffId,
+      handoff_title: planHandoffTitle,
+      handoff_kind: "plan",
+    });
+    return 0;
+  }
+
   const aiPlan = planRouteFromActionIntent(actionIntent, loaded.config);
   const actionProposal = buildActionProposal(aiPlan);
 
@@ -949,6 +1059,7 @@ export async function runChatTurn(
     handoff_id: handoffId,
     handoff_title: handoffTitle,
     needs_approval: needsApproval,
+    handoff_kind: handoffId ? "task" : null,
   });
   return 0;
 }

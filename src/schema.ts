@@ -227,6 +227,7 @@ export const ActionIntentType = z.enum([
   "create_handoff",
   "review",
   "release_control",
+  "project_plan",
 ]);
 export type ActionIntentType = z.infer<typeof ActionIntentType>;
 
@@ -244,6 +245,55 @@ export const ActionIntentBlock = z
   })
   .strict();
 export type ActionIntentBlock = z.infer<typeof ActionIntentBlock>;
+
+export const ProjectPlanTaskStatus = z.enum([
+  "pending",
+  "running",
+  "completed",
+  "failed",
+  "blocked",
+]);
+export type ProjectPlanTaskStatus = z.infer<typeof ProjectPlanTaskStatus>;
+
+export const ProjectPlanTask = z
+  .object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    target: AgentName,
+    model: z.string().min(1),
+    effort: Effort,
+    mode: ExecutionMode,
+    description: z.string().min(1),
+    depends_on: z.array(z.string()).default([]),
+    status: ProjectPlanTaskStatus.default("pending"),
+    handoff_id: z.string().optional(),
+  })
+  .strict();
+export type ProjectPlanTask = z.infer<typeof ProjectPlanTask>;
+
+export const ProjectPlanStatus = z.enum([
+  "awaiting_answers",
+  "ready",
+  "running",
+  "completed",
+  "failed",
+]);
+export type ProjectPlanStatus = z.infer<typeof ProjectPlanStatus>;
+
+export const ProjectPlan = z
+  .object({
+    plan_id: z.string().min(1),
+    created_at: z.string(),
+    goal: z.string().min(1),
+    questions: z.array(z.string()).default([]),
+    answers: z.array(z.string()).default([]),
+    tasks: z.array(ProjectPlanTask).default([]),
+    reporting: z.string().default(""),
+    source_handoff_id: z.string().optional(),
+    status: ProjectPlanStatus.default("awaiting_answers"),
+  })
+  .strict();
+export type ProjectPlan = z.infer<typeof ProjectPlan>;
 
 export const RouteDecision = z
   .object({

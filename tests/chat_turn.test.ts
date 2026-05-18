@@ -73,6 +73,19 @@ mode: review
 approval_required: false
 END_ACTION_INTENT`;
 
+const PLAN_REPLY = `I'll plan that feature.
+
+ACTION_INTENT
+intent_type: project_plan
+confidence: 0.9
+summary: build a new notifications feature
+target: claude
+model: claude-sonnet-4-6
+effort: high
+mode: plan
+approval_required: false
+END_ACTION_INTENT`;
+
 const CONVO_REPLY = "Hello! How can I help you today?";
 
 describe("runChatTurn", () => {
@@ -136,6 +149,20 @@ describe("runChatTurn", () => {
     expect(r.needs_approval).toBe(false);
     expect(r.ai_plan).not.toBeNull();
     expect(r.action_proposal?.action).toBe("create_handoff");
+  });
+
+  it("project_plan intent — produces a plan handoff", async () => {
+    const { io, getSentinel } = makeIO();
+    await runChatTurn(
+      "build a new notifications feature",
+      io,
+      { conversation: stubConversation({ "build a new notifications feature": PLAN_REPLY }) },
+    );
+    const r = getSentinel()!;
+    expect(r.handoff_kind).toBe("plan");
+    expect(r.handoff_id).toMatch(/^h_/);
+    expect(r.handoff_title).toMatch(/^Plan: /);
+    expect(r.needs_approval).toBe(false);
   });
 
   it("review intent — handoff targets claude in review mode", async () => {
