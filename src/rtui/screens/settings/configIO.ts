@@ -151,6 +151,16 @@ export function loadDraft(cwd: string): { draft: SettingsDraft; pool: PoolEntry[
 export function saveDraft(cwd: string, draft: SettingsDraft, pool: PoolEntry[], orderIds: string[]): string {
   const path = resolveWritePath(cwd);
   const prev = existsSync(path) ? RelayConfig.parse(JSON.parse(readFileSync(path, "utf8"))) : RelayConfig.parse({});
+  // Preserve the existing encrypted key for the primary provider so a normal
+  // save (where the user didn't re-enter the raw token) doesn't silently erase it.
+  const existingPrimaryEncKey: string | undefined = (() => {
+    const providers = prev.overseer?.providers;
+    if (!Array.isArray(providers)) return undefined;
+    const primaryId = prev.overseer?.primary_provider;
+    const primaryEntry = providers.find((p) => p.id === primaryId) ?? providers[0];
+    const enc = (primaryEntry as Record<string, unknown>)?.api_key_enc;
+    return typeof enc === "string" && enc.trim().length > 0 ? enc.trim() : undefined;
+  })();
   const secret = ensureProjectConfigSecret(cwd);
   const apiMode = draft.kind === "api";
   const providerName = draft.provider;
@@ -187,10 +197,15 @@ export function saveDraft(cwd: string, draft: SettingsDraft, pool: PoolEntry[], 
   };
 
   if (apiMode && draft.api_key.trim().length > 0) {
+    // User entered a new raw key — encrypt and store it.
     if (secret.length === 0) {
       throw new Error("RELAYOS_CONFIG_SECRET is required to save api_key.");
     }
     primaryRecord.api_key_enc = encryptConfigSecret(draft.api_key.trim(), secret);
+  } else if (apiMode && existingPrimaryEncKey) {
+    // No new key entered but an encrypted one already exists — carry it forward
+    // so a routine settings save doesn't silently remove the only configured token.
+    primaryRecord.api_key_enc = existingPrimaryEncKey;
   }
   const nextProviders = [
     primaryRecord,

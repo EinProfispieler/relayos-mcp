@@ -36,8 +36,10 @@ EOF
 }
 
 # Default + `chat` route to the new RTUI bundle via bun.
+# Do NOT cd into ROOT_DIR — all paths are absolute and the caller's cwd is the
+# user's project root; changing it would make process.cwd() point at the package
+# install tree instead of the user's repo.
 if [ "$#" -eq 0 ]; then
-  cd "$ROOT_DIR" || exit 1
   exec bun "$RTUI_JS"
 fi
 
@@ -45,7 +47,6 @@ COMMAND="$1"
 case "$COMMAND" in
   chat)
     shift
-    cd "$ROOT_DIR" || exit 1
     exec bun "$RTUI_JS" "$@"
     ;;
   help|-h|--help)
@@ -54,41 +55,33 @@ case "$COMMAND" in
     ;;
   settings)
     shift
-    cd "$ROOT_DIR" || exit 1
     exec node "$CLI_JS" settings "$@"
     ;;
   setup)
     shift
-    cd "$ROOT_DIR" || exit 1
     exec node "$CLI_JS" setup "$@"
     ;;
   banner)
     shift
-    cd "$ROOT_DIR" || exit 1
     exec node "$CLI_JS" banner "$@"
     ;;
   status)
     shift
-    cd "$ROOT_DIR" || exit 1
     exec node "$CLI_JS" overseer status "$@"
     ;;
   doctor)
     shift
-    cd "$ROOT_DIR" || exit 1
     exec node "$CLI_JS" overseer doctor "$@"
     ;;
   report)
     shift
-    cd "$ROOT_DIR" || exit 1
     exec node "$CLI_JS" report "$@"
     ;;
   run)
     shift
-    cd "$ROOT_DIR" || exit 1
     exec node "$CLI_JS" overseer execute-handoff "$@"
     ;;
   *)
-    cd "$ROOT_DIR" || exit 1
     exec node "$CLI_JS" "$@"
     ;;
 esac
