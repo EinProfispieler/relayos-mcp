@@ -267,6 +267,7 @@ export const ProjectPlanTask = z
     depends_on: z.array(z.string()).default([]),
     status: ProjectPlanTaskStatus.default("pending"),
     handoff_id: z.string().optional(),
+    retry_count: z.number().int().min(0).default(0),
   })
   .strict();
 export type ProjectPlanTask = z.infer<typeof ProjectPlanTask>;

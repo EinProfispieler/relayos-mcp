@@ -70,7 +70,7 @@ import { createHandoff } from "./tools/create_handoff.js";
 import { createAuditWriter } from "./audit.js";
 import { evaluatePolicy, formatBannerLines } from "./policy.js";
 import type { Envelope, SpawnResult } from "./schema.js";
-import { ensureStorage, resolveStorageLayout, stdoutLogPath } from "./storage.js";
+import { ensureStorage, resolveStorageLayout, stdoutLogPath, stderrLogPath } from "./storage.js";
 import {
   parseProjectPlanBlock,
   buildProjectPlan,
@@ -78,7 +78,12 @@ import {
   loadProjectPlan,
   appendAnswerToplan,
   updatePlanTaskStatus,
+  updatePlanTaskRetryCount,
   buildTaskHandoffInput,
+  getTaskErrorContext,
+  buildFixHandoffInput,
+  buildPlanReport,
+  persistPlanReport,
 } from "./project_plan.js";
 
 export interface CliIO {
@@ -2199,6 +2204,199 @@ async function runOverseerPlanTaskHandoff(args: string[], io: CliIO): Promise<nu
   return 0;
 }
 
+/**
+ * `relayos overseer plan-report <plan_id>`
+ * Builds a report from plan + handoff_results.jsonl and emits a sentinel.
+ * Emits: `@@RELAYOS_PLAN_REPORT@@ <json without markdown>`
+ */
+async function runOverseerPlanReport(args: string[], io: CliIO): Promise<number> {
+  const [planId] = args;
+  if (!planId) {
+    io.stderr.write("Usage: relayos overseer plan-report <plan_id>\n");
+    return 1;
+  }
+  const layout = resolveOverseerLayout(process.cwd());
+  const plan = loadProjectPlan(layout, planId);
+  if (!plan) {
+    io.stderr.write(`Plan ${planId} not found\n`);
+    return 1;
+  }
+  const report = buildPlanReport(layout, plan);
+  persistPlanReport(layout, planId, report);
+  const { markdown: _md, ...sentinelData } = report;
+  io.stdout.write(`@@RELAYOS_PLAN_REPORT@@ ${JSON.stringify(sentinelData)}\n`);
+  return 0;
+}
+
+const MAX_TASK_RETRIES = 2;
+
+/**
+ * `relayos overseer plan-execute-task <plan_id> <task_id>`
+ * Creates a handoff for the task, executes it, and retries on failure (up to 2 times).
+ * Emits: `@@RELAYOS_TASK_RESULT@@ {"plan_id","task_id","status","handoff_id","exit_code","retries","error_summary"}`
+ */
+async function runOverseerPlanExecuteTask(args: string[], io: CliIO): Promise<number> {
+  const planId = args[0];
+  const taskId = args[1];
+  if (!planId || !taskId) {
+    io.stderr.write("Usage: relayos overseer plan-execute-task <plan_id> <task_id>\n");
+    return 1;
+  }
+
+  const overseerLayout = resolveOverseerLayout(process.cwd());
+  const plan = loadProjectPlan(overseerLayout, planId);
+  if (!plan) {
+    io.stderr.write(`Plan not found: ${planId}\n`);
+    return 1;
+  }
+
+  const task = plan.tasks.find((t) => t.id === taskId);
+  if (!task) {
+    io.stderr.write(`Task not found: ${taskId} in plan ${planId}\n`);
+    return 1;
+  }
+
+  const storageLayout = resolveStorageLayout();
+  const audit = createAuditWriter(storageLayout);
+  const cwd = process.cwd();
+
+  /** Execute a single handoff and return exit code. */
+  async function executeHandoffById(handoffId: string): Promise<number> {
+    const envelopePath = join(storageLayout.envelopesDir, `${handoffId}.json`);
+    if (!existsSync(envelopePath)) return 1;
+
+    const envelope = JSON.parse(readFileSync(envelopePath, "utf8")) as Envelope;
+    if (envelope.status !== "recorded") return 1;
+
+    const triedTargets = new Set<string>();
+    const attempts: Array<{ target: "codex" | "claude"; launchCommand: string }> = [];
+    const addAttempt = (rawTarget: string): void => {
+      const target = rawTarget.trim().toLowerCase();
+      if (target !== "codex" && target !== "claude") return;
+      if (triedTargets.has(target)) return;
+      triedTargets.add(target);
+      if (target === envelope.target_agent) {
+        attempts.push({ target, launchCommand: envelope.launch_command });
+        return;
+      }
+      const swapped: Envelope = { ...envelope, target_agent: target };
+      const rendered = target === "codex" ? renderCodexTarget(swapped) : renderClaudeTarget(swapped);
+      attempts.push({ target, launchCommand: rendered.launch_command });
+    };
+    addAttempt(envelope.target_agent);
+    try {
+      const cfg = loadProjectConfig({ cwd: process.cwd() }).config;
+      const providers = cfg.overseer?.providers;
+      const backups = cfg.overseer?.backup_providers ?? [];
+      if (Array.isArray(providers)) {
+        for (const id of backups) {
+          const entry = providers.find((p: { id: string; name: string }) => p.id === id);
+          if (entry) addAttempt(entry.name);
+        }
+      }
+    } catch { /* config unavailable */ }
+
+    const spawningEnvelope: Envelope = { ...envelope, status: "spawning", updated_at: new Date().toISOString() };
+    writeFileSync(envelopePath, `${JSON.stringify(spawningEnvelope, null, 2)}\n`, "utf8");
+
+    let spawnResult: SpawnResult | null = null;
+    let ranTarget: "codex" | "claude" | null = null;
+
+    for (const attempt of attempts) {
+      let detection: Awaited<ReturnType<typeof detectCli>>;
+      try { detection = await detectCli(attempt.target); } catch { continue; }
+      if (!detection.found || !detection.resolved_path) continue;
+      try {
+        const sr = await runTarget({
+          layout: storageLayout,
+          handoffId,
+          binary: detection.resolved_path,
+          argv: parseArgv(attempt.launchCommand),
+          workingDir: envelope.working_dir,
+        });
+        spawnResult = sr;
+        ranTarget = attempt.target;
+        if (sr.exit_code === 0) break;
+      } catch { /* try next */ }
+    }
+
+    if (!spawnResult || ranTarget == null) {
+      const failedEnvelope: Envelope = { ...spawningEnvelope, status: "failed", updated_at: new Date().toISOString() };
+      writeFileSync(envelopePath, `${JSON.stringify(failedEnvelope, null, 2)}\n`, "utf8");
+      return 1;
+    }
+
+    const finalStatus = spawnResult.exit_code === 0 ? "completed" : "failed";
+    const finalEnvelope: Envelope = {
+      ...spawningEnvelope,
+      target_agent: ranTarget,
+      status: finalStatus,
+      updated_at: new Date().toISOString(),
+      spawn: spawnResult,
+    };
+    writeFileSync(envelopePath, `${JSON.stringify(finalEnvelope, null, 2)}\n`, "utf8");
+    await appendHandoffResult(overseerLayout, {
+      run_id: handoffId,
+      status: finalStatus as OverseerHandoffResultStatus,
+      summary: `${ranTarget} execution ${finalStatus} for handoff ${handoffId}`,
+      test_result: `exit_code=${spawnResult.exit_code}`,
+    });
+
+    return spawnResult.exit_code;
+  }
+
+  // Create the initial handoff
+  const initialInput = buildTaskHandoffInput(task, plan, cwd);
+  const initialResult = await createHandoff(initialInput, { layout: storageLayout, audit });
+  const initialHandoffId = initialResult.handoff_id;
+
+  updatePlanTaskStatus(overseerLayout, planId, taskId, "running", initialHandoffId);
+
+  io.stdout.write(`Executing task [${taskId}]: ${task.title} (handoff: ${initialHandoffId})\n`);
+  let exitCode = await executeHandoffById(initialHandoffId);
+  let currentHandoffId = initialHandoffId;
+  let retries = 0;
+  let errorSummary = "";
+
+  while (exitCode !== 0 && retries < MAX_TASK_RETRIES) {
+    retries += 1;
+    errorSummary = getTaskErrorContext(storageLayout, currentHandoffId);
+    io.stdout.write(`Task [${taskId}] failed (attempt ${retries}/${MAX_TASK_RETRIES}), retrying…\n`);
+
+    const fixInput = buildFixHandoffInput(task, plan, cwd, currentHandoffId, errorSummary, retries);
+    const fixResult = await createHandoff(fixInput, { layout: storageLayout, audit });
+    currentHandoffId = fixResult.handoff_id;
+
+    updatePlanTaskStatus(overseerLayout, planId, taskId, "running", currentHandoffId);
+    updatePlanTaskRetryCount(overseerLayout, planId, taskId, retries);
+
+    exitCode = await executeHandoffById(currentHandoffId);
+  }
+
+  const finalTaskStatus = exitCode === 0 ? "completed" : "blocked";
+  if (exitCode !== 0) {
+    errorSummary = getTaskErrorContext(storageLayout, currentHandoffId);
+  }
+
+  updatePlanTaskStatus(overseerLayout, planId, taskId, finalTaskStatus, currentHandoffId);
+  updatePlanTaskRetryCount(overseerLayout, planId, taskId, retries);
+
+  const resultPayload = {
+    plan_id: planId,
+    task_id: taskId,
+    status: finalTaskStatus,
+    handoff_id: currentHandoffId,
+    exit_code: exitCode,
+    retries,
+    error_summary: errorSummary ? errorSummary.slice(0, 500) : "",
+  };
+
+  io.stdout.write("@@RELAYOS_TASK_RESULT@@ " + JSON.stringify(resultPayload) + "\n");
+  io.stdout.write(`Task [${taskId}] ${finalTaskStatus}. Retries: ${retries}. Handoff: ${currentHandoffId}\n`);
+
+  return finalTaskStatus === "completed" ? 0 : 1;
+}
+
 async function runOverseerHandoffResult(args: string[], io: CliIO): Promise<number> {
   const [sub, ...rest] = args;
   if (sub === "add") {
@@ -2710,6 +2908,8 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "plan-extract") return runOverseerPlanExtract(rest, io);
   if (sub === "plan-answer") return runOverseerPlanAnswer(rest, io);
   if (sub === "plan-task-handoff") return runOverseerPlanTaskHandoff(rest, io);
+  if (sub === "plan-execute-task") return runOverseerPlanExecuteTask(rest, io);
+  if (sub === "plan-report") return runOverseerPlanReport(rest, io);
   if (sub === "next") return runOverseerNext(rest, io);
   if (sub === "start") return runOverseerStart(rest, io);
   if (sub === "mode") return runOverseerMode(rest, io);
@@ -2723,11 +2923,12 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "branch") return runOverseerBranch(rest, io);
   if (sub === "progress") return runOverseerProgress(rest, io);
   io.stderr.write(
-    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|capabilities|summary|memory-index|doctor|role-profile|wake-instructions|init|note|decision|decisions|handoff-result|handoff-results|execute-handoff|plan-extract|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n" +
+    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|capabilities|summary|memory-index|doctor|role-profile|wake-instructions|init|note|decision|decisions|handoff-result|handoff-results|execute-handoff|plan-extract|plan-answer|plan-task-handoff|plan-execute-task|plan-report|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n" +
       "  overseer execute-handoff <id>   launch Codex for a recorded handoff and capture result\n" +
       "  overseer plan-extract <id>              parse the PROJECT_PLAN block from a completed plan handoff\n" +
       "  overseer plan-answer <plan_id> <text>   append an answer to an open plan\n" +
       "  overseer plan-task-handoff <plan_id> <task_id>  create a handoff envelope for one task\n" +
+      "  overseer plan-execute-task <plan_id> <task_id>  create + execute a task handoff with up to 2 fix retries\n" +
       "  overseer execute-handoff --dry-run <id>         print launch_command without executing\n",
   );
   return 1;

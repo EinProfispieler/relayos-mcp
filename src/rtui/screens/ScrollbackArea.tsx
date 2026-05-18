@@ -2,6 +2,7 @@ import { Box, Static, Text } from "ink";
 import type { ScrollbackItem } from "../state/types.js";
 import { colors } from "../theme/colors.js";
 import { PlanSummary } from "./PlanSummary.js";
+import { PlanReport } from "./PlanReport.js";
 
 interface Props {
   items: ScrollbackItem[];
@@ -45,6 +46,8 @@ function ItemRow({ item }: { item: ScrollbackItem }) {
     }
     case "plan_summary":
       return <PlanSummary plan={item.plan} />;
+    case "plan_report":
+      return <PlanReport data={item.data} />;
     case "divider":
       return <Text color={colors.dim}>{"─".repeat(60)}</Text>;
   }

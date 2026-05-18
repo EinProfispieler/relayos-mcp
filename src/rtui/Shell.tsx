@@ -12,7 +12,7 @@ import { WelcomeBanner } from "./screens/WelcomeBanner.js";
 import { SettingsPanel } from "./screens/SettingsPanel.js";
 import { SetupWizard } from "./screens/SetupWizard.js";
 import { runCliCommand } from "./commands/runner.js";
-import type { PendingHandoff, ProjectPlanView, ScrollbackItem } from "./state/types.js";
+import type { PendingHandoff, PlanReportData, ProjectPlanView, ScrollbackItem } from "./state/types.js";
 import { runChatTurn, type ChatTurnResult, type ChatTurnIO } from "../chat.js";
 import { loadProjectConfig } from "../config.js";
 
@@ -187,6 +187,22 @@ export function Shell() {
       if (!task) {
         dispatch({ type: "STATUS_SET", status: "idle" });
         appendNote(dispatch, "All plan tasks dispatched.");
+        // Generate plan report
+        const reportLines: string[] = [];
+        await runCliCommand({
+          commandName: "plan-report",
+          argv: ["overseer", "plan-report", planId],
+          dispatch: (a) => { if (a.type === "CLI_OUTPUT_LINE") reportLines.push(a.line); },
+        });
+        const reportSentinel = reportLines.find((l) => l.startsWith("@@RELAYOS_PLAN_REPORT@@ "));
+        if (reportSentinel) {
+          try {
+            const reportData = JSON.parse(reportSentinel.slice("@@RELAYOS_PLAN_REPORT@@ ".length)) as PlanReportData;
+            dispatch({ type: "SCROLLBACK_APPEND", item: { id: genId(), type: "plan_report", data: reportData } });
+          } catch {
+            // silently skip bad report data
+          }
+        }
         return;
       }
 
@@ -228,14 +244,45 @@ export function Shell() {
         return; // Stop — user will /approve then /proceed again
       }
 
-      // In build mode: auto-execute
+      // In build mode: auto-execute with retry loop via plan-execute-task
       appendNote(dispatch, `Build mode: executing task [${task.id}]…`);
+      const execLines: string[] = [];
       await runCliCommand({
         commandName: `execute-task-${task.id}`,
-        argv: ["overseer", "execute-handoff", taskData.handoff_id],
-        dispatch,
+        argv: ["overseer", "plan-execute-task", planId, task.id],
+        dispatch: (action) => {
+          if (action.type === "CLI_OUTPUT_LINE") execLines.push(action.line);
+          else dispatch(action);
+        },
       });
-      dispatch({ type: "PROJECT_PLAN_TASK_UPDATE", taskId: task.id, status: "completed" });
+      // Parse result sentinel if present
+      const resultSentinel = execLines.find((l) => l.startsWith("@@RELAYOS_TASK_RESULT@@ "));
+      if (resultSentinel) {
+        try {
+          const resultData = JSON.parse(resultSentinel.slice("@@RELAYOS_TASK_RESULT@@ ".length)) as {
+            plan_id: string;
+            task_id: string;
+            status: string;
+            handoff_id: string;
+            exit_code: number;
+            retries: number;
+            error_summary: string;
+          };
+          dispatch({
+            type: "PROJECT_PLAN_TASK_UPDATE",
+            taskId: task.id,
+            status: resultData.status,
+            handoffId: resultData.handoff_id,
+          });
+          if (resultData.status === "blocked") {
+            appendNote(dispatch, `Task [${task.id}] blocked after ${resultData.retries} retries.`);
+          }
+        } catch {
+          dispatch({ type: "PROJECT_PLAN_TASK_UPDATE", taskId: task.id, status: "completed" });
+        }
+      } else {
+        dispatch({ type: "PROJECT_PLAN_TASK_UPDATE", taskId: task.id, status: "completed" });
+      }
 
       await runNext(tasks.slice(1));
     };

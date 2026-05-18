@@ -9,6 +9,7 @@ import {
   type ProjectPlanTask as ProjectPlanTaskT,
 } from "./schema.js";
 import type { OverseerLayout } from "./overseer.js";
+import { stdoutLogPath, stderrLogPath, type StorageLayout } from "./storage.js";
 
 const BLOCK_START = "PROJECT_PLAN";
 const BLOCK_END = "END_PROJECT_PLAN";
@@ -210,6 +211,80 @@ export function updatePlanTaskStatus(
   return updated;
 }
 
+/** Update retry_count on a task in a persisted plan. */
+export function updatePlanTaskRetryCount(
+  layout: OverseerLayout,
+  planId: string,
+  taskId: string,
+  retryCount: number,
+): ProjectPlanT | null {
+  const plan = loadProjectPlan(layout, planId);
+  if (!plan) return null;
+  const tasks = plan.tasks.map((t) =>
+    t.id === taskId ? { ...t, retry_count: retryCount } : t,
+  );
+  const updated = { ...plan, tasks };
+  persistProjectPlan(layout, updated);
+  return updated;
+}
+
+/**
+ * Read stdout + stderr tails from a handoff's log files.
+ * Caps combined output to ~2000 chars.
+ */
+export function getTaskErrorContext(layout: StorageLayout, handoffId: string): string {
+  const CAP = 2000;
+  const parts: string[] = [];
+
+  const outPath = stdoutLogPath(layout, handoffId);
+  if (existsSync(outPath)) {
+    const content = readFileSync(outPath, "utf8");
+    const tail = content.length > CAP ? `…(truncated)\n${content.slice(-CAP)}` : content;
+    if (tail.trim().length > 0) parts.push(`--- stdout ---\n${tail}`);
+  }
+
+  const errPath = stderrLogPath(layout, handoffId);
+  if (existsSync(errPath)) {
+    const content = readFileSync(errPath, "utf8");
+    const tail = content.length > CAP ? `…(truncated)\n${content.slice(-CAP)}` : content;
+    if (tail.trim().length > 0) parts.push(`--- stderr ---\n${tail}`);
+  }
+
+  const combined = parts.join("\n");
+  return combined.length > CAP * 2 ? combined.slice(-(CAP * 2)) : combined;
+}
+
+/**
+ * Like buildTaskHandoffInput but prepends the prior attempt's error context.
+ */
+export function buildFixHandoffInput(
+  task: ProjectPlanTaskT,
+  plan: ProjectPlanT,
+  cwd: string,
+  originalHandoffId: string,
+  errorContext: string,
+  attemptNum: number,
+): HandoffInput {
+  const base = buildTaskHandoffInput(task, plan, cwd);
+
+  const fixPrefix = [
+    `[Fix attempt ${attemptNum} for task ${task.id}]`,
+    `Previous handoff: ${originalHandoffId}`,
+    ``,
+    `Error context from previous run:`,
+    errorContext || "(no output captured)",
+    ``,
+    `Please diagnose the failure above and fix it.`,
+    ``,
+  ].join("\n");
+
+  return {
+    ...base,
+    task_title: `[fix-${attemptNum}] ${base.task_title}`,
+    task_description: fixPrefix + base.task_description,
+  };
+}
+
 /**
  * Build a HandoffInput from a ProjectPlanTask + plan context.
  * The task already carries all routing data — no re-routing is needed.
@@ -250,4 +325,139 @@ export function buildTaskHandoffInput(
     working_dir: cwd,
     auto_spawn: false,
   };
+}
+
+// ── Plan Report ──────────────────────────────────────────────────────────────
+
+export interface PlanReportData {
+  plan_id: string;
+  goal: string;
+  generated_at: string;
+  summary: {
+    total: number;
+    completed: number;
+    failed: number;
+    blocked: number;
+    pending: number;
+  };
+  tasks: Array<{
+    id: string;
+    title: string;
+    status: string;
+    handoff_id?: string;
+    result_summary?: string;
+    test_result?: string;
+    needs_review?: boolean;
+    blockers?: string[];
+  }>;
+  markdown: string;
+}
+
+interface HandoffResult {
+  run_id: string;
+  status: string;
+  summary?: string;
+  test_result?: string;
+  needs_review?: boolean;
+  blockers?: string[];
+}
+
+function readHandoffResults(layout: OverseerLayout): Map<string, HandoffResult> {
+  const path = join(layout.dir, "handoff_results.jsonl");
+  const map = new Map<string, HandoffResult>();
+  if (!existsSync(path)) return map;
+  try {
+    const lines = readFileSync(path, "utf8").split("\n").filter((l) => l.trim().length > 0);
+    for (const line of lines) {
+      try {
+        const r = JSON.parse(line) as HandoffResult;
+        if (r.run_id) map.set(r.run_id, r);
+      } catch {
+        // skip malformed lines
+      }
+    }
+  } catch {
+    // ignore read errors
+  }
+  return map;
+}
+
+export function buildPlanReport(layout: OverseerLayout, plan: ProjectPlanT): PlanReportData {
+  const results = readHandoffResults(layout);
+  const generated_at = new Date().toISOString();
+
+  const tasks: PlanReportData["tasks"] = plan.tasks.map((t) => {
+    const result = t.handoff_id ? results.get(t.handoff_id) : undefined;
+    return {
+      id: t.id,
+      title: t.title,
+      status: t.status,
+      handoff_id: t.handoff_id,
+      result_summary: result?.summary,
+      test_result: result?.test_result,
+      needs_review: result?.needs_review,
+      blockers: result?.blockers,
+    };
+  });
+
+  const summary = {
+    total: tasks.length,
+    completed: tasks.filter((t) => t.status === "completed").length,
+    failed: tasks.filter((t) => t.status === "failed").length,
+    blocked: tasks.filter((t) => t.status === "blocked").length,
+    pending: tasks.filter((t) => t.status === "pending" || t.status === "running").length,
+  };
+
+  // Build markdown
+  const mdLines: string[] = [];
+  mdLines.push(`# Plan Report: ${plan.plan_id}`);
+  mdLines.push(``);
+  mdLines.push(`**Goal:** ${plan.goal}`);
+  mdLines.push(`**Generated:** ${generated_at}`);
+  mdLines.push(``);
+  mdLines.push(`## Summary`);
+  mdLines.push(``);
+  mdLines.push(`- Total: ${summary.total}`);
+  mdLines.push(`- Completed: ${summary.completed}`);
+  if (summary.failed > 0) mdLines.push(`- Failed: ${summary.failed}`);
+  if (summary.blocked > 0) mdLines.push(`- Blocked: ${summary.blocked}`);
+  if (summary.pending > 0) mdLines.push(`- Pending/Running: ${summary.pending}`);
+  mdLines.push(``);
+  mdLines.push(`## Tasks`);
+  mdLines.push(``);
+  mdLines.push(`| ID | Title | Status | Summary |`);
+  mdLines.push(`|----|-------|--------|---------|`);
+  for (const t of tasks) {
+    const summary_col = t.result_summary ?? "";
+    mdLines.push(`| ${t.id} | ${t.title} | ${t.status} | ${summary_col} |`);
+  }
+
+  if (plan.questions.length > 0) {
+    mdLines.push(``);
+    mdLines.push(`## Questions & Answers`);
+    mdLines.push(``);
+    plan.questions.forEach((q, i) => {
+      mdLines.push(`**Q${i + 1}:** ${q}`);
+      const a = plan.answers[i];
+      if (a) mdLines.push(`**A${i + 1}:** ${a}`);
+      mdLines.push(``);
+    });
+  }
+
+  const markdown = mdLines.join("\n");
+
+  return {
+    plan_id: plan.plan_id,
+    goal: plan.goal,
+    generated_at,
+    summary,
+    tasks,
+    markdown,
+  };
+}
+
+export function persistPlanReport(layout: OverseerLayout, plan_id: string, report: PlanReportData): void {
+  mkdirSync(layout.plansDir, { recursive: true });
+  const path = join(layout.plansDir, `${plan_id}.report.md`);
+  writeFileSync(path, report.markdown, "utf8");
 }

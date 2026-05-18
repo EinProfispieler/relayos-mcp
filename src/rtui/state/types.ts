@@ -1,3 +1,7 @@
+import type { PlanReportData } from "../../project_plan.js";
+
+export type { PlanReportData };
+
 export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
 
 export type Status =
@@ -47,6 +51,7 @@ export type ScrollbackItem =
   | { id: string; type: "timing_note"; ms: number }
   | { id: string; type: "error"; text: string }
   | { id: string; type: "plan_summary"; plan: ProjectPlanView }
+  | { id: string; type: "plan_report"; data: PlanReportData }
   | { id: string; type: "divider" };
 
 export interface LiveState {
