@@ -77,8 +77,8 @@ describe("chat /approve helpers", () => {
     expect(built.target_agent).toBe("codex");
     expect(built.execution_mode).toBe("patch");
     expect(built.auto_spawn).toBe(false);
-    expect(built.model).toBe("gpt-5.3-codex");
-    expect(built.effort).toBe("medium");
+    expect(built.model).toBe("gpt-5.5");
+    expect(built.effort).toBe("high");
     expect(built.task_title.length).toBeLessThanOrEqual(80);
     expect(built.expected_output).toEqual(["Patch applied", "Tests pass"]);
     expect(built.task_description).toContain("Original user message:");

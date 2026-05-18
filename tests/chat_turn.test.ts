@@ -60,6 +60,19 @@ mode: patch
 approval_required: true
 END_ACTION_INTENT`;
 
+const REVIEW_REPLY = `I'll review that module.
+
+ACTION_INTENT
+intent_type: review
+confidence: 0.9
+summary: review the auth module for issues
+target: claude
+model: claude-sonnet-4-6
+effort: medium
+mode: review
+approval_required: false
+END_ACTION_INTENT`;
+
 const CONVO_REPLY = "Hello! How can I help you today?";
 
 describe("runChatTurn", () => {
@@ -123,6 +136,21 @@ describe("runChatTurn", () => {
     expect(r.needs_approval).toBe(false);
     expect(r.ai_plan).not.toBeNull();
     expect(r.action_proposal?.action).toBe("create_handoff");
+  });
+
+  it("review intent — handoff targets claude in review mode", async () => {
+    const { io, getSentinel } = makeIO();
+    await runChatTurn(
+      "review the auth module",
+      io,
+      { conversation: stubConversation({ "review the auth module": REVIEW_REPLY }) },
+    );
+    const r = getSentinel()!;
+    expect(r.handoff_id).toMatch(/^h_/);
+    expect(r.action_proposal?.action).toBe("create_handoff");
+    expect(r.action_proposal?.target).toBe("claude");
+    expect(r.action_proposal?.mode).toBe("review");
+    expect(r.needs_approval).toBe(false);
   });
 
   it("release/approval_required message — needs_approval true, no auto-execute handoff", async () => {

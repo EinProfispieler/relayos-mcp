@@ -16,6 +16,9 @@ import {
   type AIRoutingPlan,
   ActionIntentBlock,
   type ActionIntentBlock as ActionIntentBlockType,
+  type Effort,
+  type ExecutionMode,
+  type RelayConfig,
 } from "./schema.js";
 import { type RouteDecision } from "./router.js";
 import { buildActionProposal, type ActionProposal } from "./action_dispatch.js";
@@ -85,19 +88,82 @@ function toTaskTitle(message: string): string {
   return cleaned.slice(0, 80) || "Untitled task";
 }
 
-export function buildHandoffInputFromPending(pending: PendingActionProposal): {
+const EFFORT_VALUES: readonly Effort[] = ["low", "medium", "high", "xhigh", "max"];
+function asEffort(value: string | undefined): Effort | null {
+  return value != null && (EFFORT_VALUES as readonly string[]).includes(value)
+    ? (value as Effort)
+    : null;
+}
+
+/** Map an action-proposal mode to a handoff execution_mode. */
+function modeToExecutionMode(mode: string | undefined): ExecutionMode {
+  switch (mode) {
+    case "review":
+      return "review";
+    case "plan":
+      return "plan";
+    case "test":
+      return "test";
+    case "read_only":
+      return "read_only";
+    default:
+      return "patch";
+  }
+}
+
+/**
+ * Resolve model + effort for a target agent. The user-configured provider entry
+ * in `overseer.providers[]` wins for the model; the AI-proposed effort wins when
+ * valid; model_profiles supplies the final fallback.
+ */
+function resolveProviderProfile(
+  cfg: RelayConfig | undefined,
+  target: "codex" | "claude",
+): { model: string; effort: Effort } {
+  const profiles = resolveModelProfiles(cfg);
+  const fallback: { model: string; effort: Effort } =
+    target === "codex"
+      ? { model: profiles.codexModel, effort: profiles.codexEffort }
+      : { model: profiles.claudeModel, effort: profiles.claudeEffort };
+  const providers = cfg?.overseer?.providers;
+  const entry = Array.isArray(providers)
+    ? providers.find((p) => p.name.trim().toLowerCase() === target)
+    : undefined;
+  if (!entry) return fallback;
+  return {
+    model: entry.model || fallback.model,
+    effort: asEffort(entry.effort) ?? fallback.effort,
+  };
+}
+
+export function buildHandoffInputFromPending(
+  pending: PendingActionProposal,
+  cfg?: RelayConfig,
+): {
   source_agent: "claude";
-  target_agent: "codex";
+  target_agent: "codex" | "claude";
   model: string;
-  effort: "low" | "medium" | "high";
-  execution_mode: "patch";
+  effort: Effort;
+  execution_mode: ExecutionMode;
   task_title: string;
   task_description: string;
   expected_output: string[];
   auto_spawn: false;
 } {
-  const model = pending.actionProposal.model || "gpt-5.3-codex";
-  const effort = (pending.actionProposal.effort || "medium") as "low" | "medium" | "high";
+  const proposalTarget = pending.actionProposal.target;
+  const target: "codex" | "claude" =
+    proposalTarget === "claude" ? "claude" : "codex";
+  const executionMode = modeToExecutionMode(pending.actionProposal.mode);
+
+  const profile = resolveProviderProfile(cfg, target);
+  const model = pending.actionProposal.model || profile.model;
+  const effort: Effort = asEffort(pending.actionProposal.effort) ?? profile.effort;
+
+  const isWriteMode = executionMode === "patch" || executionMode === "test";
+  const expected_output = isWriteMode
+    ? ["Patch applied", "Tests pass"]
+    : ["Findings summarized; no files modified"];
+
   const proposalLines = [
     `action: ${pending.actionProposal.action}`,
     `target: ${pending.actionProposal.target ?? "n/a"}`,
@@ -109,10 +175,10 @@ export function buildHandoffInputFromPending(pending: PendingActionProposal): {
 
   return {
     source_agent: "claude",
-    target_agent: "codex",
+    target_agent: target,
     model,
     effort,
-    execution_mode: "patch",
+    execution_mode: executionMode,
     task_title: toTaskTitle(pending.originalMessage),
     task_description: [
       "Original user message:",
@@ -130,20 +196,9 @@ export function buildHandoffInputFromPending(pending: PendingActionProposal): {
       "Action proposal:",
       ...proposalLines,
     ].join("\n"),
-    expected_output: ["Patch applied", "Tests pass"],
+    expected_output,
     auto_spawn: false,
   };
-}
-
-function buildHandoffInputFromPendingWithProfiles(
-  pending: PendingActionProposal,
-  codexModel: string,
-  codexEffort: "low" | "medium" | "high",
-) {
-  const base = buildHandoffInputFromPending(pending);
-  const model = pending.actionProposal.model || codexModel;
-  const effort = (pending.actionProposal.effort || codexEffort) as "low" | "medium" | "high";
-  return { ...base, model, effort };
 }
 
 const CHAT_USAGE = "usage: relayos chat\n";
@@ -592,11 +647,9 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
       }
 
       const loadedForProfiles = loadProjectConfig({ cwd: process.cwd() });
-      const profiles = resolveModelProfiles(loadedForProfiles.config);
-      const handoffInput = buildHandoffInputFromPendingWithProfiles(
+      const handoffInput = buildHandoffInputFromPending(
         pendingProposal!,
-        profiles.codexModel,
-        profiles.codexEffort,
+        loadedForProfiles.config,
       );
       const storageLayout = resolveStorageLayout();
       await ensureStorage(storageLayout);
@@ -876,12 +929,7 @@ export async function runChatTurn(
   let handoffTitle: string | null = null;
 
   try {
-    const profiles = resolveModelProfiles(loaded.config);
-    const handoffInput = buildHandoffInputFromPendingWithProfiles(
-      pending,
-      profiles.codexModel,
-      profiles.codexEffort,
-    );
+    const handoffInput = buildHandoffInputFromPending(pending, loaded.config);
     const storageLayout = resolveStorageLayout();
     await ensureStorage(storageLayout);
     const audit = createAuditWriter(storageLayout);

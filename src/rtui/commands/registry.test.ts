@@ -10,6 +10,7 @@ describe("SLASH_COMMANDS registry", () => {
       "/next",
       "/results",
       "/settings",
+      "/setup",
       "/exit",
       "/approve",
       "/run",

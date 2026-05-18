@@ -14,6 +14,11 @@ function looksLikeReleaseControl(nextAction: string): boolean {
   return /(commit|push|tag|release)/i.test(nextAction);
 }
 
+/** Resolve the planner's target to a dispatchable agent, with a per-role default. */
+function resolveTargetAgent(planTarget: string, fallback: "codex" | "claude"): "codex" | "claude" {
+  return planTarget === "codex" || planTarget === "claude" ? planTarget : fallback;
+}
+
 export function buildActionProposal(plan: AIRoutingPlan): ActionProposal {
   if (plan.task_type === "release_control" || plan.task_type === "release" || looksLikeReleaseControl(plan.next_action)) {
     return {
@@ -39,7 +44,7 @@ export function buildActionProposal(plan: AIRoutingPlan): ActionProposal {
   if (plan.task_type === "implementation") {
     return {
       action: "create_handoff",
-      target: "codex",
+      target: resolveTargetAgent(plan.target, "codex"),
       model: plan.model,
       effort: plan.effort,
       mode: plan.mode,
@@ -50,11 +55,11 @@ export function buildActionProposal(plan: AIRoutingPlan): ActionProposal {
 
   if (plan.task_type === "review") {
     return {
-      action: "review_request",
-      target: "claude",
+      action: "create_handoff",
+      target: resolveTargetAgent(plan.target, "claude"),
       model: plan.model,
       effort: plan.effort,
-      mode: "read_only",
+      mode: "review",
       approval_required: false,
       status: "not_executed",
     };

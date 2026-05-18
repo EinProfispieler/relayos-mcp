@@ -186,7 +186,8 @@ describe("relayos overseer execute-handoff", () => {
     const cap = captureIO();
     const code = await runCli(["overseer", "execute-handoff", "h_detect_throw"], cap.io);
     expect(code).toBe(1);
-    expect(cap.stderr).toContain("Failed to detect CLI");
+    expect(cap.stderr).toContain("Failed to execute handoff");
+    expect(cap.stderr).toContain("CLI detection error");
     expect(cap.stderr).toContain("boom");
   });
 
@@ -369,5 +370,91 @@ describe("relayos overseer execute-handoff", () => {
       );
     const record = results.find((entry) => entry.run_id === "h_claude");
     expect(record?.summary).toBe("claude execution completed for handoff h_claude");
+  });
+
+  function writeFullEnvelope(id: string, targetAgent: "codex" | "claude") {
+    writeEnvelope(id, {
+      id,
+      created_at: "2026-05-15T00:00:00.000Z",
+      updated_at: "2026-05-15T00:00:00.000Z",
+      status: "recorded",
+      source_agent: "claude",
+      target_agent: targetAgent,
+      model: "gpt-5.5",
+      effort: "medium",
+      execution_mode: "patch",
+      task_title: "demo task",
+      task_description: "do the thing",
+      allowed_files: [],
+      forbidden_files: [],
+      constraints: [],
+      expected_output: ["Patch applied"],
+      auto_spawn: false,
+      launch_command: `${targetAgent} exec 'go'`,
+      audit_metadata: {
+        tags: [],
+        event_count: 0,
+        last_event_ts: "2026-05-15T00:00:00.000Z",
+        cli_detection: { target_binary: targetAgent, found: true },
+        enforcement_notes: [],
+      },
+    });
+  }
+
+  function writeFailoverConfig() {
+    mkdirSync(join(testRoot, ".relayos"), { recursive: true });
+    writeFileSync(
+      join(testRoot, ".relayos", "config.json"),
+      JSON.stringify({
+        overseer: {
+          providers: [
+            { id: "p1", name: "codex", kind: "subscription_cli", model: "gpt-5.5" },
+            { id: "p2", name: "claude", kind: "subscription_cli", model: "claude-sonnet-4-6" },
+          ],
+          primary_provider: "p1",
+          backup_providers: ["p2"],
+        },
+      }),
+      "utf8",
+    );
+  }
+
+  it("fails over to a backup provider when the primary CLI is missing", async () => {
+    writeFullEnvelope("h_failover", "codex");
+    writeFailoverConfig();
+    detectCliMock.mockImplementation(async (binary: string) =>
+      binary === "claude"
+        ? { target_binary: "claude", found: true, resolved_path: "/usr/local/bin/claude" }
+        : { target_binary: "codex", found: false },
+    );
+    runTargetMock.mockResolvedValue({
+      started_at: "2026-05-15T00:00:00.000Z",
+      finished_at: "2026-05-15T00:00:01.000Z",
+      exit_code: 0,
+      duration_ms: 1000,
+      stdout_tail: "ok",
+      stderr_tail: "",
+    });
+
+    const cap = captureIO();
+    const code = await runCli(["overseer", "execute-handoff", "h_failover"], cap.io);
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain('failing over to "claude"');
+    expect(cap.stdout).toContain("Provider: claude (failed over from codex)");
+    expect(runTargetMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails when the primary and all backup providers are missing", async () => {
+    writeFullEnvelope("h_allfail", "codex");
+    writeFailoverConfig();
+    detectCliMock.mockResolvedValue({ target_binary: "codex", found: false });
+
+    const cap = captureIO();
+    const code = await runCli(["overseer", "execute-handoff", "h_allfail"], cap.io);
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("Failed to execute handoff");
+    expect(cap.stderr).toContain("codex: CLI binary not found");
+    expect(cap.stderr).toContain("claude: CLI binary not found");
+    expect(runTargetMock).not.toHaveBeenCalled();
   });
 });

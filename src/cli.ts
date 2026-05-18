@@ -64,6 +64,8 @@ import { runProviderSetupWizard, runSettingsWizard } from "./settings.js";
 import { planRouteFromActionIntent } from "./ai_planner.js";
 import { buildActionProposal } from "./action_dispatch.js";
 import { detectCli, runTarget } from "./spawn/index.js";
+import { renderCodexTarget } from "./render/codex.js";
+import { renderClaudeTarget } from "./render/claude.js";
 import { evaluatePolicy, formatBannerLines } from "./policy.js";
 import type { Envelope, SpawnResult } from "./schema.js";
 import { ensureStorage, resolveStorageLayout } from "./storage.js";
@@ -1940,17 +1942,37 @@ async function runOverseerExecuteHandoff(args: string[], io: CliIO): Promise<num
     return 0;
   }
 
-  let detection: Awaited<ReturnType<typeof detectCli>>;
+  // Build the ordered failover attempt list: the envelope's own target first,
+  // then any distinct codex/claude provider resolved from backup_providers.
+  const triedTargets = new Set<string>();
+  const attempts: Array<{ target: "codex" | "claude"; launchCommand: string }> = [];
+  const addAttempt = (rawTarget: string): void => {
+    const target = rawTarget.trim().toLowerCase();
+    if (target !== "codex" && target !== "claude") return;
+    if (triedTargets.has(target)) return;
+    triedTargets.add(target);
+    if (target === envelope.target_agent) {
+      attempts.push({ target, launchCommand: envelope.launch_command });
+      return;
+    }
+    const swapped: Envelope = { ...envelope, target_agent: target };
+    const rendered =
+      target === "codex" ? renderCodexTarget(swapped) : renderClaudeTarget(swapped);
+    attempts.push({ target, launchCommand: rendered.launch_command });
+  };
+  addAttempt(envelope.target_agent);
   try {
-    detection = await detectCli(envelope.target_agent);
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    io.stderr.write(`Failed to detect CLI for "${envelope.target_agent}": ${errMsg}\n`);
-    return 1;
-  }
-  if (!detection.found || !detection.resolved_path) {
-    io.stderr.write(`CLI binary for "${envelope.target_agent}" not found. Is it installed and on PATH?\n`);
-    return 1;
+    const cfg = loadProjectConfig({ cwd: process.cwd() }).config;
+    const providers = cfg.overseer?.providers;
+    const backups = cfg.overseer?.backup_providers ?? [];
+    if (Array.isArray(providers)) {
+      for (const id of backups) {
+        const entry = providers.find((p) => p.id === id);
+        if (entry) addAttempt(entry.name);
+      }
+    }
+  } catch {
+    // config unavailable — proceed with the primary attempt only
   }
 
   const spawningEnvelope: Envelope = {
@@ -1960,52 +1982,87 @@ async function runOverseerExecuteHandoff(args: string[], io: CliIO): Promise<num
   };
   writeFileSync(envelopePath, `${JSON.stringify(spawningEnvelope, null, 2)}\n`, "utf8");
 
-  const argv = parseArgv(envelope.launch_command);
-  let result: SpawnResult;
-  try {
-    result = await runTarget({
-      layout,
-      handoffId: parsed.handoffId,
-      binary: detection.resolved_path,
-      argv,
-      workingDir: envelope.working_dir,
-    });
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
+  const overseerLayout = resolveOverseerLayout(process.cwd());
+  const failureNotes: string[] = [];
+  let result: SpawnResult | null = null;
+  let ranTarget: "codex" | "claude" | null = null;
+
+  for (let i = 0; i < attempts.length; i += 1) {
+    const attempt = attempts[i]!;
+    let detection: Awaited<ReturnType<typeof detectCli>>;
+    try {
+      detection = await detectCli(attempt.target);
+    } catch (err) {
+      failureNotes.push(
+        `${attempt.target}: CLI detection error: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      continue;
+    }
+    if (!detection.found || !detection.resolved_path) {
+      failureNotes.push(`${attempt.target}: CLI binary not found on PATH`);
+      continue;
+    }
+    if (i > 0) {
+      io.stdout.write(`Provider failed; failing over to "${attempt.target}"...\n`);
+    }
+    try {
+      const spawnResult = await runTarget({
+        layout,
+        handoffId: parsed.handoffId,
+        binary: detection.resolved_path,
+        argv: parseArgv(attempt.launchCommand),
+        workingDir: envelope.working_dir,
+      });
+      result = spawnResult;
+      ranTarget = attempt.target;
+      if (spawnResult.exit_code === 0) break;
+      failureNotes.push(`${attempt.target}: exit_code=${spawnResult.exit_code}`);
+    } catch (err) {
+      failureNotes.push(
+        `${attempt.target}: spawn error: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  if (!result || ranTarget == null) {
     const failedEnvelope: Envelope = {
       ...spawningEnvelope,
       status: "failed",
       updated_at: new Date().toISOString(),
     };
     writeFileSync(envelopePath, `${JSON.stringify(failedEnvelope, null, 2)}\n`, "utf8");
-    const overseerLayout = resolveOverseerLayout(process.cwd());
     await appendHandoffResult(overseerLayout, {
       run_id: parsed.handoffId,
       status: "failed",
-      summary: `${envelope.target_agent} execution failed for handoff ${parsed.handoffId}: ${errMsg}`,
+      summary: `handoff ${parsed.handoffId} could not be executed: ${failureNotes.join("; ") || "no runnable provider"}`,
     });
-    io.stderr.write(`Failed to execute handoff: ${errMsg}\n`);
+    io.stderr.write(`Failed to execute handoff. ${failureNotes.join("; ")}\n`);
     return 1;
   }
+
   const finalStatus = result.exit_code === 0 ? "completed" : "failed";
+  const failedOver = ranTarget !== envelope.target_agent;
+  const failoverNote = failedOver ? ` (failed over from ${envelope.target_agent})` : "";
 
   const finalEnvelope: Envelope = {
     ...spawningEnvelope,
+    target_agent: ranTarget,
     status: finalStatus,
     updated_at: new Date().toISOString(),
     spawn: result,
   };
   writeFileSync(envelopePath, `${JSON.stringify(finalEnvelope, null, 2)}\n`, "utf8");
 
-  const overseerLayout = resolveOverseerLayout(process.cwd());
   await appendHandoffResult(overseerLayout, {
     run_id: parsed.handoffId,
     status: finalStatus as OverseerHandoffResultStatus,
-    summary: `${envelope.target_agent} execution ${finalStatus} for handoff ${parsed.handoffId}`,
+    summary: `${ranTarget} execution ${finalStatus} for handoff ${parsed.handoffId}${failoverNote}`,
     test_result: `exit_code=${result.exit_code}`,
   });
 
-  io.stdout.write(`\nHandoff: ${parsed.handoffId}\nStatus:  ${finalStatus}\nExit code: ${result.exit_code}\n`);
+  io.stdout.write(
+    `\nHandoff: ${parsed.handoffId}\nProvider: ${ranTarget}${failoverNote}\nStatus:  ${finalStatus}\nExit code: ${result.exit_code}\n`,
+  );
   if (result.stdout_tail) io.stdout.write(`\n--- stdout tail ---\n${result.stdout_tail}\n`);
   if (result.stderr_tail) io.stdout.write(`\n--- stderr tail ---\n${result.stderr_tail}\n`);
   io.stdout.write(`\nResult recorded: ${overseerLayout.handoffResultsPath}\n`);
