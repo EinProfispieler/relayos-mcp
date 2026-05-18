@@ -1,6 +1,6 @@
 export type CommandKind = "local" | "cli" | "disabled";
 
-export type LocalHandlerName = "help" | "exit" | "settings" | "setup" | "approve" | "run" | "build";
+export type LocalHandlerName = "help" | "exit" | "settings" | "setup" | "approve" | "run" | "build" | "proceed";
 
 export interface SlashCommand {
   name: string;
@@ -22,6 +22,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: "/approve",  description: "Approve & launch pending handoff",  kind: "local", localHandler: "approve" },
   { name: "/run",      description: "Run pending handoff (alias for /approve)", kind: "local", localHandler: "run" },
   { name: "/build",    description: "Toggle build mode (auto-execute non-gated handoffs)", kind: "local", localHandler: "build" },
+  { name: "/proceed",  description: "Execute all tasks in the current project plan",       kind: "local", localHandler: "proceed" },
 ];
 
 export function filterCommands(query: string): readonly SlashCommand[] {

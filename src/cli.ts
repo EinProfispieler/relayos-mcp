@@ -66,6 +66,8 @@ import { buildActionProposal } from "./action_dispatch.js";
 import { detectCli, runTarget } from "./spawn/index.js";
 import { renderCodexTarget } from "./render/codex.js";
 import { renderClaudeTarget } from "./render/claude.js";
+import { createHandoff } from "./tools/create_handoff.js";
+import { createAuditWriter } from "./audit.js";
 import { evaluatePolicy, formatBannerLines } from "./policy.js";
 import type { Envelope, SpawnResult } from "./schema.js";
 import { ensureStorage, resolveStorageLayout, stdoutLogPath } from "./storage.js";
@@ -73,6 +75,10 @@ import {
   parseProjectPlanBlock,
   buildProjectPlan,
   persistProjectPlan,
+  loadProjectPlan,
+  appendAnswerToplan,
+  updatePlanTaskStatus,
+  buildTaskHandoffInput,
 } from "./project_plan.js";
 
 export interface CliIO {
@@ -2124,6 +2130,75 @@ async function runOverseerPlanExtract(args: string[], io: CliIO): Promise<number
   return 0;
 }
 
+/** `relayos overseer plan-answer <plan_id> <answer text...>` */
+async function runOverseerPlanAnswer(args: string[], io: CliIO): Promise<number> {
+  const planId = args[0];
+  const answer = args.slice(1).join(" ").trim();
+  if (!planId || answer.length === 0) {
+    io.stderr.write("Usage: relayos overseer plan-answer <plan_id> <answer text...>\n");
+    return 1;
+  }
+  const layout = resolveOverseerLayout(process.cwd());
+  const updated = appendAnswerToplan(layout, planId, answer);
+  if (!updated) {
+    io.stderr.write(`Plan not found: ${planId}\n`);
+    return 1;
+  }
+  io.stdout.write(`Answer recorded (${updated.answers.length} total) for plan ${planId}\n`);
+  io.stdout.write("@@RELAYOS_PLAN_ANSWER@@ " + JSON.stringify({ plan_id: planId, answers: updated.answers }) + "\n");
+  return 0;
+}
+
+/**
+ * `relayos overseer plan-task-handoff <plan_id> <task_id>`
+ * Creates a handoff envelope for one task and updates the plan.
+ * Emits: `@@RELAYOS_TASK_HANDOFF@@ {"plan_id","task_id","handoff_id","title"}`
+ */
+async function runOverseerPlanTaskHandoff(args: string[], io: CliIO): Promise<number> {
+  const planId = args[0];
+  const taskId = args[1];
+  if (!planId || !taskId) {
+    io.stderr.write("Usage: relayos overseer plan-task-handoff <plan_id> <task_id>\n");
+    return 1;
+  }
+  const overseerLayout = resolveOverseerLayout(process.cwd());
+  const plan = loadProjectPlan(overseerLayout, planId);
+  if (!plan) {
+    io.stderr.write(`Plan not found: ${planId}\n`);
+    return 1;
+  }
+  const task = plan.tasks.find((t) => t.id === taskId);
+  if (!task) {
+    io.stderr.write(`Task not found: ${taskId} in plan ${planId}\n`);
+    return 1;
+  }
+  if (task.handoff_id) {
+    // Already has a handoff — re-emit so RTUI can re-sync
+    io.stdout.write(
+      "@@RELAYOS_TASK_HANDOFF@@ " +
+        JSON.stringify({ plan_id: planId, task_id: taskId, handoff_id: task.handoff_id, title: task.title }) +
+        "\n",
+    );
+    return 0;
+  }
+
+  const storageLayout = resolveStorageLayout();
+  const audit = createAuditWriter(storageLayout);
+  const handoffInput = buildTaskHandoffInput(task, plan, process.cwd());
+  const result = await createHandoff(handoffInput, { layout: storageLayout, audit });
+
+  // Update plan with the handoff id + mark task running
+  updatePlanTaskStatus(overseerLayout, planId, taskId, "running", result.handoff_id);
+
+  io.stdout.write(
+    "@@RELAYOS_TASK_HANDOFF@@ " +
+      JSON.stringify({ plan_id: planId, task_id: taskId, handoff_id: result.handoff_id, title: task.title }) +
+      "\n",
+  );
+  io.stdout.write(`Task handoff created: ${result.handoff_id}\n`);
+  return 0;
+}
+
 async function runOverseerHandoffResult(args: string[], io: CliIO): Promise<number> {
   const [sub, ...rest] = args;
   if (sub === "add") {
@@ -2633,6 +2708,8 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "handoff-results") return runOverseerHandoffResults(rest, io);
   if (sub === "execute-handoff") return runOverseerExecuteHandoff(rest, io);
   if (sub === "plan-extract") return runOverseerPlanExtract(rest, io);
+  if (sub === "plan-answer") return runOverseerPlanAnswer(rest, io);
+  if (sub === "plan-task-handoff") return runOverseerPlanTaskHandoff(rest, io);
   if (sub === "next") return runOverseerNext(rest, io);
   if (sub === "start") return runOverseerStart(rest, io);
   if (sub === "mode") return runOverseerMode(rest, io);
@@ -2648,8 +2725,10 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   io.stderr.write(
     "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|capabilities|summary|memory-index|doctor|role-profile|wake-instructions|init|note|decision|decisions|handoff-result|handoff-results|execute-handoff|plan-extract|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n" +
       "  overseer execute-handoff <id>   launch Codex for a recorded handoff and capture result\n" +
-      "  overseer plan-extract <id>      parse the PROJECT_PLAN block from a completed plan handoff\n" +
-      "  overseer execute-handoff --dry-run <id>  print launch_command without executing\n",
+      "  overseer plan-extract <id>              parse the PROJECT_PLAN block from a completed plan handoff\n" +
+      "  overseer plan-answer <plan_id> <text>   append an answer to an open plan\n" +
+      "  overseer plan-task-handoff <plan_id> <task_id>  create a handoff envelope for one task\n" +
+      "  overseer execute-handoff --dry-run <id>         print launch_command without executing\n",
   );
   return 1;
 }

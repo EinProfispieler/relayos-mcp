@@ -143,6 +143,7 @@ export function Shell() {
             planId: raw.plan_id,
             goal: raw.goal,
             questions: raw.questions ?? [],
+            answers: (Array.isArray((raw as Record<string, unknown>).answers) ? (raw as Record<string, unknown>).answers : []) as string[],
             tasks: (raw.tasks ?? []).map((t) => ({
               id: t.id ?? "",
               title: t.title ?? "",
@@ -164,6 +165,82 @@ export function Shell() {
           dispatch({ type: "STATUS_SET", status: "idle" });
         }
       });
+  };
+
+  // ── proceed flow: execute plan tasks in sequence ─────────────────────
+  const runProceedFlow = (planId: string) => {
+    const plan = state.projectPlan;
+    if (!plan) return;
+
+    const pendingTasks = plan.tasks.filter((t) => t.status === "pending");
+    if (pendingTasks.length === 0) {
+      appendNote(dispatch, "All tasks are already dispatched or completed.");
+      return;
+    }
+
+    dispatch({ type: "STATUS_SET", status: "executing" });
+    appendNote(dispatch, `Proceeding with ${pendingTasks.length} task(s)…`);
+
+    // Execute tasks sequentially (each one resolves before the next starts)
+    const runNext = async (tasks: typeof pendingTasks): Promise<void> => {
+      const task = tasks[0];
+      if (!task) {
+        dispatch({ type: "STATUS_SET", status: "idle" });
+        appendNote(dispatch, "All plan tasks dispatched.");
+        return;
+      }
+
+      appendNote(dispatch, `Creating handoff for task [${task.id}]: ${task.title}…`);
+      const taskLines: string[] = [];
+      await runCliCommand({
+        commandName: `plan-task-handoff`,
+        argv: ["overseer", "plan-task-handoff", planId, task.id],
+        dispatch: (action) => {
+          if (action.type === "CLI_OUTPUT_LINE") taskLines.push(action.line);
+        },
+      });
+
+      const sentinel = taskLines.find((l) => l.startsWith("@@RELAYOS_TASK_HANDOFF@@ "));
+      if (!sentinel) {
+        appendError(dispatch, `Failed to create handoff for task ${task.id}.`);
+        // Continue with remaining tasks
+        await runNext(tasks.slice(1));
+        return;
+      }
+
+      const taskData = JSON.parse(sentinel.slice("@@RELAYOS_TASK_HANDOFF@@ ".length)) as {
+        plan_id: string;
+        task_id: string;
+        handoff_id: string;
+        title: string;
+      };
+
+      dispatch({ type: "PROJECT_PLAN_TASK_UPDATE", taskId: task.id, status: "running", handoffId: taskData.handoff_id });
+
+      // In step mode: set as pending handoff, user must /approve each one
+      if (state.mode === "step") {
+        dispatch({
+          type: "PENDING_HANDOFF_SET",
+          handoff: { handoffId: taskData.handoff_id, title: taskData.title, needsApproval: false },
+        });
+        dispatch({ type: "STATUS_SET", status: "awaiting_approval" });
+        appendNote(dispatch, `Task [${task.id}] handoff ready: ${taskData.handoff_id}\ntype /approve to execute, then /proceed again for the next task`);
+        return; // Stop — user will /approve then /proceed again
+      }
+
+      // In build mode: auto-execute
+      appendNote(dispatch, `Build mode: executing task [${task.id}]…`);
+      await runCliCommand({
+        commandName: `execute-task-${task.id}`,
+        argv: ["overseer", "execute-handoff", taskData.handoff_id],
+        dispatch,
+      });
+      dispatch({ type: "PROJECT_PLAN_TASK_UPDATE", taskId: task.id, status: "completed" });
+
+      await runNext(tasks.slice(1));
+    };
+
+    void runNext(pendingTasks);
   };
 
   // ── slash command handler (direct-typed) ──────────────────────────────
@@ -191,6 +268,15 @@ export function Shell() {
       return true;
     }
 
+    if (lower === "/proceed") {
+      if (!state.projectPlan) {
+        appendError(dispatch, "No active project plan. Submit a feature request first.");
+      } else {
+        runProceedFlow(state.projectPlan.planId);
+      }
+      return true;
+    }
+
     // Not a locally-handled slash command
     return false;
   };
@@ -212,6 +298,30 @@ export function Shell() {
     // Handle slash commands typed directly (not via palette)
     if (trimmed.startsWith("/")) {
       handleLocalSlash(trimmed);
+      return;
+    }
+
+    // ── answer collection mode — while awaiting plan answers ─────────────
+    if (state.status === "awaiting_answers" && state.projectPlan) {
+      dispatch({ type: "PROJECT_PLAN_ANSWER", answer: trimmed });
+      const answerIdx = (state.projectPlan.answers?.length ?? 0) + 1;
+      const totalQ = state.projectPlan.questions.length;
+      if (totalQ > 0) {
+        const remaining = totalQ - answerIdx;
+        appendNote(dispatch,
+          remaining > 0
+            ? `Answer ${answerIdx}/${totalQ} recorded. ${remaining} question(s) remaining — type /proceed when ready.`
+            : `All ${totalQ} question(s) answered. Type /proceed to start execution.`,
+        );
+      } else {
+        appendNote(dispatch, `Answer recorded. Type /proceed to start execution.`);
+      }
+      // Persist to CLI in background so the file stays in sync
+      void runCliCommand({
+        commandName: "plan-answer",
+        argv: ["overseer", "plan-answer", state.projectPlan.planId, trimmed],
+        dispatch: () => {},
+      });
       return;
     }
 

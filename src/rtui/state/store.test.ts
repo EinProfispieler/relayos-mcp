@@ -329,6 +329,7 @@ describe("PROJECT_PLAN_SET / CLEAR", () => {
     planId: "plan_1",
     goal: "build a thing",
     questions: ["q1?"],
+    answers: [],
     tasks: [
       {
         id: "t1",
@@ -356,5 +357,73 @@ describe("PROJECT_PLAN_SET / CLEAR", () => {
     expect(s.projectPlan).not.toBeNull();
     s = reducer(s, { type: "PROJECT_PLAN_CLEAR" });
     expect(s.projectPlan).toBeNull();
+  });
+});
+
+describe("PROJECT_PLAN_ANSWER", () => {
+  const plan = {
+    planId: "plan_1",
+    goal: "build a thing",
+    questions: ["q1?", "q2?"],
+    answers: [],
+    tasks: [],
+  };
+
+  test("appends answer to answers array", () => {
+    let s = reducer(baseState(), { type: "PROJECT_PLAN_SET", plan });
+    s = reducer(s, { type: "PROJECT_PLAN_ANSWER", answer: "yes" });
+    expect(s.projectPlan?.answers).toEqual(["yes"]);
+  });
+
+  test("accumulates multiple answers", () => {
+    let s = reducer(baseState(), { type: "PROJECT_PLAN_SET", plan });
+    s = reducer(s, { type: "PROJECT_PLAN_ANSWER", answer: "yes" });
+    s = reducer(s, { type: "PROJECT_PLAN_ANSWER", answer: "no" });
+    expect(s.projectPlan?.answers).toEqual(["yes", "no"]);
+  });
+
+  test("no-op when no active plan", () => {
+    const start = baseState();
+    const next = reducer(start, { type: "PROJECT_PLAN_ANSWER", answer: "yes" });
+    expect(next).toBe(start);
+  });
+});
+
+describe("PROJECT_PLAN_TASK_UPDATE", () => {
+  const plan = {
+    planId: "plan_2",
+    goal: "build a thing",
+    questions: [],
+    answers: [],
+    tasks: [
+      { id: "t1", title: "do t1", target: "codex", model: "gpt-5.5", effort: "medium", mode: "patch", status: "pending" },
+      { id: "t2", title: "do t2", target: "claude", model: "claude-sonnet-4-6", effort: "medium", mode: "review", status: "pending" },
+    ],
+  };
+
+  test("updates task status", () => {
+    let s = reducer(baseState(), { type: "PROJECT_PLAN_SET", plan });
+    s = reducer(s, { type: "PROJECT_PLAN_TASK_UPDATE", taskId: "t1", status: "running" });
+    expect(s.projectPlan?.tasks[0]?.status).toBe("running");
+    expect(s.projectPlan?.tasks[1]?.status).toBe("pending"); // unchanged
+  });
+
+  test("sets handoffId when provided", () => {
+    let s = reducer(baseState(), { type: "PROJECT_PLAN_SET", plan });
+    s = reducer(s, { type: "PROJECT_PLAN_TASK_UPDATE", taskId: "t1", status: "running", handoffId: "h_abc" });
+    expect(s.projectPlan?.tasks[0]?.handoffId).toBe("h_abc");
+  });
+
+  test("no-op for unknown task id", () => {
+    let s = reducer(baseState(), { type: "PROJECT_PLAN_SET", plan });
+    const before = s.projectPlan?.tasks.map((t) => t.status);
+    s = reducer(s, { type: "PROJECT_PLAN_TASK_UPDATE", taskId: "t_unknown", status: "completed" });
+    expect(s.projectPlan?.tasks.map((t) => t.status)).toEqual(before);
+  });
+
+  test("no-op when no active plan", () => {
+    const start = baseState();
+    const next = reducer(start, { type: "PROJECT_PLAN_TASK_UPDATE", taskId: "t1", status: "running" });
+    expect(next).toBe(start);
   });
 });

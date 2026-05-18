@@ -1,7 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ulid } from "ulid";
-import { ProjectPlan, ProjectPlanTask, type ProjectPlan as ProjectPlanT } from "./schema.js";
+import {
+  ProjectPlan,
+  ProjectPlanTask,
+  type HandoffInput,
+  type ProjectPlan as ProjectPlanT,
+  type ProjectPlanTask as ProjectPlanTaskT,
+} from "./schema.js";
 import type { OverseerLayout } from "./overseer.js";
 
 const BLOCK_START = "PROJECT_PLAN";
@@ -169,4 +175,79 @@ export function loadProjectPlan(layout: OverseerLayout, planId: string): Project
   } catch {
     return null;
   }
+}
+
+/** Append an answer to a persisted plan's answers[]. Returns the updated plan or null on failure. */
+export function appendAnswerToplan(
+  layout: OverseerLayout,
+  planId: string,
+  answer: string,
+): ProjectPlanT | null {
+  const plan = loadProjectPlan(layout, planId);
+  if (!plan) return null;
+  const updated = { ...plan, answers: [...plan.answers, answer] };
+  persistProjectPlan(layout, updated);
+  return updated;
+}
+
+/** Update a single task's status (and optionally handoff_id) in a persisted plan. */
+export function updatePlanTaskStatus(
+  layout: OverseerLayout,
+  planId: string,
+  taskId: string,
+  status: ProjectPlanTaskT["status"],
+  handoffId?: string,
+): ProjectPlanT | null {
+  const plan = loadProjectPlan(layout, planId);
+  if (!plan) return null;
+  const tasks = plan.tasks.map((t) =>
+    t.id === taskId
+      ? { ...t, status, ...(handoffId ? { handoff_id: handoffId } : {}) }
+      : t,
+  );
+  const updated = { ...plan, tasks };
+  persistProjectPlan(layout, updated);
+  return updated;
+}
+
+/**
+ * Build a HandoffInput from a ProjectPlanTask + plan context.
+ * The task already carries all routing data — no re-routing is needed.
+ */
+export function buildTaskHandoffInput(
+  task: ProjectPlanTaskT,
+  plan: ProjectPlanT,
+  cwd: string,
+): HandoffInput {
+  const contextLines = [
+    `Project plan goal: ${plan.goal}`,
+  ];
+  if (plan.answers.length > 0) {
+    contextLines.push("", "User's answers to planning questions:");
+    plan.answers.forEach((a, i) => contextLines.push(`  Q${i + 1}: ${a}`));
+  }
+  const contextBlock = contextLines.join("\n");
+
+  const description = [
+    contextBlock,
+    "",
+    `Task: ${task.title}`,
+    task.description,
+  ].join("\n");
+
+  return {
+    source_agent: "claude",
+    target_agent: task.target,
+    model: task.model,
+    effort: task.effort,
+    execution_mode: task.mode,
+    task_title: `[${plan.plan_id}/${task.id}] ${task.title}`,
+    task_description: description,
+    allowed_files: [],
+    forbidden_files: [".env*", "secrets/**", "**/node_modules/**"],
+    constraints: [],
+    expected_output: [`Complete: ${task.title}`, "write_handoff_result with status and summary"],
+    working_dir: cwd,
+    auto_spawn: false,
+  };
 }

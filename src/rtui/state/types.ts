@@ -29,12 +29,14 @@ export interface ProjectPlanTaskView {
   effort: string;
   mode: string;
   status: string;
+  handoffId?: string;
 }
 
 export interface ProjectPlanView {
   planId: string;
   goal: string;
   questions: string[];
+  answers: string[];
   tasks: ProjectPlanTaskView[];
 }
 
@@ -128,4 +130,6 @@ export type RTUIAction =
   | { type: "PENDING_HANDOFF_SET"; handoff: PendingHandoff }
   | { type: "PENDING_HANDOFF_CLEAR" }
   | { type: "PROJECT_PLAN_SET"; plan: ProjectPlanView }
-  | { type: "PROJECT_PLAN_CLEAR" };
+  | { type: "PROJECT_PLAN_CLEAR" }
+  | { type: "PROJECT_PLAN_ANSWER"; answer: string }
+  | { type: "PROJECT_PLAN_TASK_UPDATE"; taskId: string; status: string; handoffId?: string };

@@ -15,6 +15,7 @@ describe("SLASH_COMMANDS registry", () => {
       "/approve",
       "/run",
       "/build",
+      "/proceed",
     ]);
   });
 
@@ -53,6 +54,12 @@ describe("SLASH_COMMANDS registry", () => {
     expect(build?.localHandler).toBe("build");
   });
 
+  test("/proceed is local with localHandler 'proceed'", () => {
+    const proceed = SLASH_COMMANDS.find((c) => c.name === "/proceed");
+    expect(proceed?.kind).toBe("local");
+    expect(proceed?.localHandler).toBe("proceed");
+  });
+
   test("all local commands are selectable", () => {
     const locals = SLASH_COMMANDS.filter((c) => c.kind === "local");
     for (const c of locals) {
@@ -76,6 +83,10 @@ describe("filterCommands", () => {
 
   test("prefix /b matches /build", () => {
     expect(filterCommands("/b").map((c) => c.name)).toEqual(["/build"]);
+  });
+
+  test("prefix /pr matches /proceed", () => {
+    expect(filterCommands("/pr").map((c) => c.name)).toEqual(["/proceed"]);
   });
 
   test("case-insensitive", () => {

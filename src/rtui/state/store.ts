@@ -212,6 +212,32 @@ export function reducer(state: RTUIState, action: RTUIAction): RTUIState {
     case "PROJECT_PLAN_CLEAR":
       return { ...state, projectPlan: null };
 
+    case "PROJECT_PLAN_ANSWER": {
+      if (!state.projectPlan) return state;
+      return {
+        ...state,
+        projectPlan: {
+          ...state.projectPlan,
+          answers: [...state.projectPlan.answers, action.answer],
+        },
+      };
+    }
+
+    case "PROJECT_PLAN_TASK_UPDATE": {
+      if (!state.projectPlan) return state;
+      return {
+        ...state,
+        projectPlan: {
+          ...state.projectPlan,
+          tasks: state.projectPlan.tasks.map((t) =>
+            t.id === action.taskId
+              ? { ...t, status: action.status, ...(action.handoffId ? { handoffId: action.handoffId } : {}) }
+              : t,
+          ),
+        },
+      };
+    }
+
     default: {
       const _exhaustive: never = action;
       void _exhaustive;
