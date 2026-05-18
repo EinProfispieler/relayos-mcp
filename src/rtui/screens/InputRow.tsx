@@ -6,8 +6,11 @@ export function InputRow() {
   const { state, dispatch } = useRTUI();
   const { value, cursor } = state.input;
   const paletteVisible = state.palette.visible;
+  const settingsOpen = state.settingsOpen;
+  const isBusy = state.status === "thinking" || state.status === "executing";
 
   useInput((char, key) => {
+    if (settingsOpen) return;
     // When the palette is visible, it owns Return / arrows / Esc.
     // InputRow only handles character typing and backspace so the
     // buffer (and thus the palette query) stays in sync.
@@ -18,6 +21,8 @@ export function InputRow() {
       return;
     }
     if (key.return) {
+      // Block submission while AI is processing
+      if (isBusy) return;
       dispatch({ type: "INPUT_SUBMITTED" });
       return;
     }
@@ -63,6 +68,15 @@ export function InputRow() {
   const before = value.slice(0, cursor);
   const at = value.slice(cursor, cursor + 1) || " ";
   const after = value.slice(cursor + 1);
+
+  if (isBusy) {
+    return (
+      <Box>
+        <Text color={colors.dim}>⋯ </Text>
+        <Text dimColor>{value.length > 0 ? value : "waiting…"}</Text>
+      </Box>
+    );
+  }
 
   return (
     <Box>

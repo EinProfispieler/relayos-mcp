@@ -2,6 +2,8 @@ import { appendFile, mkdir, readFile, readdir, rm, stat, unlink, writeFile } fro
 import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
 import type { RelayConfig } from "./schema.js";
+import { decryptConfigSecret } from "./secret_crypto.js";
+import { getProjectConfigSecret } from "./config_secret.js";
 
 export interface ConversationProvider {
   chat(messages: ConversationMessage[]): Promise<string>;
@@ -20,9 +22,12 @@ export interface ConversationResult {
 
 export interface ConversationScope {
   projectRoot: string;
+  /** Skip the pre/post snapshot mutation guard (for read-only turns already sandboxed). */
+  skipMutationGuard?: boolean;
 }
 
 interface ResolvedConversationProviderConfig {
+  id?: string;
   provider: string;
   kind: "subscription" | "api" | "fallback" | "subscription_cli" | "local_command";
   model: string;
@@ -31,7 +36,18 @@ interface ResolvedConversationProviderConfig {
   command: string | null;
   args: string[];
   timeoutMs: number;
+  apiBase: string | null;
+  apiKey: string | null;
+  apiKeyEnc: string | null;
+  apiKeyEnv: string | null;
+  apiFormat: "openai_compatible" | "anthropic_messages" | null;
 }
+
+interface ProviderCooldownState {
+  providers: Record<string, { blocked_until: string; reason: string; updated_at: string }>;
+}
+
+const PROVIDER_COOLDOWN_FILE = "provider_cooldowns.json";
 
 function normalizeModelId(input: string): string {
   const raw = input.trim();
@@ -56,10 +72,128 @@ class ConfiguredConversationProvider implements ConversationProvider {
     if (!latestUser) {
       return `provider-configured-but-not-executable: ${providerLabel} configured, but no user message was provided.`;
     }
+    if (this.cfg.kind === "api") {
+      return runApiProvider(this.cfg, this.scope, messages, providerLabel);
+    }
     if (!isExecutableMode(this.cfg.executionMode) || !this.cfg.command) {
       return `provider-configured-but-not-executable: ${providerLabel} is configured, but no executable command is set for execution_mode local_command/subscription_cli.`;
     }
     return runLocalCommandProvider(this.cfg, this.scope, latestUser.content, providerLabel);
+  }
+}
+
+function resolveApiKey(cfg: ResolvedConversationProviderConfig, scope: ConversationScope): string | null {
+  if (cfg.apiKey && cfg.apiKey.trim().length > 0) return cfg.apiKey.trim();
+  if (cfg.apiKeyEnc && cfg.apiKeyEnc.trim().length > 0) {
+    const secret = getProjectConfigSecret(scope.projectRoot);
+    if (typeof secret === "string" && secret.trim().length > 0) {
+      try {
+        const plain = decryptConfigSecret(cfg.apiKeyEnc, secret);
+        if (plain.trim().length > 0) return plain.trim();
+      } catch {
+        // continue to other resolution paths
+      }
+    }
+  }
+  if (cfg.apiKeyEnv && cfg.apiKeyEnv.trim().length > 0) {
+    const fromEnv = process.env[cfg.apiKeyEnv.trim()];
+    if (typeof fromEnv === "string" && fromEnv.trim().length > 0) return fromEnv.trim();
+  }
+  return null;
+}
+
+function inferApiFormat(cfg: ResolvedConversationProviderConfig): "openai_compatible" | "anthropic_messages" {
+  if (cfg.apiFormat) return cfg.apiFormat;
+  const lower = cfg.provider.toLowerCase();
+  if (lower.includes("claude") || lower.includes("anthropic")) return "anthropic_messages";
+  return "openai_compatible";
+}
+
+function resolveApiBase(cfg: ResolvedConversationProviderConfig): string {
+  if (cfg.apiBase && cfg.apiBase.trim().length > 0) return cfg.apiBase.trim();
+  const p = cfg.provider.toLowerCase();
+  if (p.includes("claude") || p.includes("anthropic")) return "https://api.anthropic.com/v1";
+  if (p.includes("glm") || p.includes("zhipu")) return "https://open.bigmodel.cn/api/coding/paas/v4";
+  if (p.includes("kimi") || p.includes("moonshot")) return "https://api.moonshot.cn/v1";
+  return "https://api.openai.com/v1";
+}
+
+function buildEndpoint(base: string, format: "openai_compatible" | "anthropic_messages"): string {
+  const cleaned = base.replace(/\/+$/, "");
+  if (cleaned.endsWith("/chat/completions") || cleaned.endsWith("/messages")) return cleaned;
+  if (format === "anthropic_messages") return `${cleaned}/messages`;
+  return `${cleaned}/chat/completions`;
+}
+
+async function runApiProvider(
+  cfg: ResolvedConversationProviderConfig,
+  scope: ConversationScope,
+  messages: ConversationMessage[],
+  providerLabel: string,
+): Promise<string> {
+  const apiKey = resolveApiKey(cfg, scope);
+  if (!apiKey) {
+    return `provider-execution-failed: ${providerLabel} api key is missing (set api_key or api_key_env).`;
+  }
+  const format = inferApiFormat(cfg);
+  const base = resolveApiBase(cfg);
+  const endpoint = buildEndpoint(base, format);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);
+  try {
+    if (format === "anthropic_messages") {
+      const latestUser = [...messages].reverse().find((m) => m.role === "user");
+      const userText = latestUser?.content ?? "";
+      const resp = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: cfg.model,
+          max_tokens: 1024,
+          messages: [{ role: "user", content: userText }],
+        }),
+        signal: controller.signal,
+      });
+      if (!resp.ok) {
+        const text = (await resp.text()).slice(0, 500);
+        return `provider-execution-failed: ${providerLabel} HTTP ${resp.status}; detail: ${text}`;
+      }
+      const json = (await resp.json()) as { content?: Array<{ type?: string; text?: string }> };
+      const text = json.content?.find((c) => c.type === "text")?.text?.trim();
+      return text && text.length > 0 ? text : `provider-execution-failed: ${providerLabel} empty response.`;
+    }
+
+    const resp = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: cfg.model,
+        messages: messages.map((m) => ({ role: m.role, content: m.content })),
+        temperature: 0.2,
+      }),
+      signal: controller.signal,
+    });
+    if (!resp.ok) {
+      const text = (await resp.text()).slice(0, 500);
+      return `provider-execution-failed: ${providerLabel} HTTP ${resp.status}; detail: ${text}`;
+    }
+    const json = (await resp.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    const text = json.choices?.[0]?.message?.content?.trim();
+    return text && text.length > 0 ? text : `provider-execution-failed: ${providerLabel} empty response.`;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `provider-execution-failed: ${providerLabel} request error; detail: ${msg}`;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -198,7 +332,7 @@ async function runLocalCommandProvider(
   const useStdin = cfg.executionMode === "local_command" && !hasInputPlaceholder;
   const shouldPipeAndCloseStdin = cfg.executionMode === "subscription_cli" || useStdin;
 
-  const before = await snapshotProjectTree(scope.projectRoot);
+  const before = scope.skipMutationGuard ? null : await snapshotProjectTree(scope.projectRoot);
   const result = await new Promise<{
     code: number | null;
     signal: NodeJS.Signals | null;
@@ -252,7 +386,7 @@ async function runLocalCommandProvider(
     }
   });
 
-  const mutated = await rollbackProjectMutations(scope.projectRoot, before);
+  const mutated = before ? await rollbackProjectMutations(scope.projectRoot, before) : false;
   if (mutated && result.code === 0 && !result.timedOut && !result.spawnError && result.stdout.trim().length > 0) {
     const safeNotice =
       "\n\n[safety] provider attempted to modify project files during conversation mode; changes were rolled back.";
@@ -307,6 +441,21 @@ function resolveConversationProviderConfig(
   const timeoutMs = typeof providerValue === "object"
     ? providerValue.timeout_ms ?? 120000
     : config.overseer?.timeout_ms ?? 120000;
+  const apiBase = typeof providerValue === "object"
+    ? providerValue.api_base?.trim() ?? null
+    : config.overseer?.api_base?.trim() ?? null;
+  const apiKey = typeof providerValue === "object"
+    ? providerValue.api_key?.trim() ?? null
+    : config.overseer?.api_key?.trim() ?? null;
+  const apiKeyEnc = typeof providerValue === "object"
+    ? providerValue.api_key_enc?.trim() ?? null
+    : null;
+  const apiKeyEnv = typeof providerValue === "object"
+    ? providerValue.api_key_env?.trim() ?? null
+    : config.overseer?.api_key_env?.trim() ?? null;
+  const apiFormat = typeof providerValue === "object"
+    ? providerValue.api_format ?? null
+    : config.overseer?.api_format ?? null;
   return {
     provider: providerName,
     kind,
@@ -316,7 +465,136 @@ function resolveConversationProviderConfig(
     command,
     args,
     timeoutMs,
+    apiBase,
+    apiKey,
+    apiKeyEnc,
+    apiKeyEnv,
+    apiFormat,
   };
+}
+
+function resolveConversationProviderConfigs(config: RelayConfig): ResolvedConversationProviderConfig[] {
+  const providers = config.overseer?.providers;
+  if (!providers || providers.length === 0) {
+    const single = resolveConversationProviderConfig(config);
+    return single ? [single] : [];
+  }
+  const byId = new Map<string, ResolvedConversationProviderConfig>();
+  for (const p of providers) {
+    byId.set(p.id, {
+      id: p.id,
+      provider: p.name,
+      kind: p.kind,
+      model: normalizeModelId(p.model),
+      effort: p.effort?.trim() ?? null,
+      executionMode: p.execution_mode?.trim() ?? null,
+      command: p.command?.trim() ?? null,
+      args: p.args ?? [],
+      timeoutMs: p.timeout_ms ?? 120000,
+      apiBase: p.api_base?.trim() ?? null,
+      apiKey: p.api_key?.trim() ?? null,
+      apiKeyEnc: p.api_key_enc?.trim() ?? null,
+      apiKeyEnv: p.api_key_env?.trim() ?? null,
+      apiFormat: p.api_format ?? null,
+    });
+  }
+  const orderedIds = [
+    ...(config.overseer?.primary_provider ? [config.overseer.primary_provider] : []),
+    ...(config.overseer?.backup_providers ?? []),
+  ];
+  const out: ResolvedConversationProviderConfig[] = [];
+  const seen = new Set<string>();
+  for (const id of orderedIds) {
+    const cfg = byId.get(id);
+    if (!cfg || seen.has(id)) continue;
+    out.push(cfg);
+    seen.add(id);
+  }
+  for (const p of providers) {
+    if (seen.has(p.id)) continue;
+    const cfg = byId.get(p.id);
+    if (cfg) out.push(cfg);
+  }
+  return out;
+}
+
+function isFallbackEligibleFailure(reply: string): boolean {
+  const lower = reply.toLowerCase();
+  if (!lower.startsWith("provider-execution-failed:")) return false;
+  return (
+    lower.includes("http 429") ||
+    lower.includes("rate limit") ||
+    lower.includes("quota") ||
+    lower.includes("timed out") ||
+    lower.includes("timeout") ||
+    lower.includes("fetch failed") ||
+    lower.includes("request error") ||
+    lower.includes("network")
+  );
+}
+
+function isUsageLimitFailure(reply: string): boolean {
+  const lower = reply.toLowerCase();
+  return (
+    lower.includes("usage limit") ||
+    lower.includes("max usage") ||
+    lower.includes("rate limit reached") ||
+    lower.includes("try again in") ||
+    lower.includes("5h") ||
+    lower.includes("5 hours")
+  );
+}
+
+function providerKey(cfg: ResolvedConversationProviderConfig): string {
+  return cfg.id ?? `${cfg.provider}:${cfg.model}:${cfg.kind}`;
+}
+
+async function readProviderCooldowns(): Promise<ProviderCooldownState> {
+  const dir = join(process.cwd(), ".relayos", "overseer");
+  const file = join(dir, PROVIDER_COOLDOWN_FILE);
+  try {
+    const raw = await readFile(file, "utf8");
+    const parsed = JSON.parse(raw) as ProviderCooldownState;
+    if (!parsed || typeof parsed !== "object" || typeof parsed.providers !== "object") {
+      return { providers: {} };
+    }
+    return parsed;
+  } catch {
+    return { providers: {} };
+  }
+}
+
+async function writeProviderCooldowns(state: ProviderCooldownState): Promise<void> {
+  const dir = join(process.cwd(), ".relayos", "overseer");
+  await mkdir(dir, { recursive: true });
+  const file = join(dir, PROVIDER_COOLDOWN_FILE);
+  await writeFile(file, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+}
+
+async function setProviderCooldown(
+  cfg: ResolvedConversationProviderConfig,
+  durationMs: number,
+  reason: string,
+): Promise<void> {
+  const key = providerKey(cfg);
+  const state = await readProviderCooldowns();
+  const until = new Date(Date.now() + durationMs).toISOString();
+  state.providers[key] = {
+    blocked_until: until,
+    reason,
+    updated_at: new Date().toISOString(),
+  };
+  await writeProviderCooldowns(state);
+}
+
+async function isProviderBlocked(cfg: ResolvedConversationProviderConfig): Promise<boolean> {
+  const key = providerKey(cfg);
+  const state = await readProviderCooldowns();
+  const entry = state.providers[key];
+  if (!entry) return false;
+  const until = Date.parse(entry.blocked_until);
+  if (!Number.isFinite(until)) return false;
+  return until > Date.now();
 }
 
 export function resolveConversationProvider(
@@ -347,8 +625,8 @@ export async function handleConversation(
   config: RelayConfig,
   scope: ConversationScope,
 ): Promise<ConversationResult> {
-  const provider = resolveConversationProvider(config, scope);
-  if (!provider) {
+  const configs = resolveConversationProviderConfigs(config);
+  if (configs.length === 0) {
     await appendConversationLog(messages);
     return {
       reply:
@@ -357,13 +635,31 @@ export async function handleConversation(
       configured: false,
     };
   }
-
-  const reply = await provider.chat(messages);
-  await appendConversationLog([...messages, { role: "assistant", content: reply }]);
-  const resolved = resolveConversationProviderConfig(config);
+  let lastReply = "provider-execution-failed: no providers executed";
+  let used = "configured";
+  const active: ResolvedConversationProviderConfig[] = [];
+  for (const cfg of configs) {
+    if (!(await isProviderBlocked(cfg))) active.push(cfg);
+  }
+  const effective = active.length > 0 ? active : configs;
+  for (let i = 0; i < effective.length; i++) {
+    const cfg = effective[i]!;
+    const provider = new ConfiguredConversationProvider(cfg, scope);
+    const reply = await provider.chat(messages);
+    used = `${cfg.provider}/${cfg.model}/${cfg.kind}`;
+    if (isUsageLimitFailure(reply)) {
+      await setProviderCooldown(cfg, 5 * 60 * 60 * 1000, "usage limit reached");
+    }
+    if (!isFallbackEligibleFailure(reply) || i === effective.length - 1) {
+      lastReply = reply;
+      break;
+    }
+    lastReply = `${reply}\n[fallback] switching to backup provider (${i + 2}/${effective.length})...`;
+  }
+  await appendConversationLog([...messages, { role: "assistant", content: lastReply }]);
   return {
-    reply,
-    providerUsed: resolved ? `${resolved.provider}/${resolved.model}/${resolved.kind}` : "configured",
+    reply: lastReply,
+    providerUsed: used,
     configured: true,
   };
 }

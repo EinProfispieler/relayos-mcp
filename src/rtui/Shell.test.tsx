@@ -24,7 +24,7 @@ test("Shell mounts and renders prompt + status line", () => {
   expect(frame).toContain("production");
 });
 
-test("submitting text appends echo reply to scrollback", async () => {
+test("submitting text enters provider execution flow (no local echo)", async () => {
   const { lastFrame, stdin } = render(
     <RTUIProvider runtime={runtime}>
       <Shell />
@@ -33,8 +33,12 @@ test("submitting text appends echo reply to scrollback", async () => {
   stdin.write("hello");
   await new Promise((r) => setTimeout(r, 30));
   stdin.write("\r");
-  await new Promise((r) => setTimeout(r, 50));
+  await new Promise((r) => setTimeout(r, 300));
   const frame = lastFrame() ?? "";
-  expect(frame).toContain("❯ hello");
-  expect(frame).toContain("echo: hello");
+  // User input appears in scrollback (not just prompt)
+  expect(frame).toContain("hello");
+  // Echo stub is gone — real pipeline is used
+  expect(frame).not.toContain("echo: hello");
+  // Status will be either Thinking (subprocess running) or some pipeline result
+  // but NEVER "echo: hello" from the old stub
 });

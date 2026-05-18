@@ -37,7 +37,8 @@ test("renders matching commands with descriptions", async () => {
   expect(frame).toContain("/recent");
   expect(frame).toContain("/results");
   expect(frame).toContain("/run");
-  expect(frame).toContain("coming soon");
+  // /run is now a real local command, not disabled
+  expect(frame).toContain("Run pending handoff");
 });
 
 test("hidden when palette.visible is false", () => {
@@ -72,8 +73,9 @@ test("Down arrow advances selectedIndex", async () => {
   await new Promise((r) => setTimeout(r, 30));
   const frame = lastFrame() ?? "";
   const lines = frame.split("\n");
-  const highlightedLine = lines.find((l) => l.includes("❯ /status"));
+  const highlightedLine = lines.find((l) => l.includes("❯ /"));
   expect(highlightedLine).toBeDefined();
+  expect(highlightedLine?.includes("❯ /help")).toBe(false);
 });
 
 test("Escape closes the palette", async () => {

@@ -1,4 +1,4 @@
-export type EffortLevel = "low" | "medium" | "high";
+export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
 
 export type Status =
   | "idle"
@@ -24,6 +24,7 @@ export type ScrollbackItem =
   | { id: string; type: "user_input"; text: string }
   | { id: string; type: "assistant_text"; text: string }
   | { id: string; type: "system_note"; text: string }
+  | { id: string; type: "timing_note"; ms: number }
   | { id: string; type: "error"; text: string }
   | { id: string; type: "divider" };
 
@@ -57,6 +58,14 @@ export interface CliState {
   streamingLines: readonly string[];
 }
 
+export type ChatMode = "step" | "build";
+
+export interface PendingHandoff {
+  handoffId: string;
+  title: string;
+  needsApproval: boolean;
+}
+
 export interface RTUIState {
   session: SessionInfo;
   runtime: RuntimeView;
@@ -66,6 +75,10 @@ export interface RTUIState {
   status: Status;
   palette: PaletteState;
   cli: CliState;
+  settingsOpen: boolean;
+  wizardOpen: boolean;
+  mode: ChatMode;
+  pendingHandoff: PendingHandoff | null;
 }
 
 export type RTUIAction =
@@ -86,4 +99,11 @@ export type RTUIAction =
   | { type: "CLI_COMMAND_START"; commandName: string; argv: readonly string[] }
   | { type: "CLI_COMMAND_QUEUE"; commandName: string; argv: readonly string[] }
   | { type: "CLI_OUTPUT_LINE"; line: string }
-  | { type: "CLI_COMMAND_COMPLETE"; exitCode: number };
+  | { type: "CLI_COMMAND_COMPLETE"; exitCode: number }
+  | { type: "SETTINGS_OPEN" }
+  | { type: "SETTINGS_CLOSE" }
+  | { type: "WIZARD_OPEN" }
+  | { type: "WIZARD_CLOSE" }
+  | { type: "MODE_SET"; mode: ChatMode }
+  | { type: "PENDING_HANDOFF_SET"; handoff: PendingHandoff }
+  | { type: "PENDING_HANDOFF_CLEAR" };

@@ -739,3 +739,168 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
 
   return 0;
 }
+
+// ── Single-turn non-interactive pipeline for the RTUI ──────────────────────
+
+export interface ChatTurnIO {
+  stdout: { write: (chunk: string) => unknown };
+  stderr: { write: (chunk: string) => unknown };
+}
+
+export interface ChatTurnResult {
+  reply: string;
+  provider_used: string | null;
+  provider_latency_ms: number | null;
+  ai_plan: AIRoutingPlan | null;
+  action_proposal: ActionProposal | null;
+  handoff_id: string | null;
+  handoff_title: string | null;
+  needs_approval: boolean;
+}
+
+/**
+ * Run one non-interactive pipeline turn.
+ * Emits a single `@@RELAYOS_TURN@@ {...}` line to io.stdout so the RTUI can
+ * parse it unambiguously.  Returns exit code 0 always (errors go to stderr).
+ */
+export async function runChatTurn(
+  message: string,
+  io: ChatTurnIO,
+  deps?: {
+    conversation?: typeof handleConversation;
+  },
+): Promise<number> {
+  const converse = deps?.conversation ?? handleConversation;
+
+  const emit = (result: ChatTurnResult) => {
+    io.stdout.write("@@RELAYOS_TURN@@ " + JSON.stringify(result) + "\n");
+  };
+
+  const msg = message.trim();
+  if (msg.length === 0) {
+    emit({
+      reply: "",
+      provider_used: null,
+      provider_latency_ms: null,
+      ai_plan: null,
+      action_proposal: null,
+      handoff_id: null,
+      handoff_title: null,
+      needs_approval: false,
+    });
+    return 0;
+  }
+
+  let convResult: Awaited<ReturnType<typeof handleConversation>>;
+  let providerLatencyMs: number | null = null;
+  try {
+    const loaded = loadProjectConfig({ cwd: process.cwd() });
+    const projectRoot = loaded.source ? dirname(dirname(loaded.source)) : process.cwd();
+    const t0 = Date.now();
+    convResult = await converse([{ role: "user", content: msg }], loaded.config, {
+      projectRoot,
+      skipMutationGuard: true, // chat turns are read-only; skip the full project tree snapshot
+    });
+    providerLatencyMs = Date.now() - t0;
+  } catch (err) {
+    io.stderr.write(`chat-turn: conversation error: ${String(err)}\n`);
+    emit({
+      reply: "Error: conversation provider failed. Check your config.",
+      provider_used: null,
+      provider_latency_ms: null,
+      ai_plan: null,
+      action_proposal: null,
+      handoff_id: null,
+      handoff_title: null,
+      needs_approval: false,
+    });
+    return 0;
+  }
+
+  const parsedReply = extractActionIntentFromReply(convResult.reply);
+  const assistantReply =
+    parsedReply.visibleReply.length > 0 ? parsedReply.visibleReply : convResult.reply;
+
+  const actionIntent = parsedReply.actionIntent;
+  const providerUsed: string | null = (convResult as { provider_used?: string }).provider_used ?? null;
+
+  if (
+    !actionIntent ||
+    actionIntent.intent_type === "conversation" ||
+    actionIntent.confidence < 0.7
+  ) {
+    emit({
+      reply: assistantReply,
+      provider_used: providerUsed,
+      provider_latency_ms: providerLatencyMs,
+      ai_plan: null,
+      action_proposal: null,
+      handoff_id: null,
+      handoff_title: null,
+      needs_approval: false,
+    });
+    return 0;
+  }
+
+  const loaded = loadProjectConfig({ cwd: process.cwd() });
+  const aiPlan = planRouteFromActionIntent(actionIntent, loaded.config);
+  const actionProposal = buildActionProposal(aiPlan);
+
+  const needsApproval =
+    actionProposal.action === "request_approval" ||
+    actionProposal.status === "blocked_until_user_approval";
+
+  if (actionProposal.action !== "create_handoff") {
+    emit({
+      reply: assistantReply,
+      provider_used: providerUsed,
+      provider_latency_ms: providerLatencyMs,
+      ai_plan: aiPlan,
+      action_proposal: actionProposal,
+      handoff_id: null,
+      handoff_title: null,
+      needs_approval: needsApproval,
+    });
+    return 0;
+  }
+
+  // Build and record the handoff envelope (auto_spawn: false — RTUI decides when to execute)
+  const pending: PendingActionProposal = {
+    originalMessage: msg,
+    aiPlan,
+    actionProposal,
+    executed: false,
+  };
+
+  let handoffId: string | null = null;
+  let handoffTitle: string | null = null;
+
+  try {
+    const profiles = resolveModelProfiles(loaded.config);
+    const handoffInput = buildHandoffInputFromPendingWithProfiles(
+      pending,
+      profiles.codexModel,
+      profiles.codexEffort,
+    );
+    const storageLayout = resolveStorageLayout();
+    await ensureStorage(storageLayout);
+    const audit = createAuditWriter(storageLayout);
+    const handoffResult = await createHandoff(handoffInput, { layout: storageLayout, audit });
+    handoffId = handoffResult.handoff_id;
+    handoffTitle = handoffInput.task_title;
+  } catch (err) {
+    io.stderr.write(`chat-turn: handoff creation error: ${String(err)}\n`);
+  }
+
+  emit({
+    reply: assistantReply,
+    provider_used: providerUsed,
+    provider_latency_ms: providerLatencyMs,
+    ai_plan: aiPlan,
+    action_proposal: actionProposal,
+    handoff_id: handoffId,
+    handoff_title: handoffTitle,
+    needs_approval: needsApproval,
+  });
+  return 0;
+}

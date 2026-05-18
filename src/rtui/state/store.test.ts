@@ -276,3 +276,50 @@ describe("CLI_COMMAND_COMPLETE", () => {
     expect(s.cli.queue).toEqual([]);
   });
 });
+
+// ── New state: mode and pendingHandoff ────────────────────────────────────
+
+describe("MODE_SET", () => {
+  test("initialState defaults to 'step'", () => {
+    expect(baseState().mode).toBe("step");
+  });
+
+  test("MODE_SET switches to build", () => {
+    const next = reducer(baseState(), { type: "MODE_SET", mode: "build" });
+    expect(next.mode).toBe("build");
+  });
+
+  test("MODE_SET switches back to step", () => {
+    const s = { ...baseState(), mode: "build" as const };
+    const next = reducer(s, { type: "MODE_SET", mode: "step" });
+    expect(next.mode).toBe("step");
+  });
+});
+
+describe("PENDING_HANDOFF_SET / CLEAR", () => {
+  test("initialState has null pendingHandoff", () => {
+    expect(baseState().pendingHandoff).toBeNull();
+  });
+
+  test("PENDING_HANDOFF_SET stores the handoff", () => {
+    const handoff = { handoffId: "h_123", title: "Test", needsApproval: false };
+    const next = reducer(baseState(), { type: "PENDING_HANDOFF_SET", handoff });
+    expect(next.pendingHandoff).toEqual(handoff);
+  });
+
+  test("PENDING_HANDOFF_SET with approval flag", () => {
+    const handoff = { handoffId: "h_456", title: "Release", needsApproval: true };
+    const next = reducer(baseState(), { type: "PENDING_HANDOFF_SET", handoff });
+    expect(next.pendingHandoff?.needsApproval).toBe(true);
+  });
+
+  test("PENDING_HANDOFF_CLEAR removes pending handoff", () => {
+    let s = reducer(baseState(), {
+      type: "PENDING_HANDOFF_SET",
+      handoff: { handoffId: "h_789", title: "Task", needsApproval: false },
+    });
+    expect(s.pendingHandoff).not.toBeNull();
+    s = reducer(s, { type: "PENDING_HANDOFF_CLEAR" });
+    expect(s.pendingHandoff).toBeNull();
+  });
+});

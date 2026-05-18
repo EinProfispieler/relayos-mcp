@@ -11,6 +11,7 @@ while [ -h "$SCRIPT" ]; do
   esac
 done
 DIR=$(cd "$(dirname "$SCRIPT")" && pwd)
+ROOT_DIR=$(cd "$DIR/.." && pwd)
 CLI_JS="$DIR/../dist/cli.js"
 RTUI_JS="$DIR/../dist/rtui.js"
 
@@ -23,6 +24,7 @@ Usage:
   relays chat [args...]     Same as above
   relays help               Show this help
   relays settings           Provider/settings wizard (Node)
+  relays setup              Guided provider setup wizard (Node)
   relays banner             Show RelayOS banner (Node)
   relays status             Overseer runtime status (Node)
   relays doctor             Overseer health checks (Node)
@@ -35,6 +37,7 @@ EOF
 
 # Default + `chat` route to the new RTUI bundle via bun.
 if [ "$#" -eq 0 ]; then
+  cd "$ROOT_DIR" || exit 1
   exec bun "$RTUI_JS"
 fi
 
@@ -42,6 +45,7 @@ COMMAND="$1"
 case "$COMMAND" in
   chat)
     shift
+    cd "$ROOT_DIR" || exit 1
     exec bun "$RTUI_JS" "$@"
     ;;
   help|-h|--help)
@@ -50,29 +54,41 @@ case "$COMMAND" in
     ;;
   settings)
     shift
+    cd "$ROOT_DIR" || exit 1
     exec node "$CLI_JS" settings "$@"
+    ;;
+  setup)
+    shift
+    cd "$ROOT_DIR" || exit 1
+    exec node "$CLI_JS" setup "$@"
     ;;
   banner)
     shift
+    cd "$ROOT_DIR" || exit 1
     exec node "$CLI_JS" banner "$@"
     ;;
   status)
     shift
+    cd "$ROOT_DIR" || exit 1
     exec node "$CLI_JS" overseer status "$@"
     ;;
   doctor)
     shift
+    cd "$ROOT_DIR" || exit 1
     exec node "$CLI_JS" overseer doctor "$@"
     ;;
   report)
     shift
+    cd "$ROOT_DIR" || exit 1
     exec node "$CLI_JS" report "$@"
     ;;
   run)
     shift
+    cd "$ROOT_DIR" || exit 1
     exec node "$CLI_JS" overseer execute-handoff "$@"
     ;;
   *)
+    cd "$ROOT_DIR" || exit 1
     exec node "$CLI_JS" "$@"
     ;;
 esac

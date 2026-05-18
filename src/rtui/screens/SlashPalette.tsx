@@ -4,9 +4,13 @@ import { SLASH_COMMANDS, isSelectable, type SlashCommand } from "../commands/reg
 import { useRTUI } from "../state/context.js";
 import { runCliCommand } from "../commands/runner.js";
 
+function genId(): string {
+  return `pal-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export function SlashPalette() {
   const { visible, filtered, selectedIndex, move, close, select } = useSlashOverlay();
-  const { dispatch } = useRTUI();
+  const { state, dispatch } = useRTUI();
   const { exit } = useApp();
 
   useInput(
@@ -32,6 +36,8 @@ export function SlashPalette() {
         dispatch({ type: "INPUT_CHANGED", value: "", cursor: 0 });
         if (cmd.kind === "local") {
           if (cmd.localHandler === "exit") exit();
+          if (cmd.localHandler === "settings") dispatch({ type: "SETTINGS_OPEN" });
+          if (cmd.localHandler === "setup") dispatch({ type: "WIZARD_OPEN" });
           if (cmd.localHandler === "help") {
             dispatch({
               type: "SCROLLBACK_APPEND",
@@ -43,6 +49,45 @@ export function SlashPalette() {
                   .join("\n"),
               },
             });
+          }
+          if (cmd.localHandler === "build") {
+            const next = state.mode === "step" ? "build" : "step";
+            dispatch({ type: "MODE_SET", mode: next });
+            dispatch({
+              type: "SCROLLBACK_APPEND",
+              item: {
+                id: genId(),
+                type: "system_note",
+                text: `Mode switched to ${next.toUpperCase()} — ${
+                  next === "build"
+                    ? "non-gated handoffs will auto-execute"
+                    : "type /approve to launch handoffs"
+                }`,
+              },
+            });
+          }
+          if (cmd.localHandler === "approve" || cmd.localHandler === "run") {
+            if (!state.pendingHandoff) {
+              dispatch({
+                type: "SCROLLBACK_APPEND",
+                item: { id: genId(), type: "error", text: "No pending handoff. Submit a coding request first." },
+              });
+            } else {
+              const handoffId = state.pendingHandoff.handoffId;
+              dispatch({ type: "PENDING_HANDOFF_CLEAR" });
+              dispatch({ type: "STATUS_SET", status: "executing" });
+              dispatch({
+                type: "SCROLLBACK_APPEND",
+                item: { id: genId(), type: "system_note", text: `Launching handoff ${handoffId}…` },
+              });
+              void runCliCommand({
+                commandName: "execute-handoff",
+                argv: ["overseer", "execute-handoff", handoffId],
+                dispatch,
+              }).then(() => {
+                dispatch({ type: "STATUS_SET", status: "idle" });
+              });
+            }
           }
         } else if (cmd.kind === "cli" && cmd.argv) {
           void runCliCommand({ commandName: cmd.name, argv: cmd.argv, dispatch });

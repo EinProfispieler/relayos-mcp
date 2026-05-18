@@ -342,6 +342,30 @@ export const RelayConfig = z
     defaults: RelayConfigDefaults.optional(),
     overseer: z
       .object({
+        providers: z
+          .array(
+            z
+              .object({
+                id: z.string().min(1),
+                name: z.string().min(1),
+                kind: z.enum(["subscription", "api", "fallback", "subscription_cli", "local_command"]),
+                model: z.string().min(1),
+                effort: z.string().min(1).optional(),
+                execution_mode: z.string().min(1).optional(),
+                command: z.string().min(1).optional(),
+                args: z.array(z.string()).optional(),
+                timeout_ms: z.number().int().positive().optional(),
+                api_base: z.string().min(1).optional(),
+                api_key: z.string().min(1).optional(),
+                api_key_env: z.string().min(1).optional(),
+                api_key_enc: z.string().min(1).optional(),
+                api_format: z.enum(["openai_compatible", "anthropic_messages"]).optional(),
+              })
+              .strict(),
+          )
+          .optional(),
+        primary_provider: z.string().min(1).optional(),
+        backup_providers: z.array(z.string().min(1)).optional(),
         provider: z
           .union([
             z.string().min(1),
@@ -356,6 +380,11 @@ export const RelayConfig = z
                 command: z.string().min(1).optional(),
                 args: z.array(z.string()).optional(),
                 timeout_ms: z.number().int().positive().optional(),
+                api_base: z.string().min(1).optional(),
+                api_key: z.string().min(1).optional(),
+                api_key_env: z.string().min(1).optional(),
+                api_key_enc: z.string().min(1).optional(),
+                api_format: z.enum(["openai_compatible", "anthropic_messages"]).optional(),
               })
               .strict(),
           ])
@@ -372,6 +401,10 @@ export const RelayConfig = z
         command: z.string().min(1).optional(),
         args: z.array(z.string()).optional(),
         timeout_ms: z.number().int().positive().optional(),
+        api_base: z.string().min(1).optional(),
+        api_key: z.string().min(1).optional(),
+        api_key_env: z.string().min(1).optional(),
+        api_format: z.enum(["openai_compatible", "anthropic_messages"]).optional(),
       })
       .strict()
       .optional(),

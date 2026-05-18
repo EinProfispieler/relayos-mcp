@@ -31,6 +31,17 @@ function ItemRow({ item }: { item: ScrollbackItem }) {
           <Text color={colors.error}>{item.text}</Text>
         </Box>
       );
+    case "timing_note": {
+      const ms = item.ms;
+      const label = ms < 2000 ? `${ms}ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms / 1000)}s`;
+      const color = ms < 2000 ? colors.ready : ms < 5000 ? colors.thinking : colors.error;
+      return (
+        <Box>
+          <Text color={color}>⏱ </Text>
+          <Text color={color}>{label}</Text>
+        </Box>
+      );
+    }
     case "divider":
       return <Text color={colors.dim}>{"─".repeat(60)}</Text>;
   }

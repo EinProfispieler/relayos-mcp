@@ -1,4 +1,4 @@
-import type { RTUIAction, RTUIState, RuntimeView, ScrollbackItem } from "./types.js";
+import type { ChatMode, RTUIAction, RTUIState, RuntimeView, ScrollbackItem } from "./types.js";
 
 const HISTORY_LIMIT = 500;
 
@@ -24,6 +24,10 @@ export function initialState(runtime: RuntimeView): RTUIState {
     status: "idle",
     palette: { visible: false, query: "", selectedIndex: 0 },
     cli: { running: null, queue: [], streamingLines: [] },
+    settingsOpen: false,
+    wizardOpen: false,
+    mode: "step" as ChatMode,
+    pendingHandoff: null,
   };
 }
 
@@ -179,6 +183,27 @@ export function reducer(state: RTUIState, action: RTUIAction): RTUIState {
         },
       };
     }
+
+    case "SETTINGS_OPEN":
+      return { ...state, settingsOpen: true };
+
+    case "SETTINGS_CLOSE":
+      return { ...state, settingsOpen: false };
+
+    case "WIZARD_OPEN":
+      return { ...state, wizardOpen: true };
+
+    case "WIZARD_CLOSE":
+      return { ...state, wizardOpen: false };
+
+    case "MODE_SET":
+      return { ...state, mode: action.mode };
+
+    case "PENDING_HANDOFF_SET":
+      return { ...state, pendingHandoff: action.handoff };
+
+    case "PENDING_HANDOFF_CLEAR":
+      return { ...state, pendingHandoff: null };
 
     default: {
       const _exhaustive: never = action;

@@ -56,11 +56,11 @@ import {
   writeActiveBrief,
   writeNextAction,
 } from "./overseer.js";
-import { extractActionIntentFromReply, runChat } from "./chat.js";
+import { extractActionIntentFromReply, runChat, runChatTurn } from "./chat.js";
 import { loadProjectConfig } from "./config.js";
 import { handleConversation, type ConversationMessage } from "./conversation.js";
 import { buildChatHelpText } from "./chat.js";
-import { runSettingsWizard } from "./settings.js";
+import { runProviderSetupWizard, runSettingsWizard } from "./settings.js";
 import { planRouteFromActionIntent } from "./ai_planner.js";
 import { buildActionProposal } from "./action_dispatch.js";
 import { detectCli, runTarget } from "./spawn/index.js";
@@ -74,7 +74,7 @@ export interface CliIO {
 }
 
 function usage(): string {
-  return "usage: relayos [banner|launch|policy|checkpoint|diff-risk|report|overseer|chat|settings] [--force] [args...]\n";
+  return "usage: relayos [banner|launch|policy|checkpoint|diff-risk|report|overseer|chat|settings|setup] [--force] [args...]\n";
 }
 
 function readAllFromStdin(): Promise<string> {
@@ -158,6 +158,15 @@ async function runSettings(args: string[], io: CliIO): Promise<number> {
     return 1;
   }
   await runSettingsWizard(process.cwd(), { write: (text) => io.stdout.write(text) });
+  return 0;
+}
+
+async function runSetup(args: string[], io: CliIO): Promise<number> {
+  if (args.length > 0) {
+    io.stderr.write("usage: relayos setup\n");
+    return 1;
+  }
+  await runProviderSetupWizard(process.cwd(), { write: (text) => io.stdout.write(text) });
   return 0;
 }
 
@@ -2560,7 +2569,9 @@ export async function runCli(
   if (command === "report") return runReport(rest, io);
   if (command === "overseer") return runOverseer(rest, io);
   if (command === "chat") return runChatWithConversationMode(rest, io);
+  if (command === "chat-turn") return runChatTurn(rest[0] ?? "", io);
   if (command === "settings") return runSettings(rest, io);
+  if (command === "setup") return runSetup(rest, io);
 
   io.stderr.write(usage());
   return 1;
