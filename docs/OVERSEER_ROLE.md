@@ -25,13 +25,14 @@ coordination, scoping, and review.
 - **Projected state** — human-readable working-memory files (`CURRENT_STATE`,
   `TODO`, `DECISIONS`, `HANDOFFS`) derived from the event logs.
 - **Checkpoint** — a saved snapshot of projected state, used to roll working
-  memory back. Rolling code back is Git's job.
+  memory back. Rolling code back is Git's job, not a checkpoint's.
 - **Agents** — `codex` = implementation (patches, tests, refactors); `claude` =
   review, planning, analysis, explanation, docs; `overseer` (you) = coordinate,
   discuss, plan, create handoffs, record decisions.
 - **Execution mode** — `patch | plan | review | test`: what a handoff's agent
   may do.
-- **Step mode** (default) — one handoff per turn; the user approves each one.
+- **Step mode** (default) — one handoff per turn; the user must approve each one
+  before it runs.
 - **Build mode** (opt-in) — after one approval you continue through the task
   list, but only as a foreground, supervised, interruptible loop the user is
   watching.
