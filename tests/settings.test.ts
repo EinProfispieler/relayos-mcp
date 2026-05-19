@@ -75,7 +75,8 @@ describe("settings wizard", () => {
       },
     });
 
-    await runWizard(cwd, ["preset", "codex-gpt55"]);
+    // "codex-plan" preset sets model to gpt-5.5 and preserves timeout_ms from existing config
+    await runWizard(cwd, ["preset", "codex-plan"]);
 
     const config = readConfig(cwd);
     expect(config.overseer.model).toBe("gpt-5.5");
@@ -98,7 +99,8 @@ describe("settings wizard", () => {
       },
     });
 
-    await runWizard(cwd, ["quick", "", "", "chinese", ""]);
+    // quick flow: flow=quick, ai=codex, mode=plan, timeout=default, language=chinese
+    await runWizard(cwd, ["quick", "", "", "", "chinese"]);
 
     const config = readConfig(cwd);
     expect(config.overseer.language).toBe("chinese");
