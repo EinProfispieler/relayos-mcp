@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import type { RelayConfig } from "./schema.js";
 import { decryptConfigSecret } from "./secret_crypto.js";
 import { getProjectConfigSecret } from "./config_secret.js";
+import { OVERSEER_ROLE_TEXT } from "./overseer/role.js";
 
 export interface ConversationProvider {
   chat(messages: ConversationMessage[]): Promise<string>;
@@ -141,7 +142,7 @@ async function runApiProvider(
 
   // Build the overseer system prompt — same identity + context as CLI providers.
   // Append routing/action-intent instructions so API providers can also emit ACTION_INTENT.
-  const overseerContext = await buildOverseerContext(scope.projectRoot);
+  const overseerContext = await buildOverseerContextBundle(scope.projectRoot);
   const systemPrompt = [
     overseerContext,
     "",
@@ -704,16 +705,15 @@ export async function handleConversation(
 // ── Overseer identity + context ────────────────────────────────────────────
 
 /**
- * Load a text file from the overseer dir, capping at `maxLines`.
- * Returns null when the file is missing or unreadable.
+ * Load a text file from the overseer dir, capping at `maxChars` characters
+ * (a soft byte bound). Returns null when the file is missing or unreadable.
  */
-async function loadOverseerFile(overseerDir: string, name: string, maxLines = 40): Promise<string | null> {
+async function loadOverseerFile(overseerDir: string, name: string, maxChars: number): Promise<string | null> {
   try {
-    const content = await readFile(join(overseerDir, name), "utf8");
-    const lines = content.split("\n");
-    return lines.length > maxLines
-      ? lines.slice(0, maxLines).join("\n") + "\n[…truncated]"
-      : content.trim();
+    const content = (await readFile(join(overseerDir, name), "utf8")).trim();
+    return content.length > maxChars
+      ? content.slice(0, maxChars) + "\n[…truncated]"
+      : content;
   } catch {
     return null;
   }
@@ -747,19 +747,38 @@ async function loadOverseerJsonlTail(
 }
 
 /**
- * Build the RelayOS Overseer identity + project context block that is
- * prepended to every conversation turn.  Loaded from `.relayos/overseer/`.
- * Returns a plain text block (no trailing newline) ready to embed.
+ * Build the fixed 4-layer Overseer context bundle prepended to every
+ * conversation turn:
+ *   Layer 1 — identity (OVERSEER_ROLE_TEXT, a tracked product constant)
+ *   Layer 2 — policy   (OPERATING_POLICY / FORBIDDEN_ACTIONS / MODEL_POLICY)
+ *   Layer 3 — project  (PROJECT_BRIEF / CURRENT_STATE / TODO / NEXT_ACTION)
+ *   Layer 4 — recent truth (recent decisions / timeline / handoff results)
+ * Layers 2-4 read the project's `.relayos/overseer/` directory; missing files
+ * are omitted gracefully. Returns a plain text block ready to embed.
  */
-async function buildOverseerContext(projectRoot: string): Promise<string> {
+async function buildOverseerContextBundle(projectRoot: string): Promise<string> {
   const overseerDir = join(projectRoot, ".relayos", "overseer");
 
-  const [brief, state, decisions, timeline, results] = await Promise.all([
-    loadOverseerFile(overseerDir, "PROJECT_BRIEF.md", 40),
-    loadOverseerFile(overseerDir, "CURRENT_STATE.md", 40),
+  // Layer 2 — policy (each capped at ~4 KB)
+  const [policy, forbidden, modelPolicy] = await Promise.all([
+    loadOverseerFile(overseerDir, "OPERATING_POLICY.md", 4096),
+    loadOverseerFile(overseerDir, "FORBIDDEN_ACTIONS.md", 4096),
+    loadOverseerFile(overseerDir, "MODEL_POLICY.md", 4096),
+  ]);
+
+  // Layer 3 — project (each capped at ~8 KB)
+  const [brief, state, todo, nextAction] = await Promise.all([
+    loadOverseerFile(overseerDir, "PROJECT_BRIEF.md", 8192),
+    loadOverseerFile(overseerDir, "CURRENT_STATE.md", 8192),
+    loadOverseerFile(overseerDir, "TODO.md", 8192),
+    loadOverseerFile(overseerDir, "NEXT_ACTION.md", 8192),
+  ]);
+
+  // Layer 4 — recent truth
+  const [decisions, timeline, results] = await Promise.all([
     loadOverseerJsonlTail(overseerDir, "decisions.jsonl", 5,
       (p) => typeof p["text"] === "string" ? `  - ${p["text"].slice(0, 200)}` : null),
-    loadOverseerJsonlTail(overseerDir, "timeline.jsonl", 5,
+    loadOverseerJsonlTail(overseerDir, "timeline.jsonl", 8,
       (p) => {
         const ts = typeof p["ts"] === "string" ? p["ts"].slice(0, 10) : "?";
         return typeof p["text"] === "string" ? `  [${ts}] ${p["text"].slice(0, 200)}` : null;
@@ -770,47 +789,30 @@ async function buildOverseerContext(projectRoot: string): Promise<string> {
         : null),
   ]);
 
-  const parts: string[] = [
-    "=== RELAYOS OVERSEER — IDENTITY & CONTEXT ===",
-    "You are the RelayOS Overseer, the persistent AI coordinator for this software project.",
-    "You discuss work with the developer, understand intent, and route tasks to AI agents via handoffs.",
-    "",
-    "KEY CONCEPTS (answer questions about these accurately):",
-    "- HANDOFF: A structured work envelope (JSON with id h_…, target agent, execution_mode,",
-    "  task_description, constraints, expected_output). Stored in .relayos/handoffs/.",
-    "  Creating a handoff is safe and side-effect-free. It only executes when the user runs /approve.",
-    "- AUDIT TRAIL: Immutable JSONL logs in .relayos/overseer/ recording all agent activity —",
-    "  decisions, timeline notes, handoff results. The authoritative history of what was done.",
-    "- AGENTS: codex = implementation (patches, tests); claude = review/plan/explain;",
-    "  overseer (you) = coordinate, discuss, create handoffs, record decisions.",
-    "- EXECUTION MODES: patch | plan | review | test. Controls what the agent is allowed to do.",
-    "- PROJECT PLAN: Multi-step work broken into ordered sub-handoffs dispatched sequentially.",
-    "- /approve or /run: The RTUI command the user types to actually launch a pending handoff.",
-    "- STEP MODE (default): handoffs are created and queued; user must /approve each one.",
-    "- BUILD MODE: non-gated handoffs auto-execute after each turn; release/commit still require /approve.",
-  ];
+  // Layer 1 — identity
+  const parts: string[] = [OVERSEER_ROLE_TEXT];
 
-  if (brief) {
-    parts.push("", "=== PROJECT BRIEF ===", brief);
-  }
-  if (state) {
-    parts.push("", "=== CURRENT STATE ===", state);
-  }
-  if (decisions.length > 0) {
-    parts.push("", "=== RECENT DECISIONS ===", decisions.join("\n"));
-  }
-  if (timeline.length > 0) {
-    parts.push("", "=== RECENT TIMELINE ===", timeline.join("\n"));
-  }
-  if (results.length > 0) {
-    parts.push("", "=== RECENT HANDOFF RESULTS ===", results.join("\n"));
-  }
+  // Layer 2
+  if (policy) parts.push("", "=== OPERATING POLICY ===", policy);
+  if (forbidden) parts.push("", "=== FORBIDDEN ACTIONS ===", forbidden);
+  if (modelPolicy) parts.push("", "=== MODEL POLICY ===", modelPolicy);
+
+  // Layer 3
+  if (brief) parts.push("", "=== PROJECT BRIEF ===", brief);
+  if (state) parts.push("", "=== CURRENT STATE ===", state);
+  if (todo) parts.push("", "=== TODO ===", todo);
+  if (nextAction) parts.push("", "=== NEXT ACTION ===", nextAction);
+
+  // Layer 4
+  if (decisions.length > 0) parts.push("", "=== RECENT DECISIONS ===", decisions.join("\n"));
+  if (timeline.length > 0) parts.push("", "=== RECENT TIMELINE ===", timeline.join("\n"));
+  if (results.length > 0) parts.push("", "=== RECENT HANDOFF RESULTS ===", results.join("\n"));
 
   return parts.join("\n");
 }
 
 async function buildScopedProviderInput(projectRoot: string, userMessage: string): Promise<string> {
-  const identity = await buildOverseerContext(projectRoot);
+  const identity = await buildOverseerContextBundle(projectRoot);
   return [
     identity,
     "",
