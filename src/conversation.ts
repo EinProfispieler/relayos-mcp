@@ -138,6 +138,37 @@ async function runApiProvider(
   const format = inferApiFormat(cfg);
   const base = resolveApiBase(cfg);
   const endpoint = buildEndpoint(base, format);
+
+  // Build the overseer system prompt — same identity + context as CLI providers.
+  // Append routing/action-intent instructions so API providers can also emit ACTION_INTENT.
+  const overseerContext = await buildOverseerContext(scope.projectRoot);
+  const systemPrompt = [
+    overseerContext,
+    "",
+    "=== OPERATING INSTRUCTIONS ===",
+    `- Allowed context is only the current project/worktree root: ${scope.projectRoot}`,
+    "- Do not read, cite, summarize, or rely on files outside this project/worktree.",
+    "- Do not edit files. Do not run shell commands.",
+    "- Do not claim any tests/builds/commands were executed.",
+    "- Always return a normal human-facing answer.",
+    "- If the user appears to be asking for project work, you may append one optional ACTION_INTENT block at the end.",
+    "- PROVIDER ROUTING GUIDANCE — target by task fit:",
+    "  - codex: implementation, patches, refactors, writing/running tests.",
+    "  - claude: review, planning, code analysis, explanation, documentation.",
+    "  - overseer: discussion, clarification, no agent dispatch.",
+    "- ACTION_INTENT format (optional, at end of reply):",
+    "ACTION_INTENT",
+    "intent_type: conversation | create_task | create_handoff | review | release_control | project_plan",
+    "confidence: 0.0-1.0",
+    "summary: one-line description",
+    "target: codex | claude | overseer",
+    "model: <model id>",
+    "effort: low | medium | high | xhigh | max",
+    "mode: patch | plan | review | test",
+    "approval_required: true | false",
+    "END_ACTION_INTENT",
+  ].join("\n");
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);
   try {
@@ -154,6 +185,7 @@ async function runApiProvider(
         body: JSON.stringify({
           model: cfg.model,
           max_tokens: 1024,
+          system: systemPrompt,
           messages: [{ role: "user", content: userText }],
         }),
         signal: controller.signal,
@@ -167,6 +199,11 @@ async function runApiProvider(
       return text && text.length > 0 ? text : `provider-execution-failed: ${providerLabel} empty response.`;
     }
 
+    // openai_compatible (GLM, OpenAI-compatible APIs): prepend system message
+    const apiMessages = [
+      { role: "system" as const, content: systemPrompt },
+      ...messages.map((m) => ({ role: m.role, content: m.content })),
+    ];
     const resp = await fetch(endpoint, {
       method: "POST",
       headers: {
@@ -175,7 +212,7 @@ async function runApiProvider(
       },
       body: JSON.stringify({
         model: cfg.model,
-        messages: messages.map((m) => ({ role: m.role, content: m.content })),
+        messages: apiMessages,
         temperature: 0.2,
       }),
       signal: controller.signal,
@@ -313,7 +350,7 @@ async function runLocalCommandProvider(
   providerLabel: string,
 ): Promise<string> {
   const effort = cfg.effort ?? "medium";
-  const scopedInput = buildScopedProviderInput(scope.projectRoot, userMessage);
+  const scopedInput = await buildScopedProviderInput(scope.projectRoot, userMessage);
   const hasInputPlaceholder = cfg.args.some((arg) => arg.includes("{{input}}"));
   const argv = cfg.args.map((arg) =>
     arg
@@ -664,9 +701,120 @@ export async function handleConversation(
   };
 }
 
-function buildScopedProviderInput(projectRoot: string, userMessage: string): string {
+// ── Overseer identity + context ────────────────────────────────────────────
+
+/**
+ * Load a text file from the overseer dir, capping at `maxLines`.
+ * Returns null when the file is missing or unreadable.
+ */
+async function loadOverseerFile(overseerDir: string, name: string, maxLines = 40): Promise<string | null> {
+  try {
+    const content = await readFile(join(overseerDir, name), "utf8");
+    const lines = content.split("\n");
+    return lines.length > maxLines
+      ? lines.slice(0, maxLines).join("\n") + "\n[…truncated]"
+      : content.trim();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Load the last `n` JSONL records from a file, extract a text field.
+ */
+async function loadOverseerJsonlTail(
+  overseerDir: string,
+  name: string,
+  n: number,
+  extract: (parsed: Record<string, unknown>) => string | null,
+): Promise<string[]> {
+  try {
+    const content = await readFile(join(overseerDir, name), "utf8");
+    const lines = content.trim().split("\n").filter(Boolean);
+    const tail = lines.slice(-n);
+    return tail.flatMap((l) => {
+      try {
+        const p = JSON.parse(l) as Record<string, unknown>;
+        const s = extract(p);
+        return s ? [s] : [];
+      } catch {
+        return [];
+      }
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Build the RelayOS Overseer identity + project context block that is
+ * prepended to every conversation turn.  Loaded from `.relayos/overseer/`.
+ * Returns a plain text block (no trailing newline) ready to embed.
+ */
+async function buildOverseerContext(projectRoot: string): Promise<string> {
+  const overseerDir = join(projectRoot, ".relayos", "overseer");
+
+  const [brief, state, decisions, timeline, results] = await Promise.all([
+    loadOverseerFile(overseerDir, "PROJECT_BRIEF.md", 40),
+    loadOverseerFile(overseerDir, "CURRENT_STATE.md", 40),
+    loadOverseerJsonlTail(overseerDir, "decisions.jsonl", 5,
+      (p) => typeof p["text"] === "string" ? `  - ${p["text"].slice(0, 200)}` : null),
+    loadOverseerJsonlTail(overseerDir, "timeline.jsonl", 5,
+      (p) => {
+        const ts = typeof p["ts"] === "string" ? p["ts"].slice(0, 10) : "?";
+        return typeof p["text"] === "string" ? `  [${ts}] ${p["text"].slice(0, 200)}` : null;
+      }),
+    loadOverseerJsonlTail(overseerDir, "handoff_results.jsonl", 3,
+      (p) => typeof p["summary"] === "string"
+        ? `  [${p["status"] ?? "?"}] ${p["summary"].slice(0, 150)}`
+        : null),
+  ]);
+
+  const parts: string[] = [
+    "=== RELAYOS OVERSEER — IDENTITY & CONTEXT ===",
+    "You are the RelayOS Overseer, the persistent AI coordinator for this software project.",
+    "You discuss work with the developer, understand intent, and route tasks to AI agents via handoffs.",
+    "",
+    "KEY CONCEPTS (answer questions about these accurately):",
+    "- HANDOFF: A structured work envelope (JSON with id h_…, target agent, execution_mode,",
+    "  task_description, constraints, expected_output). Stored in .relayos/handoffs/.",
+    "  Creating a handoff is safe and side-effect-free. It only executes when the user runs /approve.",
+    "- AUDIT TRAIL: Immutable JSONL logs in .relayos/overseer/ recording all agent activity —",
+    "  decisions, timeline notes, handoff results. The authoritative history of what was done.",
+    "- AGENTS: codex = implementation (patches, tests); claude = review/plan/explain;",
+    "  overseer (you) = coordinate, discuss, create handoffs, record decisions.",
+    "- EXECUTION MODES: patch | plan | review | test. Controls what the agent is allowed to do.",
+    "- PROJECT PLAN: Multi-step work broken into ordered sub-handoffs dispatched sequentially.",
+    "- /approve or /run: The RTUI command the user types to actually launch a pending handoff.",
+    "- STEP MODE (default): handoffs are created and queued; user must /approve each one.",
+    "- BUILD MODE: non-gated handoffs auto-execute after each turn; release/commit still require /approve.",
+  ];
+
+  if (brief) {
+    parts.push("", "=== PROJECT BRIEF ===", brief);
+  }
+  if (state) {
+    parts.push("", "=== CURRENT STATE ===", state);
+  }
+  if (decisions.length > 0) {
+    parts.push("", "=== RECENT DECISIONS ===", decisions.join("\n"));
+  }
+  if (timeline.length > 0) {
+    parts.push("", "=== RECENT TIMELINE ===", timeline.join("\n"));
+  }
+  if (results.length > 0) {
+    parts.push("", "=== RECENT HANDOFF RESULTS ===", results.join("\n"));
+  }
+
+  return parts.join("\n");
+}
+
+async function buildScopedProviderInput(projectRoot: string, userMessage: string): Promise<string> {
+  const identity = await buildOverseerContext(projectRoot);
   return [
-    "SYSTEM BOUNDARY INSTRUCTIONS:",
+    identity,
+    "",
+    "=== OPERATING INSTRUCTIONS ===",
     `- Allowed context is only the current project/worktree root: ${projectRoot}`,
     "- Do not read, cite, summarize, or rely on files outside this project/worktree.",
     "- Do not read ~/.agent-access.md or any home-directory files unless the user explicitly approves it.",
