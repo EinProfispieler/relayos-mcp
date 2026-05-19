@@ -24,7 +24,7 @@ describe("overseer policy templates", () => {
   it("FORBIDDEN_ACTIONS permits additive optional fields", () => {
     const text = read("FORBIDDEN_ACTIONS.md");
     expect(text).toContain("no breaking format changes");
-    expect(text).toContain("additive optional fields");
+    expect(text).toContain("Additive optional fields");
   });
 
   it("MODEL_POLICY names the model-selection priority", () => {
