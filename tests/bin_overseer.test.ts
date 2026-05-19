@@ -18,8 +18,10 @@ describe("overseer binary", () => {
     expect(statSync(p).mode & 0o111).toBeGreaterThan(0);
   });
 
-  it("bin/relays forwards to overseer", () => {
-    const text = readFileSync(join(ROOT, "bin", "relays"), "utf8");
-    expect(text).toContain("overseer");
+  it("bin/relays forwards to overseer and is executable", () => {
+    const p = join(ROOT, "bin", "relays");
+    expect(statSync(p).mode & 0o111).toBeGreaterThan(0);
+    const text = readFileSync(p, "utf8");
+    expect(text).toMatch(/exec\s+"\$DIR\/overseer"\s+"\$@"/);
   });
 });
