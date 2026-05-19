@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const TEMPLATES = join(__dirname, "..", "src", "overseer", "templates");
+const TEMPLATES = fileURLToPath(new URL("../src/overseer/templates", import.meta.url));
 
 function read(name: string): string {
   return readFileSync(join(TEMPLATES, name), "utf8");
@@ -29,7 +30,7 @@ describe("overseer policy templates", () => {
 
   it("MODEL_POLICY names the model-selection priority", () => {
     const text = read("MODEL_POLICY.md");
-    expect(text.trim().length).toBeGreaterThan(50);
+    expect(text).toContain("correctness and safety over token saving");
     expect(text.toLowerCase()).toContain("effort");
   });
 });
