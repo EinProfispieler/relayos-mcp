@@ -1,0 +1,87 @@
+#!/usr/bin/env sh
+# User-facing RelayOS shortcut CLI.
+# Chat mode (default + `chat`) → dist/rtui.js (React + Ink TUI, requires bun)
+# All other subcommands → dist/cli.js (existing Node-based CLI)
+SCRIPT="$0"
+while [ -h "$SCRIPT" ]; do
+  LINK=$(readlink "$SCRIPT")
+  case "$LINK" in
+    /*) SCRIPT="$LINK" ;;
+    *) SCRIPT="$(dirname "$SCRIPT")/$LINK" ;;
+  esac
+done
+DIR=$(cd "$(dirname "$SCRIPT")" && pwd)
+ROOT_DIR=$(cd "$DIR/.." && pwd)
+CLI_JS="$DIR/../dist/cli.js"
+RTUI_JS="$DIR/../dist/rtui.js"
+
+print_help() {
+  cat <<'EOF'
+overseer - RelayOS Overseer chat + quick CLI
+
+Usage:
+  overseer                    Start RTUI chat mode (requires bun)
+  overseer chat [args...]     Same as above
+  overseer help               Show this help
+  overseer settings           Provider/settings wizard (Node)
+  overseer setup              Guided provider setup wizard (Node)
+  overseer banner             Show RelayOS banner (Node)
+  overseer status             Overseer runtime status (Node)
+  overseer doctor             Overseer health checks (Node)
+  overseer report             Runtime + handoff report (Node)
+  overseer run <handoff_id>   Execute one recorded handoff (Node)
+
+Unknown commands are forwarded to: relayos <command> [args...]
+EOF
+}
+
+# Default + `chat` route to the new RTUI bundle via bun.
+# Do NOT cd into ROOT_DIR — all paths are absolute and the caller's cwd is the
+# user's project root; changing it would make process.cwd() point at the package
+# install tree instead of the user's repo.
+if [ "$#" -eq 0 ]; then
+  exec bun "$RTUI_JS"
+fi
+
+COMMAND="$1"
+case "$COMMAND" in
+  chat)
+    shift
+    exec bun "$RTUI_JS" "$@"
+    ;;
+  help|-h|--help)
+    print_help
+    exit 0
+    ;;
+  settings)
+    shift
+    exec node "$CLI_JS" settings "$@"
+    ;;
+  setup)
+    shift
+    exec node "$CLI_JS" setup "$@"
+    ;;
+  banner)
+    shift
+    exec node "$CLI_JS" banner "$@"
+    ;;
+  status)
+    shift
+    exec node "$CLI_JS" overseer status "$@"
+    ;;
+  doctor)
+    shift
+    exec node "$CLI_JS" overseer doctor "$@"
+    ;;
+  report)
+    shift
+    exec node "$CLI_JS" report "$@"
+    ;;
+  run)
+    shift
+    exec node "$CLI_JS" overseer execute-handoff "$@"
+    ;;
+  *)
+    exec node "$CLI_JS" "$@"
+    ;;
+esac
