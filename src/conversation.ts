@@ -711,8 +711,11 @@ export async function handleConversation(
 async function loadOverseerFile(overseerDir: string, name: string, maxChars: number): Promise<string | null> {
   try {
     const content = (await readFile(join(overseerDir, name), "utf8")).trim();
-    return content.length > maxChars
-      ? content.slice(0, maxChars) + "\n[…truncated]"
+    if (content.length <= maxChars) return content;
+    // Truncate by code point so a multi-unit character is never split mid-way.
+    const codePoints = [...content];
+    return codePoints.length > maxChars
+      ? codePoints.slice(0, maxChars).join("") + "\n[…truncated]"
       : content;
   } catch {
     return null;
@@ -789,7 +792,7 @@ async function buildOverseerContextBundle(projectRoot: string): Promise<string> 
         : null),
   ]);
 
-  // Layer 1 — identity
+  // Assemble — Layer 1 (identity) first, then Layers 2/3/4 in order.
   const parts: string[] = [OVERSEER_ROLE_TEXT];
 
   // Layer 2

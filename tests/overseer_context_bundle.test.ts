@@ -77,6 +77,17 @@ describe("buildOverseerContextBundle (4-layer)", () => {
     expect(reply).toContain("NEXT-MARKER-D");
   });
 
+  it("Layer 4 — includes recent decisions and timeline when JSONL files are present", async () => {
+    const root = tempProject();
+    writeOverseerFile(root, "decisions.jsonl", '{"text":"decision A"}\n');
+    writeOverseerFile(root, "timeline.jsonl", '{"ts":"2026-05-20T10:00:00Z","text":"note B"}\n');
+    const reply = await turn(root);
+    expect(reply).toContain("=== RECENT DECISIONS ===");
+    expect(reply).toContain("decision A");
+    expect(reply).toContain("=== RECENT TIMELINE ===");
+    expect(reply).toContain("note B");
+  });
+
   it("layer order — identity precedes policy precedes project", async () => {
     const root = tempProject();
     writeOverseerFile(root, "OPERATING_POLICY.md", "POLICY-MARKER-A");
