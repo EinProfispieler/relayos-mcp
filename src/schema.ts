@@ -475,3 +475,145 @@ export const CreateFromTemplateInput = z
   })
   .strict();
 export type CreateFromTemplateInput = z.infer<typeof CreateFromTemplateInput>;
+
+// ── Run Ledger / Continuity Layer ─────────────────────────────────────
+//
+// A Run is a bounded work session. Per session we record:
+//   • RunRecord            — overall session metadata (one per run)
+//   • TaskLedgerEntry      — append-only per-task ledger
+//   • ContinuationPacket   — small recovery snapshot regenerated on compact
+//   • SourceIndexEntry     — files touched during the run
+//   • ExecutionWorkspace   — linked execution-location records (where work
+//                            happened, who owned it, cleanup intent)
+//
+// All append-only files dedup last-write-wins by their primary key on read.
+
+export const RunStatus = z.enum(["active", "completed", "abandoned"]);
+export type RunStatus = z.infer<typeof RunStatus>;
+
+export const RunRecord = z
+  .object({
+    id: z.string().regex(/^r_/, "RunRecord.id must start with r_"),
+    status: RunStatus,
+    started_at: z.string().min(1),
+    ended_at: z.string().min(1).optional(),
+    goal: z.string().optional(),
+    branch: z.string().optional(),
+    head_sha: z.string().optional(),
+    task_count: z.number().int().nonnegative(),
+    handoff_ids: z.array(z.string()),
+  })
+  .strict();
+export type RunRecord = z.infer<typeof RunRecord>;
+
+export const TaskLedgerStatus = z.enum([
+  "pending",
+  "dispatched",
+  "completed",
+  "failed",
+  "blocked",
+]);
+export type TaskLedgerStatus = z.infer<typeof TaskLedgerStatus>;
+
+export const TaskLedgerEntry = z
+  .object({
+    seq: z.number().int().min(1),
+    task_id: z.string().min(1),
+    run_id: z.string().min(1),
+    user_input: z.string(),
+    status: TaskLedgerStatus,
+    handoff_id: z.string().optional(),
+    target_agent: z.string().optional(),
+    model: z.string().optional(),
+    effort: z.string().optional(),
+    mode: z.string().optional(),
+    result_summary: z.string().max(200).optional(),
+    created_at: z.string().min(1),
+    updated_at: z.string().min(1),
+  })
+  .strict();
+export type TaskLedgerEntry = z.infer<typeof TaskLedgerEntry>;
+
+export const ContinuationPacket = z
+  .object({
+    run_id: z.string().min(1),
+    generated_at: z.string().min(1),
+    context_summary: z.string().max(500),
+    completed_task_ids: z.array(z.string()),
+    pending_task_ids: z.array(z.string()),
+    last_handoff_id: z.string().optional(),
+    last_handoff_status: z.string().optional(),
+    open_questions: z.array(z.string()),
+    next_action: z.string(),
+    files_modified: z.array(z.string()),
+    token_budget_note: z.string(),
+  })
+  .strict();
+export type ContinuationPacket = z.infer<typeof ContinuationPacket>;
+
+export const SourceIndexAction = z.enum(["created", "modified", "deleted"]);
+export type SourceIndexAction = z.infer<typeof SourceIndexAction>;
+
+export const SourceIndexEntry = z
+  .object({
+    path: z.string().min(1),
+    action: SourceIndexAction,
+    handoff_id: z.string().optional(),
+    task_seq: z.number().int().positive().optional(),
+    ts: z.string().min(1),
+  })
+  .strict();
+export type SourceIndexEntry = z.infer<typeof SourceIndexEntry>;
+
+export const ExecutionWorkspaceKind = z.enum([
+  "git_worktree",
+  "main_checkout",
+  "external_checkout",
+]);
+export type ExecutionWorkspaceKind = z.infer<typeof ExecutionWorkspaceKind>;
+
+export const ExecutionWorkspaceOwner = z.enum([
+  "claude",
+  "codex",
+  "human",
+  "other",
+]);
+export type ExecutionWorkspaceOwner = z.infer<typeof ExecutionWorkspaceOwner>;
+
+export const ExecutionWorkspaceStatus = z.enum([
+  "active",
+  "merged",
+  "abandoned",
+  "cleaned",
+]);
+export type ExecutionWorkspaceStatus = z.infer<typeof ExecutionWorkspaceStatus>;
+
+export const ExecutionWorkspaceCleanupPolicy = z.enum([
+  "manual",
+  "auto_on_merge",
+  "auto_on_complete",
+]);
+export type ExecutionWorkspaceCleanupPolicy = z.infer<
+  typeof ExecutionWorkspaceCleanupPolicy
+>;
+
+export const ExecutionWorkspace = z
+  .object({
+    id: z.string().regex(/^w_/, "ExecutionWorkspace.id must start with w_"),
+    run_id: z.string().min(1),
+    task_id: z.string().optional(),
+    kind: ExecutionWorkspaceKind,
+    path: z.string().min(1),
+    branch: z.string().optional(),
+    base_sha: z.string().optional(),
+    head_sha: z.string().optional(),
+    owner_agent: ExecutionWorkspaceOwner,
+    purpose: z.string().optional(),
+    status: ExecutionWorkspaceStatus,
+    created_at: z.string().min(1),
+    updated_at: z.string().min(1),
+    cleanup_policy: ExecutionWorkspaceCleanupPolicy,
+    related_handoff_id: z.string().optional(),
+  })
+  .strict();
+export type ExecutionWorkspace = z.infer<typeof ExecutionWorkspace>;
