@@ -644,8 +644,26 @@ export function resolveConversationProvider(
   return new ConfiguredConversationProvider(providerConfig, scope);
 }
 
-async function appendConversationLog(messages: ConversationMessage[]): Promise<void> {
-  const dir = join(process.cwd(), ".relayos", "overseer");
+/**
+ * Append a conversation transcript to `<projectRoot>/.relayos/overseer/conversation_log.jsonl`.
+ *
+ * `projectRoot` is REQUIRED — callers must pass `scope.projectRoot`.
+ * Previously this used `process.cwd()`, which silently wrote to
+ * `bin/.relayos/overseer/conversation_log.jsonl` when the CLI ran from
+ * the `bin/` directory and leaked private session content into git
+ * (see plan §6.4 + Batch 1 gitignore fix).
+ *
+ * Exported for tests; production code paths reach it through
+ * `handleConversation`.
+ */
+export async function appendConversationLog(
+  messages: ConversationMessage[],
+  projectRoot: string,
+): Promise<void> {
+  if (!projectRoot) {
+    throw new Error("appendConversationLog: projectRoot is required");
+  }
+  const dir = join(projectRoot, ".relayos", "overseer");
   await mkdir(dir, { recursive: true });
   const logPath = join(dir, "conversation_log.jsonl");
   const now = new Date().toISOString();
@@ -665,7 +683,7 @@ export async function handleConversation(
 ): Promise<ConversationResult> {
   const configs = resolveConversationProviderConfigs(config);
   if (configs.length === 0) {
-    await appendConversationLog(messages);
+    await appendConversationLog(messages, scope.projectRoot);
     return {
       reply:
         "provider-not-configured: set overseer.provider, overseer.kind, and overseer.model in .relayos/config.json.",
@@ -694,7 +712,10 @@ export async function handleConversation(
     }
     lastReply = `${reply}\n[fallback] switching to backup provider (${i + 2}/${effective.length})...`;
   }
-  await appendConversationLog([...messages, { role: "assistant", content: lastReply }]);
+  await appendConversationLog(
+    [...messages, { role: "assistant", content: lastReply }],
+    scope.projectRoot,
+  );
   return {
     reply: lastReply,
     providerUsed: used,
