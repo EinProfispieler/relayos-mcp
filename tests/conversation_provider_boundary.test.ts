@@ -75,7 +75,7 @@ describe("conversation provider project boundary", () => {
       projectRoot,
     });
 
-    expect(result.reply).toContain("SYSTEM BOUNDARY INSTRUCTIONS:");
+    expect(result.reply).toContain("OPERATING INSTRUCTIONS");
     expect(result.reply).toContain(`Allowed context is only the current project/worktree root: ${projectRoot}`);
     expect(result.reply).toContain("Do not read, cite, summarize, or rely on files outside this project/worktree.");
     expect(result.reply).toContain("Do not edit files.");

@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import type { RelayConfig } from "./schema.js";
 import { decryptConfigSecret } from "./secret_crypto.js";
 import { getProjectConfigSecret } from "./config_secret.js";
+import { OVERSEER_ROLE_TEXT } from "./overseer/role.js";
 
 export interface ConversationProvider {
   chat(messages: ConversationMessage[]): Promise<string>;
@@ -138,6 +139,37 @@ async function runApiProvider(
   const format = inferApiFormat(cfg);
   const base = resolveApiBase(cfg);
   const endpoint = buildEndpoint(base, format);
+
+  // Build the overseer system prompt — same identity + context as CLI providers.
+  // Append routing/action-intent instructions so API providers can also emit ACTION_INTENT.
+  const overseerContext = await buildOverseerContextBundle(scope.projectRoot);
+  const systemPrompt = [
+    overseerContext,
+    "",
+    "=== OPERATING INSTRUCTIONS ===",
+    `- Allowed context is only the current project/worktree root: ${scope.projectRoot}`,
+    "- Do not read, cite, summarize, or rely on files outside this project/worktree.",
+    "- Do not edit files. Do not run shell commands.",
+    "- Do not claim any tests/builds/commands were executed.",
+    "- Always return a normal human-facing answer.",
+    "- If the user appears to be asking for project work, you may append one optional ACTION_INTENT block at the end.",
+    "- PROVIDER ROUTING GUIDANCE — target by task fit:",
+    "  - codex: implementation, patches, refactors, writing/running tests.",
+    "  - claude: review, planning, code analysis, explanation, documentation.",
+    "  - overseer: discussion, clarification, no agent dispatch.",
+    "- ACTION_INTENT format (optional, at end of reply):",
+    "ACTION_INTENT",
+    "intent_type: conversation | create_task | create_handoff | review | release_control | project_plan",
+    "confidence: 0.0-1.0",
+    "summary: one-line description",
+    "target: codex | claude | overseer",
+    "model: <model id>",
+    "effort: low | medium | high | xhigh | max",
+    "mode: patch | plan | review | test",
+    "approval_required: true | false",
+    "END_ACTION_INTENT",
+  ].join("\n");
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);
   try {
@@ -154,6 +186,7 @@ async function runApiProvider(
         body: JSON.stringify({
           model: cfg.model,
           max_tokens: 1024,
+          system: systemPrompt,
           messages: [{ role: "user", content: userText }],
         }),
         signal: controller.signal,
@@ -167,6 +200,11 @@ async function runApiProvider(
       return text && text.length > 0 ? text : `provider-execution-failed: ${providerLabel} empty response.`;
     }
 
+    // openai_compatible (GLM, OpenAI-compatible APIs): prepend system message
+    const apiMessages = [
+      { role: "system" as const, content: systemPrompt },
+      ...messages.map((m) => ({ role: m.role, content: m.content })),
+    ];
     const resp = await fetch(endpoint, {
       method: "POST",
       headers: {
@@ -175,7 +213,7 @@ async function runApiProvider(
       },
       body: JSON.stringify({
         model: cfg.model,
-        messages: messages.map((m) => ({ role: m.role, content: m.content })),
+        messages: apiMessages,
         temperature: 0.2,
       }),
       signal: controller.signal,
@@ -313,7 +351,7 @@ async function runLocalCommandProvider(
   providerLabel: string,
 ): Promise<string> {
   const effort = cfg.effort ?? "medium";
-  const scopedInput = buildScopedProviderInput(scope.projectRoot, userMessage);
+  const scopedInput = await buildScopedProviderInput(scope.projectRoot, userMessage);
   const hasInputPlaceholder = cfg.args.some((arg) => arg.includes("{{input}}"));
   const argv = cfg.args.map((arg) =>
     arg
@@ -549,8 +587,24 @@ function providerKey(cfg: ResolvedConversationProviderConfig): string {
   return cfg.id ?? `${cfg.provider}:${cfg.model}:${cfg.kind}`;
 }
 
-async function readProviderCooldowns(): Promise<ProviderCooldownState> {
-  const dir = join(process.cwd(), ".relayos", "overseer");
+/**
+ * Read provider cooldown state from
+ * `<projectRoot>/.relayos/overseer/provider_cooldowns.json`.
+ *
+ * `projectRoot` is REQUIRED. Previously this used `process.cwd()`,
+ * which leaked the cooldown file into `bin/.relayos/overseer/` when
+ * invoked off-root (same class as the `appendConversationLog` bug
+ * fixed in Batch 2).
+ *
+ * Exported for tests.
+ */
+export async function readProviderCooldowns(
+  projectRoot: string,
+): Promise<ProviderCooldownState> {
+  if (!projectRoot) {
+    throw new Error("readProviderCooldowns: projectRoot is required");
+  }
+  const dir = join(projectRoot, ".relayos", "overseer");
   const file = join(dir, PROVIDER_COOLDOWN_FILE);
   try {
     const raw = await readFile(file, "utf8");
@@ -564,8 +618,21 @@ async function readProviderCooldowns(): Promise<ProviderCooldownState> {
   }
 }
 
-async function writeProviderCooldowns(state: ProviderCooldownState): Promise<void> {
-  const dir = join(process.cwd(), ".relayos", "overseer");
+/**
+ * Write provider cooldown state to
+ * `<projectRoot>/.relayos/overseer/provider_cooldowns.json`.
+ *
+ * `projectRoot` is REQUIRED. Throws on empty string — no silent
+ * fallback to cwd. Exported for tests.
+ */
+export async function writeProviderCooldowns(
+  state: ProviderCooldownState,
+  projectRoot: string,
+): Promise<void> {
+  if (!projectRoot) {
+    throw new Error("writeProviderCooldowns: projectRoot is required");
+  }
+  const dir = join(projectRoot, ".relayos", "overseer");
   await mkdir(dir, { recursive: true });
   const file = join(dir, PROVIDER_COOLDOWN_FILE);
   await writeFile(file, `${JSON.stringify(state, null, 2)}\n`, "utf8");
@@ -575,21 +642,25 @@ async function setProviderCooldown(
   cfg: ResolvedConversationProviderConfig,
   durationMs: number,
   reason: string,
+  projectRoot: string,
 ): Promise<void> {
   const key = providerKey(cfg);
-  const state = await readProviderCooldowns();
+  const state = await readProviderCooldowns(projectRoot);
   const until = new Date(Date.now() + durationMs).toISOString();
   state.providers[key] = {
     blocked_until: until,
     reason,
     updated_at: new Date().toISOString(),
   };
-  await writeProviderCooldowns(state);
+  await writeProviderCooldowns(state, projectRoot);
 }
 
-async function isProviderBlocked(cfg: ResolvedConversationProviderConfig): Promise<boolean> {
+async function isProviderBlocked(
+  cfg: ResolvedConversationProviderConfig,
+  projectRoot: string,
+): Promise<boolean> {
   const key = providerKey(cfg);
-  const state = await readProviderCooldowns();
+  const state = await readProviderCooldowns(projectRoot);
   const entry = state.providers[key];
   if (!entry) return false;
   const until = Date.parse(entry.blocked_until);
@@ -606,8 +677,26 @@ export function resolveConversationProvider(
   return new ConfiguredConversationProvider(providerConfig, scope);
 }
 
-async function appendConversationLog(messages: ConversationMessage[]): Promise<void> {
-  const dir = join(process.cwd(), ".relayos", "overseer");
+/**
+ * Append a conversation transcript to `<projectRoot>/.relayos/overseer/conversation_log.jsonl`.
+ *
+ * `projectRoot` is REQUIRED — callers must pass `scope.projectRoot`.
+ * Previously this used `process.cwd()`, which silently wrote to
+ * `bin/.relayos/overseer/conversation_log.jsonl` when the CLI ran from
+ * the `bin/` directory and leaked private session content into git
+ * (see plan §6.4 + Batch 1 gitignore fix).
+ *
+ * Exported for tests; production code paths reach it through
+ * `handleConversation`.
+ */
+export async function appendConversationLog(
+  messages: ConversationMessage[],
+  projectRoot: string,
+): Promise<void> {
+  if (!projectRoot) {
+    throw new Error("appendConversationLog: projectRoot is required");
+  }
+  const dir = join(projectRoot, ".relayos", "overseer");
   await mkdir(dir, { recursive: true });
   const logPath = join(dir, "conversation_log.jsonl");
   const now = new Date().toISOString();
@@ -627,7 +716,7 @@ export async function handleConversation(
 ): Promise<ConversationResult> {
   const configs = resolveConversationProviderConfigs(config);
   if (configs.length === 0) {
-    await appendConversationLog(messages);
+    await appendConversationLog(messages, scope.projectRoot);
     return {
       reply:
         "provider-not-configured: set overseer.provider, overseer.kind, and overseer.model in .relayos/config.json.",
@@ -639,7 +728,7 @@ export async function handleConversation(
   let used = "configured";
   const active: ResolvedConversationProviderConfig[] = [];
   for (const cfg of configs) {
-    if (!(await isProviderBlocked(cfg))) active.push(cfg);
+    if (!(await isProviderBlocked(cfg, scope.projectRoot))) active.push(cfg);
   }
   const effective = active.length > 0 ? active : configs;
   for (let i = 0; i < effective.length; i++) {
@@ -648,7 +737,12 @@ export async function handleConversation(
     const reply = await provider.chat(messages);
     used = `${cfg.provider}/${cfg.model}/${cfg.kind}`;
     if (isUsageLimitFailure(reply)) {
-      await setProviderCooldown(cfg, 5 * 60 * 60 * 1000, "usage limit reached");
+      await setProviderCooldown(
+        cfg,
+        5 * 60 * 60 * 1000,
+        "usage limit reached",
+        scope.projectRoot,
+      );
     }
     if (!isFallbackEligibleFailure(reply) || i === effective.length - 1) {
       lastReply = reply;
@@ -656,7 +750,10 @@ export async function handleConversation(
     }
     lastReply = `${reply}\n[fallback] switching to backup provider (${i + 2}/${effective.length})...`;
   }
-  await appendConversationLog([...messages, { role: "assistant", content: lastReply }]);
+  await appendConversationLog(
+    [...messages, { role: "assistant", content: lastReply }],
+    scope.projectRoot,
+  );
   return {
     reply: lastReply,
     providerUsed: used,
@@ -664,9 +761,124 @@ export async function handleConversation(
   };
 }
 
-function buildScopedProviderInput(projectRoot: string, userMessage: string): string {
+// ── Overseer identity + context ────────────────────────────────────────────
+
+/**
+ * Load a text file from the overseer dir, capping at `maxChars` characters
+ * (a soft byte bound). Returns null when the file is missing or unreadable.
+ */
+async function loadOverseerFile(overseerDir: string, name: string, maxChars: number): Promise<string | null> {
+  try {
+    const content = (await readFile(join(overseerDir, name), "utf8")).trim();
+    if (content.length <= maxChars) return content;
+    // Truncate by code point so a multi-unit character is never split mid-way.
+    const codePoints = [...content];
+    return codePoints.length > maxChars
+      ? codePoints.slice(0, maxChars).join("") + "\n[…truncated]"
+      : content;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Load the last `n` JSONL records from a file, extract a text field.
+ */
+async function loadOverseerJsonlTail(
+  overseerDir: string,
+  name: string,
+  n: number,
+  extract: (parsed: Record<string, unknown>) => string | null,
+): Promise<string[]> {
+  try {
+    const content = await readFile(join(overseerDir, name), "utf8");
+    const lines = content.trim().split("\n").filter(Boolean);
+    const tail = lines.slice(-n);
+    return tail.flatMap((l) => {
+      try {
+        const p = JSON.parse(l) as Record<string, unknown>;
+        const s = extract(p);
+        return s ? [s] : [];
+      } catch {
+        return [];
+      }
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Build the fixed 4-layer Overseer context bundle prepended to every
+ * conversation turn:
+ *   Layer 1 — identity (OVERSEER_ROLE_TEXT, a tracked product constant)
+ *   Layer 2 — policy   (OPERATING_POLICY / FORBIDDEN_ACTIONS / MODEL_POLICY)
+ *   Layer 3 — project  (PROJECT_BRIEF / CURRENT_STATE / TODO / NEXT_ACTION)
+ *   Layer 4 — recent truth (recent decisions / timeline / handoff results)
+ * Layers 2-4 read the project's `.relayos/overseer/` directory; missing files
+ * are omitted gracefully. Returns a plain text block ready to embed.
+ */
+async function buildOverseerContextBundle(projectRoot: string): Promise<string> {
+  const overseerDir = join(projectRoot, ".relayos", "overseer");
+
+  // Layer 2 — policy (each capped at ~4 KB)
+  const [policy, forbidden, modelPolicy] = await Promise.all([
+    loadOverseerFile(overseerDir, "OPERATING_POLICY.md", 4096),
+    loadOverseerFile(overseerDir, "FORBIDDEN_ACTIONS.md", 4096),
+    loadOverseerFile(overseerDir, "MODEL_POLICY.md", 4096),
+  ]);
+
+  // Layer 3 — project (each capped at ~8 KB)
+  const [brief, state, todo, nextAction] = await Promise.all([
+    loadOverseerFile(overseerDir, "PROJECT_BRIEF.md", 8192),
+    loadOverseerFile(overseerDir, "CURRENT_STATE.md", 8192),
+    loadOverseerFile(overseerDir, "TODO.md", 8192),
+    loadOverseerFile(overseerDir, "NEXT_ACTION.md", 8192),
+  ]);
+
+  // Layer 4 — recent truth
+  const [decisions, timeline, results] = await Promise.all([
+    loadOverseerJsonlTail(overseerDir, "decisions.jsonl", 5,
+      (p) => typeof p["text"] === "string" ? `  - ${p["text"].slice(0, 200)}` : null),
+    loadOverseerJsonlTail(overseerDir, "timeline.jsonl", 8,
+      (p) => {
+        const ts = typeof p["ts"] === "string" ? p["ts"].slice(0, 10) : "?";
+        return typeof p["text"] === "string" ? `  [${ts}] ${p["text"].slice(0, 200)}` : null;
+      }),
+    loadOverseerJsonlTail(overseerDir, "handoff_results.jsonl", 3,
+      (p) => typeof p["summary"] === "string"
+        ? `  [${p["status"] ?? "?"}] ${p["summary"].slice(0, 150)}`
+        : null),
+  ]);
+
+  // Assemble — Layer 1 (identity) first, then Layers 2/3/4 in order.
+  const parts: string[] = [OVERSEER_ROLE_TEXT];
+
+  // Layer 2
+  if (policy) parts.push("", "=== OPERATING POLICY ===", policy);
+  if (forbidden) parts.push("", "=== FORBIDDEN ACTIONS ===", forbidden);
+  if (modelPolicy) parts.push("", "=== MODEL POLICY ===", modelPolicy);
+
+  // Layer 3
+  if (brief) parts.push("", "=== PROJECT BRIEF ===", brief);
+  if (state) parts.push("", "=== CURRENT STATE ===", state);
+  if (todo) parts.push("", "=== TODO ===", todo);
+  if (nextAction) parts.push("", "=== NEXT ACTION ===", nextAction);
+
+  // Layer 4
+  if (decisions.length > 0) parts.push("", "=== RECENT DECISIONS ===", decisions.join("\n"));
+  if (timeline.length > 0) parts.push("", "=== RECENT TIMELINE ===", timeline.join("\n"));
+  if (results.length > 0) parts.push("", "=== RECENT HANDOFF RESULTS ===", results.join("\n"));
+
+  return parts.join("\n");
+}
+
+async function buildScopedProviderInput(projectRoot: string, userMessage: string): Promise<string> {
+  const identity = await buildOverseerContextBundle(projectRoot);
   return [
-    "SYSTEM BOUNDARY INSTRUCTIONS:",
+    identity,
+    "",
+    "=== OPERATING INSTRUCTIONS ===",
     `- Allowed context is only the current project/worktree root: ${projectRoot}`,
     "- Do not read, cite, summarize, or rely on files outside this project/worktree.",
     "- Do not read ~/.agent-access.md or any home-directory files unless the user explicitly approves it.",
