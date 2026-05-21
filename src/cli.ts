@@ -85,6 +85,24 @@ import {
   buildPlanReport,
   persistPlanReport,
 } from "./project_plan.js";
+import { newRunId } from "./id.js";
+import {
+  appendTaskLedgerEntry,
+  clearActiveRunId,
+  listRuns,
+  readActiveRunId,
+  readContinuationPacket,
+  readRunRecord,
+  readTaskLedgerEntries,
+  setActiveRunId,
+  writeContinuationPacket,
+  writeRunRecord,
+} from "./run_ledger.js";
+import type {
+  ContinuationPacket,
+  RunRecord,
+} from "./schema.js";
+import { execSync } from "node:child_process";
 
 export interface CliIO {
   stdout: { write: (chunk: string) => unknown; isTTY?: boolean };
@@ -2884,6 +2902,193 @@ async function runOverseerProgress(args: string[], io: CliIO): Promise<number> {
   return 0;
 }
 
+/**
+ * `overseer run <sub>` dispatcher — the Run Ledger / Continuity Layer CLI.
+ *
+ * Storage is in `<cwd>/.relayos/overseer/runs/<run_id>/...` via the
+ * helpers in `src/run_ledger.ts` (landed in Batch 1).
+ *
+ * Subcommands: start | current | resume | compact | complete | abandon | list
+ */
+async function runOverseerRun(
+  sub: string,
+  args: string[],
+  io: CliIO,
+): Promise<number> {
+  const cwd = process.cwd();
+
+  const goalFlagIdx = args.indexOf("--goal");
+  const goal = goalFlagIdx >= 0 ? args[goalFlagIdx + 1] : undefined;
+
+  switch (sub) {
+    case "start": {
+      const existing = await readActiveRunId(cwd);
+      if (existing) {
+        io.stdout.write(existing + "\n");
+        return 0;
+      }
+      const id = newRunId();
+      let branch: string | undefined;
+      let head_sha: string | undefined;
+      try {
+        branch = execSync("git rev-parse --abbrev-ref HEAD", {
+          cwd,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        }).trim();
+        head_sha = execSync("git rev-parse HEAD", {
+          cwd,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        }).trim();
+      } catch {
+        // Not a git repo — leave branch/head_sha undefined.
+      }
+      const run: RunRecord = {
+        id,
+        status: "active",
+        started_at: new Date().toISOString(),
+        goal,
+        branch,
+        head_sha,
+        task_count: 0,
+        handoff_ids: [],
+      };
+      await writeRunRecord(cwd, run);
+      await setActiveRunId(cwd, id);
+      io.stdout.write(id + "\n");
+      return 0;
+    }
+
+    case "current": {
+      const runId = await readActiveRunId(cwd);
+      if (!runId) {
+        io.stderr.write("No active run\n");
+        return 1;
+      }
+      const run = await readRunRecord(cwd, runId);
+      const recent_tasks = await readTaskLedgerEntries(cwd, runId, 10);
+      const continuation = await readContinuationPacket(cwd, runId);
+      io.stdout.write(JSON.stringify({ run, recent_tasks, continuation }, null, 2) + "\n");
+      return 0;
+    }
+
+    case "resume": {
+      const runId = args.find((a) => a.startsWith("r_"));
+      if (!runId) {
+        io.stderr.write("Usage: overseer run resume <run-id>\n");
+        return 1;
+      }
+      const run = await readRunRecord(cwd, runId);
+      if (!run) {
+        io.stderr.write(`Run ${runId} not found\n`);
+        return 1;
+      }
+      if (run.status === "abandoned") {
+        io.stderr.write(`Run ${runId} was abandoned; cannot resume\n`);
+        return 1;
+      }
+      await setActiveRunId(cwd, runId);
+      const continuation = await readContinuationPacket(cwd, runId);
+      io.stdout.write(
+        JSON.stringify({ resumed: runId, continuation }, null, 2) + "\n",
+      );
+      return 0;
+    }
+
+    case "compact": {
+      const runId = await readActiveRunId(cwd);
+      if (!runId) {
+        io.stderr.write("No active run\n");
+        return 1;
+      }
+      const run = await readRunRecord(cwd, runId);
+      const allEntries = await readTaskLedgerEntries(cwd, runId, 1000);
+      const completed = allEntries
+        .filter((e) => e.status === "completed")
+        .map((e) => e.task_id);
+      const pending = allEntries
+        .filter((e) => e.status === "pending" || e.status === "dispatched")
+        .map((e) => e.task_id);
+      const lastWithHandoff = [...allEntries]
+        .reverse()
+        .find((e) => e.handoff_id);
+      const packet: ContinuationPacket = {
+        run_id: runId,
+        generated_at: new Date().toISOString(),
+        context_summary: (run?.goal ?? "No goal set").slice(0, 500),
+        completed_task_ids: completed,
+        pending_task_ids: pending,
+        last_handoff_id: lastWithHandoff?.handoff_id,
+        last_handoff_status: lastWithHandoff?.status,
+        open_questions: [],
+        next_action:
+          pending.length > 0
+            ? `Continue task: ${pending[0]}`
+            : "All tasks complete",
+        files_modified: [],
+        token_budget_note: `${allEntries.length} total tasks; compact at ${new Date().toISOString()}`,
+      };
+      await writeContinuationPacket(cwd, runId, packet);
+      io.stdout.write(JSON.stringify(packet, null, 2) + "\n");
+      return 0;
+    }
+
+    case "complete": {
+      const runId = await readActiveRunId(cwd);
+      if (!runId) {
+        io.stderr.write("No active run\n");
+        return 1;
+      }
+      const run = await readRunRecord(cwd, runId);
+      if (!run) {
+        io.stderr.write(`Run record missing for ${runId}\n`);
+        return 1;
+      }
+      await writeRunRecord(cwd, {
+        ...run,
+        status: "completed",
+        ended_at: new Date().toISOString(),
+      });
+      await clearActiveRunId(cwd);
+      io.stdout.write(`Run ${runId} completed\n`);
+      return 0;
+    }
+
+    case "abandon": {
+      const runId = await readActiveRunId(cwd);
+      if (!runId) {
+        io.stderr.write("No active run\n");
+        return 1;
+      }
+      const run = await readRunRecord(cwd, runId);
+      if (run) {
+        await writeRunRecord(cwd, {
+          ...run,
+          status: "abandoned",
+          ended_at: new Date().toISOString(),
+        });
+      }
+      await clearActiveRunId(cwd);
+      io.stdout.write(`Run ${runId} abandoned\n`);
+      return 0;
+    }
+
+    case "list": {
+      const all = await listRuns(cwd);
+      io.stdout.write(JSON.stringify(all, null, 2) + "\n");
+      return 0;
+    }
+
+    default:
+      io.stderr.write(
+        `Unknown run subcommand: ${sub || "(none)"}\n` +
+          "usage: overseer run <start|current|resume|compact|complete|abandon|list> [args...]\n",
+      );
+      return 1;
+  }
+}
+
 async function runOverseer(args: string[], io: CliIO): Promise<number> {
   const [sub, ...rest] = args;
   if (sub === "status") return runOverseerStatus(rest, io);
@@ -2922,8 +3127,12 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "init-context") return runOverseerInitContext(rest, io);
   if (sub === "branch") return runOverseerBranch(rest, io);
   if (sub === "progress") return runOverseerProgress(rest, io);
+  if (sub === "run") {
+    const [runSub, ...runRest] = rest;
+    return runOverseerRun(runSub ?? "", runRest, io);
+  }
   io.stderr.write(
-    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|capabilities|summary|memory-index|doctor|role-profile|wake-instructions|init|note|decision|decisions|handoff-result|handoff-results|execute-handoff|plan-extract|plan-answer|plan-task-handoff|plan-execute-task|plan-report|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n" +
+    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|capabilities|summary|memory-index|doctor|role-profile|wake-instructions|init|note|decision|decisions|handoff-result|handoff-results|execute-handoff|plan-extract|plan-answer|plan-task-handoff|plan-execute-task|plan-report|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress|run> [args...]\n" +
       "  overseer execute-handoff <id>   launch Codex for a recorded handoff and capture result\n" +
       "  overseer plan-extract <id>              parse the PROJECT_PLAN block from a completed plan handoff\n" +
       "  overseer plan-answer <plan_id> <text>   append an answer to an open plan\n" +

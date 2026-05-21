@@ -3,6 +3,12 @@ import { execFile } from "node:child_process";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { TaskRecord as TaskRecordSchema, type TaskRecord } from "./schema.js";
+import {
+  readActiveRunId,
+  readContinuationPacket,
+  readRunRecord,
+  readTaskLedgerEntries,
+} from "./run_ledger.js";
 
 export interface OverseerLayout {
   dir: string;
@@ -295,6 +301,36 @@ export interface OverseerContextPackNote {
   text: string;
 }
 
+/**
+ * Compact summary of the active Run Ledger run, surfaced into the
+ * overseer context pack so agents see "what run am I on, what was the
+ * goal, what's next?" without reading the full ledger.
+ *
+ * Populated by `buildOverseerContextPack` when `active_run.json` is
+ * present. `null` when no run is active — recovery protocol step 1 (§6).
+ */
+export interface ActiveRunSummary {
+  run_id: string;
+  status: "active" | "completed" | "abandoned";
+  goal: string | null;
+  branch: string | null;
+  task_count: number;
+  recent_task_summaries: Array<{
+    seq: number;
+    status: string;
+    user_input: string;
+  }>;
+  continuation: {
+    context_summary: string;
+    completed_task_ids: string[];
+    pending_task_ids: string[];
+    last_handoff_id: string | null;
+    last_handoff_status: string | null;
+    next_action: string;
+    files_modified: string[];
+  } | null;
+}
+
 export interface OverseerContextPack {
   ok: boolean;
   protocol: "relayos-overseer-session-v1";
@@ -316,6 +352,8 @@ export interface OverseerContextPack {
   model_policy: string | null;
   recommended_prompt: string;
   evidence_links: string[];
+  /** Run Ledger / Continuity Layer (§6 — recovery protocol). Null when no run is active. */
+  active_run: ActiveRunSummary | null;
   notes: string[];
 }
 
@@ -636,6 +674,52 @@ function buildEvidenceLinks(cwd: string): string[] {
   ];
 }
 
+/**
+ * Read the Run Ledger active-run summary into a compact shape suitable
+ * for injection into the overseer context pack. Returns `null` when no
+ * run is active OR when the active pointer references a missing run
+ * record (the latter shouldn't normally happen but is handled
+ * defensively so the pack never throws on a malformed pointer).
+ *
+ * Surfaces §6 recovery state: active run id, goal, last 5 task ledger
+ * entries (deduped, seq-sorted), and the continuation packet (if any).
+ */
+async function buildActiveRunSummary(
+  cwd: string,
+): Promise<ActiveRunSummary | null> {
+  const runId = await readActiveRunId(cwd);
+  if (!runId) return null;
+  const run = await readRunRecord(cwd, runId);
+  if (!run) return null;
+  const [recent, continuation] = await Promise.all([
+    readTaskLedgerEntries(cwd, runId, 5),
+    readContinuationPacket(cwd, runId),
+  ]);
+  return {
+    run_id: runId,
+    status: run.status,
+    goal: run.goal ?? null,
+    branch: run.branch ?? null,
+    task_count: run.task_count,
+    recent_task_summaries: recent.map((e) => ({
+      seq: e.seq,
+      status: e.status,
+      user_input: e.user_input.slice(0, 120),
+    })),
+    continuation: continuation
+      ? {
+          context_summary: continuation.context_summary,
+          completed_task_ids: continuation.completed_task_ids,
+          pending_task_ids: continuation.pending_task_ids,
+          last_handoff_id: continuation.last_handoff_id ?? null,
+          last_handoff_status: continuation.last_handoff_status ?? null,
+          next_action: continuation.next_action,
+          files_modified: continuation.files_modified,
+        }
+      : null,
+  };
+}
+
 export async function buildOverseerContextPack(
   cwd: string,
   limit: number,
@@ -651,6 +735,7 @@ export async function buildOverseerContextPack(
     notes,
     decisions,
     handoffResults,
+    active_run,
   ] = await Promise.all([
     readOverseerContextSnapshot(cwd),
     readOverseerHandshakeSnapshot(cwd),
@@ -661,6 +746,7 @@ export async function buildOverseerContextPack(
     readLatestNotes(layout, limit),
     readLatestDecisions(layout, limit),
     readLatestHandoffResults(layout, limit),
+    buildActiveRunSummary(cwd),
   ]);
 
   return {
@@ -684,6 +770,7 @@ export async function buildOverseerContextPack(
     model_policy: compactText(modelPolicyRaw),
     recommended_prompt: buildRecommendedPrompt(),
     evidence_links: buildEvidenceLinks(cwd),
+    active_run,
     notes: [
       "Curated context pack is compact by design; no raw full chat transcript sync.",
       "Read-only tool: does not create, modify, or delete .relayos/overseer files.",
