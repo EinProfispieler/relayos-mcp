@@ -3,28 +3,47 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  appendDraftReply,
   appendExecutionWorkspace,
+  appendRepairAttempt,
+  appendRepairDecision,
+  appendReviewEvent,
+  appendReviewFinding,
   appendSourceIndexEntry,
   appendTaskLedgerEntry,
   clearActiveRunId,
   listRuns,
+  readActiveRepairDecision,
   readActiveRunId,
   readContinuationPacket,
+  readDraftReplies,
   readExecutionWorkspaces,
+  readLatestRepairAttempt,
+  readRepairAttempts,
+  readRepairGuidance,
+  readReviewEvents,
+  readReviewFindings,
   readRunRecord,
   readSourceIndexEntries,
   readTaskLedgerEntries,
   resolveActiveRunPath,
   resolveRunLayout,
   resolveRunsDir,
+  resolveTaskLayout,
   setActiveRunId,
   updateExecutionWorkspaceStatus,
   writeContinuationPacket,
+  writeRepairGuidance,
   writeRunRecord,
 } from "../src/run_ledger.js";
 import type {
   ContinuationPacket,
+  DraftReply,
   ExecutionWorkspace,
+  RepairAttempt,
+  RepairPolicyDecision,
+  ReviewFinding,
+  ReviewLoopEvent,
   RunRecord,
   SourceIndexEntry,
   TaskLedgerEntry,
@@ -400,5 +419,476 @@ describe("execution workspaces", () => {
     await expect(
       updateExecutionWorkspaceStatus(cwd, runId, "w_NOTFOUND", "merged"),
     ).rejects.toThrow(/not found/);
+  });
+});
+
+// ── Task 11 — task-scoped storage helpers (Plan §4) ──────────────────
+
+const RUN_ID = "r_01HXABCDEFGHJKMNPQRSTVWXYZ";
+const TASK_ID = "t_1";
+
+function isoAt(year: number, month: number, day: number, hour = 10): string {
+  // Returns "YYYY-MM-DDTHH:00:00Z" — predictable, ascii-sortable, no
+  // dependency on the current clock. Lets tests assert dedup/order
+  // deterministically.
+  const m = month.toString().padStart(2, "0");
+  const d = day.toString().padStart(2, "0");
+  const h = hour.toString().padStart(2, "0");
+  return `${year}-${m}-${d}T${h}:00:00Z`;
+}
+
+describe("resolveTaskLayout", () => {
+  it("returns paths under <runDir>/tasks/<task_id>/", () => {
+    const layout = resolveTaskLayout(cwd, RUN_ID, TASK_ID);
+    expect(layout.taskDir).toContain(
+      join("runs", RUN_ID, "tasks", TASK_ID),
+    );
+    expect(layout.taskLedgerMd).toMatch(/TASK_LEDGER\.md$/);
+    expect(layout.reviewFindings).toMatch(/REVIEW_FINDINGS\.jsonl$/);
+    expect(layout.repairAttempts).toMatch(/REPAIR_ATTEMPTS\.jsonl$/);
+    expect(layout.repairDecisions).toMatch(/REPAIR_DECISIONS\.jsonl$/);
+    expect(layout.draftReplies).toMatch(/DRAFT_REPLIES\.jsonl$/);
+    expect(layout.repairGuidance).toMatch(/REPAIR_GUIDANCE\.md$/);
+    expect(layout.reviewEvents).toMatch(/REVIEW_EVENTS\.jsonl$/);
+  });
+
+  it("different task IDs resolve to different directories", () => {
+    const a = resolveTaskLayout(cwd, RUN_ID, "t_a");
+    const b = resolveTaskLayout(cwd, RUN_ID, "t_b");
+    expect(a.taskDir).not.toBe(b.taskDir);
+  });
+});
+
+// ── ReviewFinding ─────────────────────────────────────────────────────
+
+describe("review findings", () => {
+  function makeFinding(o: Partial<ReviewFinding> = {}): ReviewFinding {
+    return {
+      id: "f_01HXABCDEFGHJKMNPQRSTVWXYZ",
+      run_id: RUN_ID,
+      task_id: TASK_ID,
+      reviewer: "claude",
+      severity: "warn",
+      category: "missing_tests",
+      title: "Default title",
+      summary: "Default summary",
+      evidence_refs: [],
+      status: "open",
+      created_at: isoAt(2026, 5, 21, 10),
+      updated_at: isoAt(2026, 5, 21, 10),
+      ...o,
+    };
+  }
+
+  it("readReviewFindings returns [] when nothing has been written", async () => {
+    expect(await readReviewFindings(cwd, RUN_ID, TASK_ID)).toEqual([]);
+  });
+
+  it("round-trips a single finding", async () => {
+    const f = makeFinding({ title: "rt" });
+    await appendReviewFinding(cwd, RUN_ID, TASK_ID, f);
+    const all = await readReviewFindings(cwd, RUN_ID, TASK_ID);
+    expect(all).toHaveLength(1);
+    expect(all[0]!.id).toBe(f.id);
+  });
+
+  it("dedups by id with last-write-wins on updated_at", async () => {
+    await appendReviewFinding(
+      cwd,
+      RUN_ID,
+      TASK_ID,
+      makeFinding({ status: "open", updated_at: isoAt(2026, 5, 21, 10) }),
+    );
+    await appendReviewFinding(
+      cwd,
+      RUN_ID,
+      TASK_ID,
+      makeFinding({ status: "resolved", updated_at: isoAt(2026, 5, 21, 11) }),
+    );
+    const all = await readReviewFindings(cwd, RUN_ID, TASK_ID);
+    expect(all).toHaveLength(1);
+    expect(all[0]!.status).toBe("resolved");
+  });
+
+  it("keeps distinct ids and sorts by created_at asc", async () => {
+    await appendReviewFinding(
+      cwd,
+      RUN_ID,
+      TASK_ID,
+      makeFinding({
+        id: "f_01AAAAAAAAAAAAAAAAAAAAAAAA",
+        created_at: isoAt(2026, 5, 21, 11),
+      }),
+    );
+    await appendReviewFinding(
+      cwd,
+      RUN_ID,
+      TASK_ID,
+      makeFinding({
+        id: "f_01BBBBBBBBBBBBBBBBBBBBBBBB",
+        created_at: isoAt(2026, 5, 21, 10),
+      }),
+    );
+    const all = await readReviewFindings(cwd, RUN_ID, TASK_ID);
+    expect(all.map((f) => f.id)).toEqual([
+      "f_01BBBBBBBBBBBBBBBBBBBBBBBB",
+      "f_01AAAAAAAAAAAAAAAAAAAAAAAA",
+    ]);
+  });
+
+  it("tolerates malformed JSONL lines", async () => {
+    const { appendFile, mkdir } = await import("node:fs/promises");
+    const layout = resolveTaskLayout(cwd, RUN_ID, TASK_ID);
+    await mkdir(layout.taskDir, { recursive: true });
+    await appendFile(layout.reviewFindings, "this is not json\n");
+    await appendReviewFinding(cwd, RUN_ID, TASK_ID, makeFinding({ title: "ok" }));
+    const all = await readReviewFindings(cwd, RUN_ID, TASK_ID);
+    expect(all).toHaveLength(1);
+  });
+});
+
+// ── RepairAttempt ─────────────────────────────────────────────────────
+
+describe("repair attempts", () => {
+  function makeAttempt(o: Partial<RepairAttempt> = {}): RepairAttempt {
+    return {
+      id: "a_01HXABCDEFGHJKMNPQRSTVWXYZ",
+      finding_id: "f_01",
+      run_id: RUN_ID,
+      task_id: TASK_ID,
+      attempt_number: 1,
+      provider: "codex",
+      model: "gpt-5.3-codex",
+      effort: "medium",
+      mode: "patch",
+      changed_variables_since_previous_attempt: [],
+      prompt_summary: "fix the obvious thing",
+      required_scope: { allowed_files: ["src/util.ts"], forbidden_files: [] },
+      required_tests: ["tests/util.test.ts"],
+      reviewer: "claude",
+      result: "fixed",
+      evidence_refs: [],
+      created_at: isoAt(2026, 5, 21, 10),
+      ...o,
+    };
+  }
+
+  it("readRepairAttempts returns [] for empty state", async () => {
+    expect(await readRepairAttempts(cwd, RUN_ID, TASK_ID)).toEqual([]);
+  });
+
+  it("round-trips a single attempt", async () => {
+    const a = makeAttempt();
+    await appendRepairAttempt(cwd, RUN_ID, TASK_ID, a);
+    const all = await readRepairAttempts(cwd, RUN_ID, TASK_ID);
+    expect(all).toHaveLength(1);
+    expect(all[0]!.id).toBe(a.id);
+  });
+
+  it("dedups by id with last-write-wins on completed_at ?? created_at", async () => {
+    await appendRepairAttempt(
+      cwd,
+      RUN_ID,
+      TASK_ID,
+      makeAttempt({
+        result: "incomplete",
+        created_at: isoAt(2026, 5, 21, 10),
+      }),
+    );
+    await appendRepairAttempt(
+      cwd,
+      RUN_ID,
+      TASK_ID,
+      makeAttempt({
+        result: "fixed",
+        created_at: isoAt(2026, 5, 21, 10),
+        completed_at: isoAt(2026, 5, 21, 11),
+      }),
+    );
+    const all = await readRepairAttempts(cwd, RUN_ID, TASK_ID);
+    expect(all).toHaveLength(1);
+    expect(all[0]!.result).toBe("fixed");
+  });
+
+  it("sorts attempts by attempt_number ascending (even when written out of order)", async () => {
+    const idForN: Record<number, string> = {
+      1: "a_01ONE0000000000000000000ON",
+      2: "a_01TWO0000000000000000000TW",
+      3: "a_01THREE000000000000000THRE",
+    };
+    for (const n of [3, 1, 2]) {
+      await appendRepairAttempt(
+        cwd,
+        RUN_ID,
+        TASK_ID,
+        makeAttempt({ id: idForN[n]!, attempt_number: n }),
+      );
+    }
+    const all = await readRepairAttempts(cwd, RUN_ID, TASK_ID);
+    expect(all.map((a) => a.attempt_number)).toEqual([1, 2, 3]);
+  });
+
+  it("readLatestRepairAttempt returns null when finding has no attempts", async () => {
+    expect(
+      await readLatestRepairAttempt(cwd, RUN_ID, TASK_ID, "f_nope"),
+    ).toBeNull();
+  });
+
+  it("readLatestRepairAttempt returns highest attempt_number for finding", async () => {
+    await appendRepairAttempt(
+      cwd,
+      RUN_ID,
+      TASK_ID,
+      makeAttempt({
+        id: "a_01AAAAAAAAAAAAAAAAAAAAAAAA",
+        finding_id: "f_A",
+        attempt_number: 1,
+      }),
+    );
+    await appendRepairAttempt(
+      cwd,
+      RUN_ID,
+      TASK_ID,
+      makeAttempt({
+        id: "a_01BBBBBBBBBBBBBBBBBBBBBBBB",
+        finding_id: "f_A",
+        attempt_number: 2,
+      }),
+    );
+    // A second finding's attempts must not interfere
+    await appendRepairAttempt(
+      cwd,
+      RUN_ID,
+      TASK_ID,
+      makeAttempt({
+        id: "a_01CCCCCCCCCCCCCCCCCCCCCCCC",
+        finding_id: "f_B",
+        attempt_number: 5,
+      }),
+    );
+    const latest = await readLatestRepairAttempt(cwd, RUN_ID, TASK_ID, "f_A");
+    expect(latest?.id).toBe("a_01BBBBBBBBBBBBBBBBBBBBBBBB");
+    expect(latest?.attempt_number).toBe(2);
+  });
+});
+
+// ── RepairPolicyDecision ──────────────────────────────────────────────
+
+describe("repair policy decisions", () => {
+  function makeDecision(o: Partial<RepairPolicyDecision> = {}): RepairPolicyDecision {
+    return {
+      id: "d_01HXABCDEFGHJKMNPQRSTVWXYZ",
+      finding_id: "f_01",
+      run_id: RUN_ID,
+      task_id: TASK_ID,
+      decision: "allow_retry",
+      requires_human_approval: true,
+      reason_codes: ["variables_changed_ok"],
+      guidance_budget_words: 750,
+      created_at: isoAt(2026, 5, 21, 10),
+      ...o,
+    };
+  }
+
+  it("readActiveRepairDecision returns null for empty state", async () => {
+    expect(
+      await readActiveRepairDecision(cwd, RUN_ID, TASK_ID, "f_01"),
+    ).toBeNull();
+  });
+
+  it("returns the only decision for a finding", async () => {
+    await appendRepairDecision(cwd, RUN_ID, TASK_ID, makeDecision());
+    const active = await readActiveRepairDecision(
+      cwd,
+      RUN_ID,
+      TASK_ID,
+      "f_01",
+    );
+    expect(active?.decision).toBe("allow_retry");
+  });
+
+  it("returns the most recent decision per finding_id (by created_at)", async () => {
+    await appendRepairDecision(
+      cwd,
+      RUN_ID,
+      TASK_ID,
+      makeDecision({
+        id: "d_01AAAAAAAAAAAAAAAAAAAAAAAA",
+        decision: "allow_retry",
+        created_at: isoAt(2026, 5, 21, 10),
+      }),
+    );
+    await appendRepairDecision(
+      cwd,
+      RUN_ID,
+      TASK_ID,
+      makeDecision({
+        id: "d_01BBBBBBBBBBBBBBBBBBBBBBBB",
+        decision: "escalate_effort",
+        reason_codes: ["escalation_ladder_step_available"],
+        created_at: isoAt(2026, 5, 21, 11),
+      }),
+    );
+    const active = await readActiveRepairDecision(
+      cwd,
+      RUN_ID,
+      TASK_ID,
+      "f_01",
+    );
+    expect(active?.decision).toBe("escalate_effort");
+  });
+
+  it("ignores decisions for other findings", async () => {
+    await appendRepairDecision(
+      cwd,
+      RUN_ID,
+      TASK_ID,
+      makeDecision({
+        finding_id: "f_other",
+        decision: "stop_needs_human",
+        reason_codes: ["max_attempts_reached"],
+      }),
+    );
+    expect(
+      await readActiveRepairDecision(cwd, RUN_ID, TASK_ID, "f_01"),
+    ).toBeNull();
+  });
+});
+
+// ── DraftReply ────────────────────────────────────────────────────────
+
+describe("draft replies", () => {
+  function makeReply(o: Partial<DraftReply> = {}): DraftReply {
+    return {
+      id: "dr_01HXABCDEFGHJKMNPQRSTVWXYZ",
+      finding_id: "f_01",
+      run_id: RUN_ID,
+      task_id: TASK_ID,
+      decision_id: "d_01",
+      body_path: "REPAIR_GUIDANCE.md",
+      body_word_count: 500,
+      approval_status: "pending",
+      created_at: isoAt(2026, 5, 21, 10),
+      ...o,
+    };
+  }
+
+  it("readDraftReplies returns [] for empty state", async () => {
+    expect(await readDraftReplies(cwd, RUN_ID, TASK_ID)).toEqual([]);
+  });
+
+  it("round-trips a single reply", async () => {
+    await appendDraftReply(cwd, RUN_ID, TASK_ID, makeReply());
+    const all = await readDraftReplies(cwd, RUN_ID, TASK_ID);
+    expect(all).toHaveLength(1);
+    expect(all[0]!.approval_status).toBe("pending");
+  });
+
+  it("dedups by id with last-write-wins on approved_at ?? created_at", async () => {
+    await appendDraftReply(
+      cwd,
+      RUN_ID,
+      TASK_ID,
+      makeReply({
+        approval_status: "pending",
+        created_at: isoAt(2026, 5, 21, 10),
+      }),
+    );
+    await appendDraftReply(
+      cwd,
+      RUN_ID,
+      TASK_ID,
+      makeReply({
+        approval_status: "approved",
+        approved_by: "human",
+        approved_at: isoAt(2026, 5, 21, 11),
+        created_at: isoAt(2026, 5, 21, 10),
+      }),
+    );
+    const all = await readDraftReplies(cwd, RUN_ID, TASK_ID);
+    expect(all).toHaveLength(1);
+    expect(all[0]!.approval_status).toBe("approved");
+    expect(all[0]!.approved_by).toBe("human");
+  });
+});
+
+// ── REPAIR_GUIDANCE.md ────────────────────────────────────────────────
+
+describe("repair guidance", () => {
+  it("readRepairGuidance returns null for empty state", async () => {
+    expect(await readRepairGuidance(cwd, RUN_ID, TASK_ID)).toBeNull();
+  });
+
+  it("write/read round-trip", async () => {
+    const md = "# Repair guidance\n\nFix the thing.\n";
+    await writeRepairGuidance(cwd, RUN_ID, TASK_ID, md);
+    expect(await readRepairGuidance(cwd, RUN_ID, TASK_ID)).toBe(md);
+  });
+
+  it("overwrites previous guidance atomically", async () => {
+    await writeRepairGuidance(cwd, RUN_ID, TASK_ID, "v1");
+    await writeRepairGuidance(cwd, RUN_ID, TASK_ID, "v2");
+    expect(await readRepairGuidance(cwd, RUN_ID, TASK_ID)).toBe("v2");
+  });
+});
+
+// ── §2.13 ReviewLoopEvent stream ──────────────────────────────────────
+
+describe("review events", () => {
+  function makeUserApproval(): ReviewLoopEvent {
+    return {
+      kind: "user_approval",
+      event: {
+        id: "ua_01HXABCDEFGHJKMNPQRSTVWXYZ",
+        run_id: RUN_ID,
+        task_id: TASK_ID,
+        draft_reply_id: "dr_01",
+        decision: "approved",
+        created_at: isoAt(2026, 5, 21, 10),
+      },
+    };
+  }
+
+  function makeBatchReport(): ReviewLoopEvent {
+    return {
+      kind: "batch_report",
+      event: {
+        id: "br_01HXABCDEFGHJKMNPQRSTVWXYZ",
+        run_id: RUN_ID,
+        task_id: TASK_ID,
+        source: "static_analysis",
+        summary: "lint clean",
+        finding_ids: [],
+        created_at: isoAt(2026, 5, 21, 9),
+      },
+    };
+  }
+
+  it("readReviewEvents returns [] for empty state", async () => {
+    expect(await readReviewEvents(cwd, RUN_ID, TASK_ID)).toEqual([]);
+  });
+
+  it("round-trips a single event", async () => {
+    await appendReviewEvent(cwd, RUN_ID, TASK_ID, makeUserApproval());
+    const all = await readReviewEvents(cwd, RUN_ID, TASK_ID);
+    expect(all).toHaveLength(1);
+    expect(all[0]!.kind).toBe("user_approval");
+  });
+
+  it("preserves chronological (append) order across kinds", async () => {
+    await appendReviewEvent(cwd, RUN_ID, TASK_ID, makeBatchReport());
+    await appendReviewEvent(cwd, RUN_ID, TASK_ID, makeUserApproval());
+    const all = await readReviewEvents(cwd, RUN_ID, TASK_ID);
+    expect(all.map((e) => e.kind)).toEqual(["batch_report", "user_approval"]);
+  });
+
+  it("filters by kind when requested", async () => {
+    await appendReviewEvent(cwd, RUN_ID, TASK_ID, makeBatchReport());
+    await appendReviewEvent(cwd, RUN_ID, TASK_ID, makeUserApproval());
+    const onlyApprovals = await readReviewEvents(cwd, RUN_ID, TASK_ID, {
+      kind: "user_approval",
+    });
+    expect(onlyApprovals).toHaveLength(1);
+    expect(onlyApprovals[0]!.kind).toBe("user_approval");
   });
 });

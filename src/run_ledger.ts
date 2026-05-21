@@ -26,17 +26,37 @@ import { existsSync } from "node:fs";
 import { appendFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  BatchReport as BatchReportSchema,
   ContinuationPacket as ContinuationPacketSchema,
+  DraftReply as DraftReplySchema,
   ExecutionWorkspace as ExecutionWorkspaceSchema,
+  RepairAttempt as RepairAttemptSchema,
+  RepairPolicyDecision as RepairPolicyDecisionSchema,
+  ReplySent as ReplySentSchema,
+  Result as ResultSchema,
+  ReviewFinding as ReviewFindingSchema,
+  ReviewLoopEvent as ReviewLoopEventSchema,
+  ReviewPass as ReviewPassSchema,
   RunRecord as RunRecordSchema,
   SourceIndexEntry as SourceIndexEntrySchema,
   TaskLedgerEntry as TaskLedgerEntrySchema,
+  UserApproval as UserApprovalSchema,
+  type BatchReport,
   type ContinuationPacket,
+  type DraftReply,
   type ExecutionWorkspace,
   type ExecutionWorkspaceStatus,
+  type RepairAttempt,
+  type RepairPolicyDecision,
+  type ReplySent,
+  type Result,
+  type ReviewFinding,
+  type ReviewLoopEvent,
+  type ReviewPass,
   type RunRecord,
   type SourceIndexEntry,
   type TaskLedgerEntry,
+  type UserApproval,
 } from "./schema.js";
 
 // ── Path resolution ──────────────────────────────────────────────────
@@ -361,3 +381,396 @@ export async function updateExecutionWorkspaceStatus(
   await appendExecutionWorkspace(cwd, runId, updated);
   return updated;
 }
+
+// ── Task-scoped storage (Plan §4 — Task 11) ──────────────────────────
+//
+// Per-task review/repair state lives one level below the run dir at
+// `<runDir>/tasks/<task_id>/`. The split keeps run-wide concerns
+// (continuation, source index, workspaces) separate from per-task
+// review state, so a long-running task does not bloat run-level files.
+//
+// Append-only discipline matches the rest of the run ledger:
+//   • JSONL files (findings, attempts, decisions, replies, events) —
+//     append only; readers dedup by id with last-write-wins on a
+//     well-defined timestamp axis.
+//   • Markdown files (TASK_LEDGER.md, REPAIR_GUIDANCE.md) — replaced
+//     atomically via .tmp + rename.
+//
+// Every reader tolerates a missing directory / file and returns [] or
+// null. The §6 recovery protocol depends on this — an agent reading
+// the active task pre-populates against potentially-missing artifacts.
+
+export interface TaskLayout {
+  taskDir: string;
+  taskLedgerMd: string;
+  reviewFindings: string;
+  repairAttempts: string;
+  repairDecisions: string;
+  draftReplies: string;
+  repairGuidance: string;
+  reviewEvents: string;
+}
+
+export function resolveTaskLayout(
+  cwd: string,
+  runId: string,
+  taskId: string,
+): TaskLayout {
+  const runLayout = resolveRunLayout(cwd, runId);
+  const taskDir = join(runLayout.runDir, "tasks", taskId);
+  return {
+    taskDir,
+    taskLedgerMd: join(taskDir, "TASK_LEDGER.md"),
+    reviewFindings: join(taskDir, "REVIEW_FINDINGS.jsonl"),
+    repairAttempts: join(taskDir, "REPAIR_ATTEMPTS.jsonl"),
+    repairDecisions: join(taskDir, "REPAIR_DECISIONS.jsonl"),
+    draftReplies: join(taskDir, "DRAFT_REPLIES.jsonl"),
+    repairGuidance: join(taskDir, "REPAIR_GUIDANCE.md"),
+    reviewEvents: join(taskDir, "REVIEW_EVENTS.jsonl"),
+  };
+}
+
+async function ensureTaskDir(layout: TaskLayout): Promise<void> {
+  await mkdir(layout.taskDir, { recursive: true });
+}
+
+/**
+ * Read a JSONL file as an array of parsed lines. Tolerates missing
+ * files (→ []) and malformed lines (silently skipped, matching the
+ * existing run-level reader behavior).
+ */
+async function readJsonlLines<T>(
+  path: string,
+  parse: (raw: unknown) => T | null,
+): Promise<T[]> {
+  if (!existsSync(path)) return [];
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch {
+    return [];
+  }
+  const out: T[] = [];
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let obj: unknown;
+    try {
+      obj = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    const parsed = parse(obj);
+    if (parsed) out.push(parsed);
+  }
+  return out;
+}
+
+// ── ReviewFinding ────────────────────────────────────────────────────
+
+export async function appendReviewFinding(
+  cwd: string,
+  runId: string,
+  taskId: string,
+  finding: ReviewFinding,
+): Promise<void> {
+  const parsed = ReviewFindingSchema.parse(finding);
+  const layout = resolveTaskLayout(cwd, runId, taskId);
+  await ensureTaskDir(layout);
+  await appendFile(layout.reviewFindings, `${JSON.stringify(parsed)}\n`, "utf8");
+}
+
+/**
+ * Read review findings, deduplicated last-write-wins per `id` on
+ * `updated_at`. Sorted by `created_at` ascending.
+ */
+export async function readReviewFindings(
+  cwd: string,
+  runId: string,
+  taskId: string,
+): Promise<ReviewFinding[]> {
+  const layout = resolveTaskLayout(cwd, runId, taskId);
+  const all = await readJsonlLines(layout.reviewFindings, (obj) => {
+    const r = ReviewFindingSchema.safeParse(obj);
+    return r.success ? r.data : null;
+  });
+  const byId = new Map<string, ReviewFinding>();
+  for (const f of all) {
+    const existing = byId.get(f.id);
+    if (!existing || f.updated_at >= existing.updated_at) byId.set(f.id, f);
+  }
+  return Array.from(byId.values()).sort((a, b) =>
+    a.created_at.localeCompare(b.created_at),
+  );
+}
+
+// ── RepairAttempt ────────────────────────────────────────────────────
+
+export async function appendRepairAttempt(
+  cwd: string,
+  runId: string,
+  taskId: string,
+  attempt: RepairAttempt,
+): Promise<void> {
+  const parsed = RepairAttemptSchema.parse(attempt);
+  const layout = resolveTaskLayout(cwd, runId, taskId);
+  await ensureTaskDir(layout);
+  await appendFile(layout.repairAttempts, `${JSON.stringify(parsed)}\n`, "utf8");
+}
+
+/**
+ * Read repair attempts, deduplicated last-write-wins per `id` on
+ * `completed_at ?? created_at`. Sorted by `attempt_number` ascending
+ * — the durable sequence per finding. Tied attempt numbers preserve
+ * insertion order (rare; only happens with concurrent writers).
+ */
+export async function readRepairAttempts(
+  cwd: string,
+  runId: string,
+  taskId: string,
+): Promise<RepairAttempt[]> {
+  const layout = resolveTaskLayout(cwd, runId, taskId);
+  const all = await readJsonlLines(layout.repairAttempts, (obj) => {
+    const r = RepairAttemptSchema.safeParse(obj);
+    return r.success ? r.data : null;
+  });
+  const byId = new Map<string, RepairAttempt>();
+  for (const a of all) {
+    const existing = byId.get(a.id);
+    const ts = a.completed_at ?? a.created_at;
+    const existingTs = existing
+      ? existing.completed_at ?? existing.created_at
+      : "";
+    if (!existing || ts >= existingTs) byId.set(a.id, a);
+  }
+  return Array.from(byId.values()).sort(
+    (a, b) => a.attempt_number - b.attempt_number,
+  );
+}
+
+/**
+ * Return the highest-attempt-number `RepairAttempt` for a given finding,
+ * or null if none. Used by the policy engine (Task 12) to compare a
+ * proposed next attempt against the most recent one.
+ */
+export async function readLatestRepairAttempt(
+  cwd: string,
+  runId: string,
+  taskId: string,
+  findingId: string,
+): Promise<RepairAttempt | null> {
+  const all = await readRepairAttempts(cwd, runId, taskId);
+  const forFinding = all.filter((a) => a.finding_id === findingId);
+  if (forFinding.length === 0) return null;
+  // Already sorted by attempt_number asc; latest is the last entry.
+  return forFinding[forFinding.length - 1] ?? null;
+}
+
+// ── RepairPolicyDecision ─────────────────────────────────────────────
+
+export async function appendRepairDecision(
+  cwd: string,
+  runId: string,
+  taskId: string,
+  decision: RepairPolicyDecision,
+): Promise<void> {
+  const parsed = RepairPolicyDecisionSchema.parse(decision);
+  const layout = resolveTaskLayout(cwd, runId, taskId);
+  await ensureTaskDir(layout);
+  await appendFile(
+    layout.repairDecisions,
+    `${JSON.stringify(parsed)}\n`,
+    "utf8",
+  );
+}
+
+/**
+ * Read all repair decisions in insertion order (no dedup — every
+ * decision is its own event with its own `id`). The "active" decision
+ * for a finding is whichever was appended most recently.
+ */
+async function readRepairDecisions(
+  cwd: string,
+  runId: string,
+  taskId: string,
+): Promise<RepairPolicyDecision[]> {
+  const layout = resolveTaskLayout(cwd, runId, taskId);
+  return readJsonlLines(layout.repairDecisions, (obj) => {
+    const r = RepairPolicyDecisionSchema.safeParse(obj);
+    return r.success ? r.data : null;
+  });
+}
+
+/**
+ * Return the most recent `RepairPolicyDecision` for a finding (by
+ * `created_at`), or null if none. The latest decision is the active
+ * one — earlier decisions are kept for audit but superseded.
+ */
+export async function readActiveRepairDecision(
+  cwd: string,
+  runId: string,
+  taskId: string,
+  findingId: string,
+): Promise<RepairPolicyDecision | null> {
+  const all = await readRepairDecisions(cwd, runId, taskId);
+  const forFinding = all.filter((d) => d.finding_id === findingId);
+  if (forFinding.length === 0) return null;
+  forFinding.sort((a, b) => a.created_at.localeCompare(b.created_at));
+  return forFinding[forFinding.length - 1] ?? null;
+}
+
+// ── DraftReply ───────────────────────────────────────────────────────
+
+export async function appendDraftReply(
+  cwd: string,
+  runId: string,
+  taskId: string,
+  reply: DraftReply,
+): Promise<void> {
+  const parsed = DraftReplySchema.parse(reply);
+  const layout = resolveTaskLayout(cwd, runId, taskId);
+  await ensureTaskDir(layout);
+  await appendFile(layout.draftReplies, `${JSON.stringify(parsed)}\n`, "utf8");
+}
+
+/**
+ * Read draft replies, deduplicated last-write-wins per `id` on
+ * `approved_at ?? created_at`. Sorted by `created_at` ascending.
+ */
+export async function readDraftReplies(
+  cwd: string,
+  runId: string,
+  taskId: string,
+): Promise<DraftReply[]> {
+  const layout = resolveTaskLayout(cwd, runId, taskId);
+  const all = await readJsonlLines(layout.draftReplies, (obj) => {
+    const r = DraftReplySchema.safeParse(obj);
+    return r.success ? r.data : null;
+  });
+  const byId = new Map<string, DraftReply>();
+  for (const r of all) {
+    const existing = byId.get(r.id);
+    const ts = r.approved_at ?? r.created_at;
+    const existingTs = existing
+      ? existing.approved_at ?? existing.created_at
+      : "";
+    if (!existing || ts >= existingTs) byId.set(r.id, r);
+  }
+  return Array.from(byId.values()).sort((a, b) =>
+    a.created_at.localeCompare(b.created_at),
+  );
+}
+
+// ── REPAIR_GUIDANCE.md (atomic replace) ──────────────────────────────
+
+/**
+ * Write `REPAIR_GUIDANCE.md` atomically (write to .tmp then rename).
+ * The caller is responsible for honoring the §3.8 word budget — this
+ * helper is a dumb writer. The Task 13 guidance generator (deferred)
+ * is what enforces budget caps.
+ */
+export async function writeRepairGuidance(
+  cwd: string,
+  runId: string,
+  taskId: string,
+  markdown: string,
+): Promise<void> {
+  const layout = resolveTaskLayout(cwd, runId, taskId);
+  await ensureTaskDir(layout);
+  const tmp = `${layout.repairGuidance}.tmp`;
+  await writeFile(tmp, markdown, "utf8");
+  await rename(tmp, layout.repairGuidance);
+}
+
+export async function readRepairGuidance(
+  cwd: string,
+  runId: string,
+  taskId: string,
+): Promise<string | null> {
+  const layout = resolveTaskLayout(cwd, runId, taskId);
+  if (!existsSync(layout.repairGuidance)) return null;
+  try {
+    return await readFile(layout.repairGuidance, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+// ── §2.13 ReviewLoopEvent stream (tagged-union JSONL) ────────────────
+//
+// Stored as a single `REVIEW_EVENTS.jsonl` per task. Each line is a
+// `ReviewLoopEvent` envelope (`{ kind, event }`). No dedup — every
+// event is its own record, and `id` lives inside `event`.
+//
+// Choosing the tagged-union approach (rather than 5 per-event files)
+// because (a) the plan's §2.13 explicitly allows either, (b) a single
+// stream preserves chronological ordering across kinds, and (c)
+// projecting the stream into per-kind queries is a few lines of
+// filter — see readReviewEvents below.
+
+export async function appendReviewEvent(
+  cwd: string,
+  runId: string,
+  taskId: string,
+  event: ReviewLoopEvent,
+): Promise<void> {
+  const parsed = ReviewLoopEventSchema.parse(event);
+  const layout = resolveTaskLayout(cwd, runId, taskId);
+  await ensureTaskDir(layout);
+  await appendFile(layout.reviewEvents, `${JSON.stringify(parsed)}\n`, "utf8");
+}
+
+/**
+ * Read all review-loop events in append order. Tolerates missing
+ * files and malformed lines. Optionally filter by `kind` to project a
+ * single event type (e.g. only `user_approval` events).
+ */
+export async function readReviewEvents(
+  cwd: string,
+  runId: string,
+  taskId: string,
+  filter?: { kind?: ReviewLoopEvent["kind"] },
+): Promise<ReviewLoopEvent[]> {
+  const layout = resolveTaskLayout(cwd, runId, taskId);
+  const all = await readJsonlLines(layout.reviewEvents, (obj) => {
+    const r = ReviewLoopEventSchema.safeParse(obj);
+    return r.success ? r.data : null;
+  });
+  if (filter?.kind) {
+    return all.filter((e) => e.kind === filter.kind);
+  }
+  return all;
+}
+
+// Re-exports of the §2.13 event types for callers that already have
+// `import { ... } from "./run_ledger.js"` — they don't need to reach
+// into ./schema.js for these.
+export type {
+  BatchReport,
+  DraftReply,
+  RepairAttempt,
+  RepairPolicyDecision,
+  ReplySent,
+  Result,
+  ReviewFinding,
+  ReviewLoopEvent,
+  ReviewPass,
+  UserApproval,
+};
+
+// Touch the imported schemas to ensure tree-shaking doesn't drop them
+// — they're used by the helpers above, but kept here so a future
+// caller can still parse a record by hand if they need to. (No-op at
+// runtime.)
+export const __taskScopedSchemas = {
+  BatchReport: BatchReportSchema,
+  DraftReply: DraftReplySchema,
+  RepairAttempt: RepairAttemptSchema,
+  RepairPolicyDecision: RepairPolicyDecisionSchema,
+  ReplySent: ReplySentSchema,
+  Result: ResultSchema,
+  ReviewFinding: ReviewFindingSchema,
+  ReviewLoopEvent: ReviewLoopEventSchema,
+  ReviewPass: ReviewPassSchema,
+  UserApproval: UserApprovalSchema,
+} as const;

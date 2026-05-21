@@ -617,3 +617,393 @@ export const ExecutionWorkspace = z
   })
   .strict();
 export type ExecutionWorkspace = z.infer<typeof ExecutionWorkspace>;
+
+// ── Review / Repair / Escalation Layer (Plan §2.8–§2.13) ─────────────
+//
+// This is the durable vocabulary the policy engine (Task 12, deferred)
+// and guidance generator (Task 13, deferred) will operate on. This
+// task ships only the shapes — no enforcement logic.
+
+// ── §2.12 EvidenceRef — pointer to exact files/lines/commands ────────
+// Defined first because the other schemas reference it.
+
+export const EvidenceRef = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("file"),
+      path: z.string().min(1),
+      line_start: z.number().int().positive().optional(),
+      line_end: z.number().int().positive().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("test"),
+      file: z.string().min(1),
+      name: z.string().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("command"),
+      argv: z.array(z.string().min(1)).min(1),
+      exit_code: z.number().int().optional(),
+      output_excerpt: z.string().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("handoff"),
+      handoff_id: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("commit"),
+      sha: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("ledger"),
+      run_id: z.string().min(1),
+      task_seq: z.number().int().positive().optional(),
+    })
+    .strict(),
+]);
+export type EvidenceRef = z.infer<typeof EvidenceRef>;
+
+// Shared reviewer/source vocabulary — appears on ReviewFinding,
+// RepairAttempt, ReviewPass, and BatchReport.
+export const Reviewer = z.enum([
+  "human",
+  "claude",
+  "codex",
+  "static_analysis",
+  "test_runner",
+]);
+export type Reviewer = z.infer<typeof Reviewer>;
+
+// Shared provider vocabulary (broader than AgentName because the
+// review layer may name "other" providers — e.g. for static_analysis
+// or external review pipelines).
+export const RepairProvider = z.enum(["claude", "codex", "other"]);
+export type RepairProvider = z.infer<typeof RepairProvider>;
+
+export const RepairEffort = z.enum(["low", "medium", "high", "xhigh", "max"]);
+export type RepairEffort = z.infer<typeof RepairEffort>;
+
+// ── §2.8 ReviewFinding ───────────────────────────────────────────────
+
+export const ReviewFindingSeverity = z.enum([
+  "info",
+  "warn",
+  "error",
+  "blocker",
+]);
+export type ReviewFindingSeverity = z.infer<typeof ReviewFindingSeverity>;
+
+export const ReviewFindingCategory = z.enum([
+  "incorrect_behavior",
+  "missing_tests",
+  "test_modified_to_pass",
+  "scope_expansion",
+  "forbidden_file_touched",
+  "evidence_contradiction",
+  "regression",
+  "unexplained_change",
+  "other",
+]);
+export type ReviewFindingCategory = z.infer<typeof ReviewFindingCategory>;
+
+export const ReviewFindingStatus = z.enum([
+  "open",
+  "under_repair",
+  "needs_human_intervention",
+  "resolved",
+  "wontfix",
+]);
+export type ReviewFindingStatus = z.infer<typeof ReviewFindingStatus>;
+
+export const ReviewFinding = z
+  .object({
+    id: z.string().regex(/^f_/, "ReviewFinding.id must start with f_"),
+    run_id: z.string().min(1),
+    task_id: z.string().min(1),
+    reviewer: Reviewer,
+    severity: ReviewFindingSeverity,
+    category: ReviewFindingCategory,
+    title: z.string().min(1).max(120),
+    summary: z.string().max(600),
+    evidence_refs: z.array(EvidenceRef),
+    related_handoff_id: z.string().optional(),
+    status: ReviewFindingStatus,
+    created_at: z.string().min(1),
+    updated_at: z.string().min(1),
+  })
+  .strict();
+export type ReviewFinding = z.infer<typeof ReviewFinding>;
+
+// ── §2.9 RepairAttempt ───────────────────────────────────────────────
+//
+// All seven RepairVariableChange axes are first-class fields here so
+// the policy engine (Task 12) can compare like-for-like across
+// attempts: provider, model, effort, mode, required_scope (axis
+// "scope"), required_tests (axis "tests"), reviewer.
+
+export const RepairMode = z.enum([
+  "patch",
+  "patch_with_tests",
+  "patch_after_diagnosis",
+  "diagnosis_only",
+  "root_cause_then_patch_plan",
+  "review_only",
+]);
+export type RepairMode = z.infer<typeof RepairMode>;
+
+export const RepairResult = z.enum([
+  "fixed",
+  "incomplete",
+  "failed",
+  "escalated",
+  "stopped",
+]);
+export type RepairResult = z.infer<typeof RepairResult>;
+
+export const RepairVariableChange = z.enum([
+  "effort",
+  "model",
+  "provider",
+  "mode",
+  "scope",
+  "tests",
+  "reviewer",
+]);
+export type RepairVariableChange = z.infer<typeof RepairVariableChange>;
+
+export const RepairRequiredScope = z
+  .object({
+    allowed_files: z.array(z.string()),
+    forbidden_files: z.array(z.string()),
+  })
+  .strict();
+export type RepairRequiredScope = z.infer<typeof RepairRequiredScope>;
+
+// NOTE — variable-change invariant is intentionally NOT enforced by
+// this schema. `RepairAttempt.attempt_number > 1` may parse with
+// `changed_variables_since_previous_attempt = []`. The §3.2 rule that
+// a non-Attempt-1 record must change ≥ 1 variable is enforced by
+// `evaluateRepairPolicy()` (Task 12, deferred). The schema's job is
+// shape; the engine's job is policy. Conflating them would mean a
+// raw read of a malformed file throws — which would defeat the
+// recovery protocol (§6) that depends on tolerant reads.
+export const RepairAttempt = z
+  .object({
+    id: z.string().regex(/^a_/, "RepairAttempt.id must start with a_"),
+    finding_id: z.string().min(1),
+    run_id: z.string().min(1),
+    task_id: z.string().min(1),
+    attempt_number: z.number().int().min(1),
+    provider: RepairProvider,
+    model: z.string().min(1),
+    effort: RepairEffort,
+    mode: RepairMode,
+    previous_attempt_id: z.string().optional(),
+    changed_variables_since_previous_attempt: z.array(RepairVariableChange),
+    escalation_reason: z.string().max(240).optional(),
+    prompt_summary: z.string().max(240),
+    required_scope: RepairRequiredScope,
+    required_tests: z.array(z.string()),
+    reviewer: Reviewer,
+    result: RepairResult,
+    evidence_refs: z.array(EvidenceRef),
+    next_policy_decision: z.string().optional(),
+    created_at: z.string().min(1),
+    completed_at: z.string().optional(),
+  })
+  .strict();
+export type RepairAttempt = z.infer<typeof RepairAttempt>;
+
+// ── §2.10 RepairPolicyDecision ───────────────────────────────────────
+
+export const RepairDecisionKind = z.enum([
+  "allow_retry",
+  "escalate_effort",
+  "escalate_model",
+  "switch_provider",
+  "switch_to_diagnosis",
+  "stop_needs_human",
+]);
+export type RepairDecisionKind = z.infer<typeof RepairDecisionKind>;
+
+export const RepairReasonCode = z.enum([
+  // failure-pattern codes
+  "same_class_bug_remains",
+  "test_modified_to_pass",
+  "scope_expanded",
+  "forbidden_file_touched",
+  "evidence_contradiction",
+  "agent_cannot_explain_root_cause",
+  "tests_pass_but_grep_unresolved",
+  "report_contradicts_repo_evidence",
+  "same_model_effort_mode_requested",
+  // exhaustion codes
+  "max_attempts_reached",
+  "no_remaining_variables_to_change",
+  // success codes
+  "variables_changed_ok",
+  "escalation_ladder_step_available",
+]);
+export type RepairReasonCode = z.infer<typeof RepairReasonCode>;
+
+export const RepairPolicyDecision = z
+  .object({
+    id: z.string().regex(/^d_/, "RepairPolicyDecision.id must start with d_"),
+    finding_id: z.string().min(1),
+    run_id: z.string().min(1),
+    task_id: z.string().min(1),
+    decision: RepairDecisionKind,
+    next_provider: RepairProvider.optional(),
+    next_model: z.string().optional(),
+    next_effort: RepairEffort.optional(),
+    next_mode: RepairMode.optional(),
+    next_required_scope: RepairRequiredScope.optional(),
+    requires_human_approval: z.boolean(),
+    reason_codes: z.array(RepairReasonCode).min(1),
+    guidance_path: z.string().optional(),
+    // Per §3.8: default 750, hard cap 1200. Lower bound 300 keeps the
+    // doc useful (anything smaller can't fit the 9 required sections).
+    guidance_budget_words: z.number().int().min(300).max(1200),
+    created_at: z.string().min(1),
+  })
+  .strict();
+export type RepairPolicyDecision = z.infer<typeof RepairPolicyDecision>;
+
+// ── §2.11 DraftReply ─────────────────────────────────────────────────
+
+export const DraftReplyApprovalStatus = z.enum([
+  "pending",
+  "approved",
+  "rejected",
+  "expired",
+]);
+export type DraftReplyApprovalStatus = z.infer<typeof DraftReplyApprovalStatus>;
+
+export const DraftReply = z
+  .object({
+    id: z.string().regex(/^dr_/, "DraftReply.id must start with dr_"),
+    finding_id: z.string().min(1),
+    run_id: z.string().min(1),
+    task_id: z.string().min(1),
+    target_handoff_id: z.string().optional(),
+    decision_id: z.string().min(1),
+    body_path: z.string().min(1),
+    body_word_count: z.number().int().min(0).max(1200),
+    approval_status: DraftReplyApprovalStatus,
+    approved_by: z.literal("human").optional(),
+    approved_at: z.string().optional(),
+    rejected_reason: z.string().optional(),
+    created_at: z.string().min(1),
+  })
+  .strict();
+export type DraftReply = z.infer<typeof DraftReply>;
+
+// ── §2.13 Review-loop event records ──────────────────────────────────
+
+export const BatchReport = z
+  .object({
+    id: z.string().regex(/^br_/, "BatchReport.id must start with br_"),
+    run_id: z.string().min(1),
+    task_id: z.string().min(1),
+    source: Reviewer,
+    summary: z.string().max(600),
+    finding_ids: z.array(z.string()),
+    result_id: z.string().optional(),
+    created_at: z.string().min(1),
+  })
+  .strict();
+export type BatchReport = z.infer<typeof BatchReport>;
+
+export const ReviewPass = z
+  .object({
+    id: z.string().regex(/^rp_/, "ReviewPass.id must start with rp_"),
+    run_id: z.string().min(1),
+    task_id: z.string().min(1),
+    reviewer: Reviewer,
+    scope: z
+      .object({
+        files: z.array(z.string()),
+        commands: z.array(z.string()),
+      })
+      .strict(),
+    finding_ids: z.array(z.string()),
+    evidence_refs: z.array(EvidenceRef),
+    created_at: z.string().min(1),
+  })
+  .strict();
+export type ReviewPass = z.infer<typeof ReviewPass>;
+
+export const UserApprovalDecision = z.enum(["approved", "rejected"]);
+export type UserApprovalDecision = z.infer<typeof UserApprovalDecision>;
+
+export const UserApproval = z
+  .object({
+    id: z.string().regex(/^ua_/, "UserApproval.id must start with ua_"),
+    run_id: z.string().min(1),
+    task_id: z.string().min(1),
+    draft_reply_id: z.string().min(1),
+    decision: UserApprovalDecision,
+    note: z.string().optional(),
+    created_at: z.string().min(1),
+  })
+  .strict();
+export type UserApproval = z.infer<typeof UserApproval>;
+
+export const ReplySent = z
+  .object({
+    id: z.string().regex(/^rs_/, "ReplySent.id must start with rs_"),
+    run_id: z.string().min(1),
+    task_id: z.string().min(1),
+    draft_reply_id: z.string().min(1),
+    target_handoff_id: z.string().optional(),
+    provider: RepairProvider,
+    created_at: z.string().min(1),
+  })
+  .strict();
+export type ReplySent = z.infer<typeof ReplySent>;
+
+export const ResultStatus = z.enum([
+  "fixed",
+  "incomplete",
+  "failed",
+  "blocked",
+  "needs_human_intervention",
+]);
+export type ResultStatus = z.infer<typeof ResultStatus>;
+
+export const Result = z
+  .object({
+    id: z.string().regex(/^res_/, "Result.id must start with res_"),
+    run_id: z.string().min(1),
+    task_id: z.string().min(1),
+    finding_id: z.string().optional(),
+    status: ResultStatus,
+    summary: z.string().max(600),
+    evidence_refs: z.array(EvidenceRef),
+    created_at: z.string().min(1),
+  })
+  .strict();
+export type Result = z.infer<typeof Result>;
+
+// Tagged union for callers that want to write a single `REVIEW_EVENTS.jsonl`
+// or hold a heterogeneous event stream in memory. Storage in this batch
+// keeps the per-file layout from §4 — this union is provided for typing
+// convenience.
+export const ReviewLoopEvent = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("batch_report"), event: BatchReport }).strict(),
+  z.object({ kind: z.literal("review_pass"), event: ReviewPass }).strict(),
+  z.object({ kind: z.literal("user_approval"), event: UserApproval }).strict(),
+  z.object({ kind: z.literal("reply_sent"), event: ReplySent }).strict(),
+  z.object({ kind: z.literal("result"), event: Result }).strict(),
+]);
+export type ReviewLoopEvent = z.infer<typeof ReviewLoopEvent>;
