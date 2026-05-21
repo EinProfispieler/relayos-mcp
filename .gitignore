@@ -7,9 +7,15 @@ coverage/
 .claude/
 docs/plans/
 .relayos/overseer/
+bin/.relayos/
 
 # Local RelayOS provider/user config
 .relayos/config.json
 
 # Local Vitest cache
 .vite-temp/
+
+# Leaked Anthropic source - reference only, never commit
+sample2/
+samplecode/
+SAMPLE2_SAMPLECODE_GUIDE.md

@@ -1,6 +1,6 @@
 import { appendFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { createInterface, type Interface } from "node:readline";
+import { createInterface, emitKeypressEvents } from "node:readline";
 import { stdin as input, stdout as output } from "node:process";
 import { ulid } from "ulid";
 import {
@@ -16,6 +16,9 @@ import {
   type AIRoutingPlan,
   ActionIntentBlock,
   type ActionIntentBlock as ActionIntentBlockType,
+  type Effort,
+  type ExecutionMode,
+  type RelayConfig,
 } from "./schema.js";
 import { type RouteDecision } from "./router.js";
 import { buildActionProposal, type ActionProposal } from "./action_dispatch.js";
@@ -26,6 +29,14 @@ import { createHandoff } from "./tools/create_handoff.js";
 import { loadProjectConfig } from "./config.js";
 import { handleConversation, type ConversationMessage } from "./conversation.js";
 import { runSettingsWizard } from "./settings.js";
+import { resolveModelProfiles } from "./model_profiles.js";
+import { gitBranch, isGitRepo } from "./git.js";
+import {
+  blue,
+  renderSlashPalette,
+  renderRuntimeLine as renderRuntimeLineFromFramework,
+  renderWelcome,
+} from "./chat_ui_framework.js";
 
 type ExitReason = "user_exit" | "eof" | "sigint";
 
@@ -77,19 +88,82 @@ function toTaskTitle(message: string): string {
   return cleaned.slice(0, 80) || "Untitled task";
 }
 
-export function buildHandoffInputFromPending(pending: PendingActionProposal): {
+const EFFORT_VALUES: readonly Effort[] = ["low", "medium", "high", "xhigh", "max"];
+function asEffort(value: string | undefined): Effort | null {
+  return value != null && (EFFORT_VALUES as readonly string[]).includes(value)
+    ? (value as Effort)
+    : null;
+}
+
+/** Map an action-proposal mode to a handoff execution_mode. */
+function modeToExecutionMode(mode: string | undefined): ExecutionMode {
+  switch (mode) {
+    case "review":
+      return "review";
+    case "plan":
+      return "plan";
+    case "test":
+      return "test";
+    case "read_only":
+      return "read_only";
+    default:
+      return "patch";
+  }
+}
+
+/**
+ * Resolve model + effort for a target agent. The user-configured provider entry
+ * in `overseer.providers[]` wins for the model; the AI-proposed effort wins when
+ * valid; model_profiles supplies the final fallback.
+ */
+function resolveProviderProfile(
+  cfg: RelayConfig | undefined,
+  target: "codex" | "claude",
+): { model: string; effort: Effort } {
+  const profiles = resolveModelProfiles(cfg);
+  const fallback: { model: string; effort: Effort } =
+    target === "codex"
+      ? { model: profiles.codexModel, effort: profiles.codexEffort }
+      : { model: profiles.claudeModel, effort: profiles.claudeEffort };
+  const providers = cfg?.overseer?.providers;
+  const entry = Array.isArray(providers)
+    ? providers.find((p) => p.name.trim().toLowerCase() === target)
+    : undefined;
+  if (!entry) return fallback;
+  return {
+    model: entry.model || fallback.model,
+    effort: asEffort(entry.effort) ?? fallback.effort,
+  };
+}
+
+export function buildHandoffInputFromPending(
+  pending: PendingActionProposal,
+  cfg?: RelayConfig,
+): {
   source_agent: "claude";
-  target_agent: "codex";
+  target_agent: "codex" | "claude";
   model: string;
-  effort: "low" | "medium" | "high";
-  execution_mode: "patch";
+  effort: Effort;
+  execution_mode: ExecutionMode;
   task_title: string;
   task_description: string;
   expected_output: string[];
   auto_spawn: false;
 } {
-  const model = pending.actionProposal.model || "gpt-5.3-codex";
-  const effort = (pending.actionProposal.effort || "medium") as "low" | "medium" | "high";
+  const proposalTarget = pending.actionProposal.target;
+  const target: "codex" | "claude" =
+    proposalTarget === "claude" ? "claude" : "codex";
+  const executionMode = modeToExecutionMode(pending.actionProposal.mode);
+
+  const profile = resolveProviderProfile(cfg, target);
+  const model = pending.actionProposal.model || profile.model;
+  const effort: Effort = asEffort(pending.actionProposal.effort) ?? profile.effort;
+
+  const isWriteMode = executionMode === "patch" || executionMode === "test";
+  const expected_output = isWriteMode
+    ? ["Patch applied", "Tests pass"]
+    : ["Findings summarized; no files modified"];
+
   const proposalLines = [
     `action: ${pending.actionProposal.action}`,
     `target: ${pending.actionProposal.target ?? "n/a"}`,
@@ -101,10 +175,10 @@ export function buildHandoffInputFromPending(pending: PendingActionProposal): {
 
   return {
     source_agent: "claude",
-    target_agent: "codex",
+    target_agent: target,
     model,
     effort,
-    execution_mode: "patch",
+    execution_mode: executionMode,
     task_title: toTaskTitle(pending.originalMessage),
     task_description: [
       "Original user message:",
@@ -122,7 +196,7 @@ export function buildHandoffInputFromPending(pending: PendingActionProposal): {
       "Action proposal:",
       ...proposalLines,
     ].join("\n"),
-    expected_output: ["Patch applied", "Tests pass"],
+    expected_output,
     auto_spawn: false,
   };
 }
@@ -188,27 +262,6 @@ function newChatSessionId(): string {
   return `chat_${ulid()}`;
 }
 
-export function buildChatHelpText(): string {
-  const menu = [
-    ["/help", "Show this command list"],
-    ["/status", "Show current chat session info"],
-    ["/tasks", "Show recent task records"],
-    ["/current", "Show current task details"],
-    ["/result", "Show current task result summary"],
-    ["/approve", "Approve the latest action proposal"],
-    ["/run", "Execute the latest approved handoff"],
-    ["/settings", "Open guided provider setup (profiles + advanced edit)"],
-    ["/exit", "Exit chat"],
-  ] as const;
-  return [
-    "Slash commands (type `/` to show the menu any time):",
-    ...menu.map(([cmd, desc]) => `  ${cmd.padEnd(9, " ")} ${desc}`),
-    "",
-    "Routing:",
-    "  Any input not starting with '/' is treated as AI conversation.",
-  ].join("\n") + "\n";
-}
-
 const KNOWN_SLASH_COMMANDS = [
   "/help",
   "/status",
@@ -220,27 +273,106 @@ const KNOWN_SLASH_COMMANDS = [
   "/settings",
   "/exit",
 ] as const;
+const SLASH_COMMAND_DESCRIPTIONS: Record<(typeof KNOWN_SLASH_COMMANDS)[number], string> = {
+  "/help": "Show command help",
+  "/status": "Show runtime/session summary",
+  "/tasks": "Show recent task records",
+  "/current": "Show current task details",
+  "/result": "Show current task result summary",
+  "/approve": "Approve latest action proposal",
+  "/run": "Execute latest approved handoff",
+  "/settings": "Open provider/model settings",
+  "/exit": "Exit chat",
+};
 
-function printSlashMenu(filter: string = ""): void {
-  const prefix = filter.trim().toLowerCase();
-  const items = KNOWN_SLASH_COMMANDS.filter((cmd) => cmd.startsWith(prefix.length > 0 ? prefix : "/"));
-  if (items.length === 0) {
-    output.write(`No slash command matches: ${filter}\n`);
-    output.write("Tip: type /help to view all commands.\n");
-    return;
+interface RuntimeView {
+  projectDir: string;
+  branch: string;
+  codexModel: string;
+  codexEffort: "low" | "medium" | "high";
+  claudeModel: string;
+  claudeEffort: "low" | "medium" | "high";
+}
+
+function showSlashPalette(filter: string): void {
+  const normalized = filter.trim().toLowerCase();
+  const palette = renderSlashPalette(
+    KNOWN_SLASH_COMMANDS,
+    SLASH_COMMAND_DESCRIPTIONS,
+    normalized.length > 0 ? normalized : "/",
+  );
+  if (palette) output.write(`${palette}\n`);
+}
+
+export function buildChatHelpText(): string {
+  return [
+    "Slash commands:",
+    "  /help      Show command help",
+    "  /status    Show runtime/session summary",
+    "  /tasks     Show recent task records",
+    "  /current   Show current task details",
+    "  /result    Show current task result summary",
+    "  /approve   Approve latest action proposal",
+    "  /run       Execute latest approved handoff",
+    "  /settings  Open provider/model settings",
+    "  /exit      Exit chat",
+    "",
+    "Tip: type '/' then keep typing to filter slash commands.",
+  ].join("\n") + "\n";
+}
+
+
+function formatActionProposalCompact(proposal: ActionProposal): string[] {
+  const lines = [
+    `Action: ${proposal.action}`,
+    `Status: ${proposal.status}`,
+  ];
+  if (proposal.target) lines.push(`Target: ${proposal.target}`);
+  if (proposal.model) lines.push(`Model: ${proposal.model}`);
+  if (proposal.effort) lines.push(`Effort: ${proposal.effort}`);
+  if (proposal.mode) lines.push(`Mode: ${proposal.mode}`);
+  if (proposal.approval_required !== undefined) {
+    lines.push(`Approval: ${proposal.approval_required ? "required" : "not required"}`);
   }
-  output.write("Slash menu:\n");
-  for (const cmd of items) output.write(`  ${cmd}\n`);
+  return lines;
 }
 
-function printHelp(): void {
-  output.write(buildChatHelpText());
+function printStatus(
+  state: ChatState,
+  pendingProposal: PendingActionProposal | null,
+  runtimeView: RuntimeView,
+): void {
+  output.write("Status\n");
+  output.write("------\n");
+  output.write(`${renderRuntimeLine(runtimeView, pendingProposal)}\n`);
+  output.write(`session: ${state.sessionId}\n`);
+  output.write(`started: ${state.startedAt}\n`);
+  output.write(`messages: ${state.messageCount}\n`);
+  output.write(`state: ${pendingProposal && !pendingProposal.executed ? "pending_approval" : "ready"}\n`);
+  if (pendingProposal && !pendingProposal.executed) {
+    output.write(`next: /approve or /run\n`);
+  }
 }
 
-function printStatus(state: ChatState): void {
-  output.write(`session_id: ${state.sessionId}\n`);
-  output.write(`started_at: ${state.startedAt}\n`);
-  output.write(`message_count: ${state.messageCount}\n`);
+async function buildRuntimeView(cwd: string): Promise<RuntimeView> {
+  const loaded = loadProjectConfig({ cwd });
+  const profiles = resolveModelProfiles(loaded.config);
+  const repo = await isGitRepo(cwd);
+  const branch = repo ? await gitBranch(cwd) : null;
+  const projectRoot = loaded.source ? dirname(dirname(loaded.source)) : cwd;
+  const projectDir = projectRoot.split("/").filter(Boolean).slice(-1)[0] ?? ".";
+  return {
+    projectDir,
+    branch: branch ?? "n/a",
+    codexModel: profiles.codexModel,
+    codexEffort: profiles.codexEffort,
+    claudeModel: profiles.claudeModel,
+    claudeEffort: profiles.claudeEffort,
+  };
+}
+
+function renderRuntimeLine(runtimeView: RuntimeView, pending: PendingActionProposal | null): string {
+  return renderRuntimeLineFromFramework(runtimeView, Boolean(pending && !pending.executed));
 }
 
 async function appendSessionRecord(state: ChatState, exitReason: ExitReason): Promise<void> {
@@ -261,24 +393,130 @@ async function appendSessionRecord(state: ChatState, exitReason: ExitReason): Pr
   await appendFile(sessionsPath, `${JSON.stringify(record)}\n`, "utf8");
 }
 
-function askLine(rl: Interface): Promise<string | null> {
+function askLineFallback(prompt: string): Promise<string | null> {
   return new Promise((resolve) => {
-    const onLine = (line: string): void => {
-      cleanup();
-      resolve(line);
-    };
-    const onClose = (): void => {
-      cleanup();
-      resolve(null);
-    };
-    const cleanup = (): void => {
-      rl.off("line", onLine);
-      rl.off("close", onClose);
+    const rl = createInterface({ input, output });
+    rl.question(prompt, (answer) => {
+      rl.close();
+      resolve(answer);
+    });
+    rl.once("close", () => resolve(null));
+  });
+}
+
+function askLineWithSample2StyleTui(prompt: string): Promise<string | null> {
+  if (!input.isTTY || !output.isTTY) {
+    return askLineFallback(prompt);
+  }
+
+  emitKeypressEvents(input);
+  input.setRawMode(true);
+
+  return new Promise((resolve) => {
+    let buffer = "";
+    let done = false;
+    const ttyColumns = Math.max(20, output.columns ?? 80);
+    const stripAnsi = (text: string): string =>
+      text.replace(/\u001B\[[0-9;?]*[ -/]*[@-~]/g, "");
+    const countVisualLines = (text: string): number => {
+      let count = 0;
+      for (const logical of text.split("\n")) {
+        const visible = stripAnsi(logical);
+        if (visible.length === 0) {
+          count += 1;
+          continue;
+        }
+        count += Math.max(1, Math.ceil(visible.length / ttyColumns));
+      }
+      return Math.max(1, count);
     };
 
-    rl.once("line", onLine);
-    rl.once("close", onClose);
-    rl.prompt();
+    const render = (): void => {
+      if (done) return;
+      const filter = buffer.trimStart().toLowerCase();
+      const palette = filter.startsWith("/")
+        ? (renderSlashPalette(
+          KNOWN_SLASH_COMMANDS,
+          SLASH_COMMAND_DESCRIPTIONS,
+          filter.length > 0 ? filter : "/",
+        ) ?? "")
+        : "";
+      output.write("\r\u001B[2K");
+      output.write(`${prompt}${buffer}`);
+      output.write("\u001B[J");
+      if (palette.length > 0) {
+        output.write(`\n${palette}`);
+        const overlayLines = countVisualLines(palette) + 1;
+        output.write(`\u001B[${overlayLines}A\r`);
+        output.write("\u001B[2K");
+        output.write(`${prompt}${buffer}`);
+      }
+    };
+
+    const finish = (value: string | null): void => {
+      if (done) return;
+      done = true;
+      input.off("keypress", onKeypress);
+      input.off("end", onEnd);
+      input.setRawMode(false);
+      resolve(value);
+    };
+
+    const onEnd = (): void => finish(null);
+
+    const onKeypress = (chunk: string, key: { name?: string; ctrl?: boolean; meta?: boolean }): void => {
+      if (done) return;
+
+      if (key.ctrl && key.name === "c") {
+        output.write("\n");
+        finish(null);
+        process.kill(process.pid, "SIGINT");
+        return;
+      }
+      if (key.ctrl && key.name === "d") {
+        if (buffer.length === 0) {
+          output.write("\n");
+          finish(null);
+          return;
+        }
+      }
+
+      if (key.name === "return" || key.name === "enter" || chunk === "\r" || chunk === "\n") {
+        output.write("\r\u001B[2K");
+        output.write(`${prompt}${buffer}`);
+        output.write("\u001B[J");
+        output.write("\n");
+        finish(buffer);
+        return;
+      }
+
+      if (key.name === "backspace") {
+        buffer = buffer.slice(0, -1);
+        render();
+        return;
+      }
+
+      if (key.ctrl || key.meta) return;
+      if (chunk && chunk.length > 0 && chunk >= " ") {
+        buffer += chunk;
+        render();
+      }
+    };
+
+    input.on("keypress", onKeypress);
+    input.once("end", onEnd);
+
+    render();
+  });
+}
+
+function askQuestion(prompt: string): Promise<string> {
+  return new Promise((resolve) => {
+    const rl = createInterface({ input, output });
+    rl.question(prompt, (answer) => {
+      rl.close();
+      resolve(answer);
+    });
   });
 }
 
@@ -308,15 +546,15 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
   let pendingProposal: PendingActionProposal | null = null;
   let sessionHandoffId: string | null = null;
 
-  output.write("RelayOS Chat - type /help for commands\n");
-
-  const rl = createInterface({ input, output, prompt: "RelayOS Overseer > " });
+  const cwd = process.cwd();
+  let runtimeView = await buildRuntimeView(cwd);
+  output.write(renderWelcome(runtimeView, { versionTag: "v0.6.0" }));
+  const promptText = `${blue("›")} `;
 
   let finished = false;
   const finalize = async (reason: ExitReason): Promise<number> => {
     if (finished) return 0;
     finished = true;
-    rl.close();
     await appendSessionRecord(state, reason);
     return 0;
   };
@@ -328,21 +566,32 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
   });
 
   while (!finished) {
-    const line = await askLine(rl);
+    const line = await askLineWithSample2StyleTui(promptText);
     if (line === null) return finalize("eof");
 
-    const trimmed = line.trim();
+    let trimmed = line.trim();
     if (trimmed === "/") {
-      printSlashMenu();
+      output.write(buildChatHelpText());
       continue;
     }
-    if (trimmed === "/help") {
-      printHelp();
-      continue;
-    }
-    if (trimmed === "/status") {
-      printStatus(state);
-      continue;
+    if (trimmed.startsWith("/")) {
+      const prefix = trimmed.toLowerCase();
+      const hasExact = KNOWN_SLASH_COMMANDS.includes(prefix as (typeof KNOWN_SLASH_COMMANDS)[number]);
+      if (!hasExact) {
+        const matches = KNOWN_SLASH_COMMANDS.filter((cmd) => cmd.startsWith(prefix));
+        if (matches.length === 1) {
+          trimmed = matches[0]!;
+        } else {
+          if (matches.length === 0) {
+            output.write(`unknown command: ${trimmed}\n`);
+          } else {
+            showSlashPalette(prefix);
+          }
+          continue;
+        }
+      } else {
+        trimmed = prefix;
+      }
     }
     if (trimmed === "/tasks") {
       const overseerLayout = resolveOverseerLayout(process.cwd());
@@ -397,7 +646,11 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
         continue;
       }
 
-      const handoffInput = buildHandoffInputFromPending(pendingProposal!);
+      const loadedForProfiles = loadProjectConfig({ cwd: process.cwd() });
+      const handoffInput = buildHandoffInputFromPending(
+        pendingProposal!,
+        loadedForProfiles.config,
+      );
       const storageLayout = resolveStorageLayout();
       await ensureStorage(storageLayout);
       const audit = createAuditWriter(storageLayout);
@@ -474,20 +727,21 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
     if (trimmed === "/settings") {
       await runSettingsWizard(process.cwd(), {
         write: (text) => output.write(text),
-        ask: (prompt) =>
-          new Promise((resolve) => {
-            rl.question(prompt, (answer) => resolve(answer));
-          }),
+        ask: (prompt) => askQuestion(prompt),
       });
+      runtimeView = await buildRuntimeView(cwd);
       continue;
     }
     if (trimmed === "/exit") {
       return finalize("user_exit");
     }
 
-    if (trimmed.startsWith("/")) {
-      printSlashMenu(trimmed.toLowerCase());
-      output.write(`unknown command: ${trimmed}\n`);
+    if (trimmed === "/help") {
+      output.write(buildChatHelpText());
+      continue;
+    }
+    if (trimmed === "/status") {
+      printStatus(state, pendingProposal, runtimeView);
       continue;
     }
 
@@ -508,7 +762,7 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
       continue;
     }
 
-    const aiPlan = planRouteFromActionIntent(actionIntent);
+    const aiPlan = planRouteFromActionIntent(actionIntent, loaded.config);
     const actionProposal = buildActionProposal(aiPlan);
     pendingProposal = {
       originalMessage: line,
@@ -529,9 +783,283 @@ export async function runChat(args: string[], options: ChatRuntimeOptions = {}):
 
     if (options.showActionProposal !== false) {
       output.write("ACTION PROPOSAL:\n");
+      for (const line of formatActionProposalCompact(actionProposal)) {
+        output.write(`  ${line}\n`);
+      }
       output.write(`${JSON.stringify(actionProposal, null, 2)}\n`);
     }
   }
 
+  return 0;
+}
+
+// ── Single-turn non-interactive pipeline for the RTUI ──────────────────────
+
+export interface ChatTurnIO {
+  stdout: { write: (chunk: string) => unknown };
+  stderr: { write: (chunk: string) => unknown };
+}
+
+export interface ChatTurnResult {
+  reply: string;
+  provider_used: string | null;
+  provider_latency_ms: number | null;
+  ai_plan: AIRoutingPlan | null;
+  action_proposal: ActionProposal | null;
+  handoff_id: string | null;
+  handoff_title: string | null;
+  needs_approval: boolean;
+  /** "plan" for a project-plan handoff, "task" for a normal work handoff. */
+  handoff_kind: "plan" | "task" | null;
+}
+
+const PROJECT_PLAN_FORMAT = [
+  "PROJECT_PLAN",
+  "goal: <one-line goal>",
+  "questions:",
+  "  - <open question the user must answer>",
+  "tasks:",
+  "  - id: t1",
+  "    title: <short title>",
+  "    target: codex | claude",
+  "    model: <model id>",
+  "    effort: low | medium | high | xhigh | max",
+  "    mode: patch | review | test | plan",
+  "    description: <what this task does>",
+  "    depends_on: []",
+  "reporting: <how each task reports back — write_handoff_result with status, summary, tests, blockers>",
+  "END_PROJECT_PLAN",
+].join("\n");
+
+/** Build a read-only plan handoff for a project_plan intent. */
+export function buildPlanHandoffInput(
+  message: string,
+  intent: ActionIntentBlockType,
+  cfg?: RelayConfig,
+): {
+  source_agent: "claude";
+  target_agent: "codex" | "claude";
+  model: string;
+  effort: Effort;
+  execution_mode: "plan";
+  task_title: string;
+  task_description: string;
+  expected_output: string[];
+  auto_spawn: false;
+} {
+  const target: "codex" | "claude" = intent.target === "codex" ? "codex" : "claude";
+  const profile = resolveProviderProfile(cfg, target);
+  const model = intent.model || profile.model;
+  const effort: Effort = asEffort(intent.effort) ?? profile.effort;
+
+  return {
+    source_agent: "claude",
+    target_agent: target,
+    model,
+    effort,
+    execution_mode: "plan",
+    task_title: `Plan: ${toTaskTitle(message)}`,
+    task_description: [
+      "You are the planning agent for a new project / feature. Research the",
+      "project, then break the work into a concrete todo list. You may use your",
+      "own planning skills. Do NOT modify any files — this is a read-only plan.",
+      "",
+      "User request:",
+      message,
+      "",
+      "End your output with exactly one PROJECT_PLAN block in this format:",
+      "",
+      PROJECT_PLAN_FORMAT,
+      "",
+      "Each task must carry full dispatch data: target (codex for",
+      "implementation, claude for review/planning), model, effort, mode, and a",
+      "clear description. List any open questions the user must answer.",
+    ].join("\n"),
+    expected_output: [
+      "A PROJECT_PLAN block with goal, questions, a routed task list, and reporting rule",
+    ],
+    auto_spawn: false,
+  };
+}
+
+/**
+ * Run one non-interactive pipeline turn.
+ * Emits a single `@@RELAYOS_TURN@@ {...}` line to io.stdout so the RTUI can
+ * parse it unambiguously.  Returns exit code 0 always (errors go to stderr).
+ */
+export async function runChatTurn(
+  message: string,
+  io: ChatTurnIO,
+  deps?: {
+    conversation?: typeof handleConversation;
+  },
+): Promise<number> {
+  const converse = deps?.conversation ?? handleConversation;
+
+  const emit = (result: Partial<ChatTurnResult> & { reply: string }) => {
+    const full: ChatTurnResult = {
+      reply: result.reply,
+      provider_used: result.provider_used ?? null,
+      provider_latency_ms: result.provider_latency_ms ?? null,
+      ai_plan: result.ai_plan ?? null,
+      action_proposal: result.action_proposal ?? null,
+      handoff_id: result.handoff_id ?? null,
+      handoff_title: result.handoff_title ?? null,
+      needs_approval: result.needs_approval ?? false,
+      handoff_kind: result.handoff_kind ?? null,
+    };
+    io.stdout.write("@@RELAYOS_TURN@@ " + JSON.stringify(full) + "\n");
+  };
+
+  const msg = message.trim();
+  if (msg.length === 0) {
+    emit({
+      reply: "",
+      provider_used: null,
+      provider_latency_ms: null,
+      ai_plan: null,
+      action_proposal: null,
+      handoff_id: null,
+      handoff_title: null,
+      needs_approval: false,
+    });
+    return 0;
+  }
+
+  let convResult: Awaited<ReturnType<typeof handleConversation>>;
+  let providerLatencyMs: number | null = null;
+  try {
+    const loaded = loadProjectConfig({ cwd: process.cwd() });
+    const projectRoot = loaded.source ? dirname(dirname(loaded.source)) : process.cwd();
+    const t0 = Date.now();
+    convResult = await converse([{ role: "user", content: msg }], loaded.config, {
+      projectRoot,
+      skipMutationGuard: true, // chat turns are read-only; skip the full project tree snapshot
+    });
+    providerLatencyMs = Date.now() - t0;
+  } catch (err) {
+    io.stderr.write(`chat-turn: conversation error: ${String(err)}\n`);
+    emit({
+      reply: "Error: conversation provider failed. Check your config.",
+      provider_used: null,
+      provider_latency_ms: null,
+      ai_plan: null,
+      action_proposal: null,
+      handoff_id: null,
+      handoff_title: null,
+      needs_approval: false,
+    });
+    return 0;
+  }
+
+  const parsedReply = extractActionIntentFromReply(convResult.reply);
+  const assistantReply =
+    parsedReply.visibleReply.length > 0 ? parsedReply.visibleReply : convResult.reply;
+
+  const actionIntent = parsedReply.actionIntent;
+  const providerUsed: string | null = (convResult as { provider_used?: string }).provider_used ?? null;
+
+  if (
+    !actionIntent ||
+    actionIntent.intent_type === "conversation" ||
+    actionIntent.confidence < 0.7
+  ) {
+    emit({
+      reply: assistantReply,
+      provider_used: providerUsed,
+      provider_latency_ms: providerLatencyMs,
+      ai_plan: null,
+      action_proposal: null,
+      handoff_id: null,
+      handoff_title: null,
+      needs_approval: false,
+    });
+    return 0;
+  }
+
+  const loaded = loadProjectConfig({ cwd: process.cwd() });
+
+  // project_plan intent → dispatch a read-only plan handoff (the plan agent
+  // produces a todo list + open questions; no work is executed this turn).
+  if (actionIntent.intent_type === "project_plan") {
+    let planHandoffId: string | null = null;
+    let planHandoffTitle: string | null = null;
+    try {
+      const planInput = buildPlanHandoffInput(msg, actionIntent, loaded.config);
+      const storageLayout = resolveStorageLayout();
+      await ensureStorage(storageLayout);
+      const audit = createAuditWriter(storageLayout);
+      const handoffResult = await createHandoff(planInput, { layout: storageLayout, audit });
+      planHandoffId = handoffResult.handoff_id;
+      planHandoffTitle = planInput.task_title;
+    } catch (err) {
+      io.stderr.write(`chat-turn: plan handoff creation error: ${String(err)}\n`);
+    }
+    emit({
+      reply: assistantReply,
+      provider_used: providerUsed,
+      provider_latency_ms: providerLatencyMs,
+      handoff_id: planHandoffId,
+      handoff_title: planHandoffTitle,
+      handoff_kind: "plan",
+    });
+    return 0;
+  }
+
+  const aiPlan = planRouteFromActionIntent(actionIntent, loaded.config);
+  const actionProposal = buildActionProposal(aiPlan);
+
+  const needsApproval =
+    actionProposal.action === "request_approval" ||
+    actionProposal.status === "blocked_until_user_approval";
+
+  if (actionProposal.action !== "create_handoff") {
+    emit({
+      reply: assistantReply,
+      provider_used: providerUsed,
+      provider_latency_ms: providerLatencyMs,
+      ai_plan: aiPlan,
+      action_proposal: actionProposal,
+      handoff_id: null,
+      handoff_title: null,
+      needs_approval: needsApproval,
+    });
+    return 0;
+  }
+
+  // Build and record the handoff envelope (auto_spawn: false — RTUI decides when to execute)
+  const pending: PendingActionProposal = {
+    originalMessage: msg,
+    aiPlan,
+    actionProposal,
+    executed: false,
+  };
+
+  let handoffId: string | null = null;
+  let handoffTitle: string | null = null;
+
+  try {
+    const handoffInput = buildHandoffInputFromPending(pending, loaded.config);
+    const storageLayout = resolveStorageLayout();
+    await ensureStorage(storageLayout);
+    const audit = createAuditWriter(storageLayout);
+    const handoffResult = await createHandoff(handoffInput, { layout: storageLayout, audit });
+    handoffId = handoffResult.handoff_id;
+    handoffTitle = handoffInput.task_title;
+  } catch (err) {
+    io.stderr.write(`chat-turn: handoff creation error: ${String(err)}\n`);
+  }
+
+  emit({
+    reply: assistantReply,
+    provider_used: providerUsed,
+    provider_latency_ms: providerLatencyMs,
+    ai_plan: aiPlan,
+    action_proposal: actionProposal,
+    handoff_id: handoffId,
+    handoff_title: handoffTitle,
+    needs_approval: needsApproval,
+    handoff_kind: handoffId ? "task" : null,
+  });
   return 0;
 }

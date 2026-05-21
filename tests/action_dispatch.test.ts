@@ -34,20 +34,39 @@ describe("buildActionProposal", () => {
     });
   });
 
-  it("maps review to read-only review_request", () => {
+  it("maps review to a claude-targeted create_handoff", () => {
     const proposal = buildActionProposal(
       plan({ task_type: "review", model: "claude-sonnet-4-6", mode: "review" }),
     );
 
     expect(proposal).toEqual({
-      action: "review_request",
+      action: "create_handoff",
       target: "claude",
       model: "claude-sonnet-4-6",
       effort: "medium",
-      mode: "read_only",
+      mode: "review",
       approval_required: false,
       status: "not_executed",
     });
+  });
+
+  it("honors an explicit claude target for an implementation task", () => {
+    const proposal = buildActionProposal(
+      plan({ task_type: "implementation", target: "claude", model: "claude-opus-4-7", mode: "patch" }),
+    );
+
+    expect(proposal.action).toBe("create_handoff");
+    expect(proposal.target).toBe("claude");
+  });
+
+  it("honors an explicit codex target for a review task", () => {
+    const proposal = buildActionProposal(
+      plan({ task_type: "review", target: "codex", model: "gpt-5.5", mode: "review" }),
+    );
+
+    expect(proposal.action).toBe("create_handoff");
+    expect(proposal.target).toBe("codex");
+    expect(proposal.mode).toBe("review");
   });
 
   it("maps release control signals to approval-gated proposal", () => {

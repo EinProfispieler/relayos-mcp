@@ -516,7 +516,9 @@ Production runtime state — coordination notes, sub-run outputs, generated repo
 ## Non-goals
 
 - No cloud sync and no cloud/server-side MCP surface.
-- No background runner, daemon, or autonomous runtime.
+- No background runner, daemon, detached runner, or autonomous runtime. (Build
+  mode is foreground, supervised, interruptible continuation only — see
+  `docs/OVERSEER_WORKFLOW.md` § "Step and build mode".)
 - No structured query, search, or pagination of notes.
 - No multi-project or cross-repo scope — storage is always project-local.
 - No encryption or access control — treat as local scratch space.

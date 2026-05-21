@@ -56,17 +56,58 @@ import {
   writeActiveBrief,
   writeNextAction,
 } from "./overseer.js";
-import { extractActionIntentFromReply, runChat } from "./chat.js";
+import { extractActionIntentFromReply, runChat, runChatTurn } from "./chat.js";
 import { loadProjectConfig } from "./config.js";
 import { handleConversation, type ConversationMessage } from "./conversation.js";
 import { buildChatHelpText } from "./chat.js";
-import { runSettingsWizard } from "./settings.js";
+import { runProviderSetupWizard, runSettingsWizard } from "./settings.js";
 import { planRouteFromActionIntent } from "./ai_planner.js";
 import { buildActionProposal } from "./action_dispatch.js";
 import { detectCli, runTarget } from "./spawn/index.js";
+import { renderCodexTarget } from "./render/codex.js";
+import { renderClaudeTarget } from "./render/claude.js";
+import { createHandoff } from "./tools/create_handoff.js";
+import { createAuditWriter } from "./audit.js";
 import { evaluatePolicy, formatBannerLines } from "./policy.js";
 import type { Envelope, SpawnResult } from "./schema.js";
-import { ensureStorage, resolveStorageLayout } from "./storage.js";
+import { ensureStorage, resolveStorageLayout, stdoutLogPath, stderrLogPath } from "./storage.js";
+import {
+  parseProjectPlanBlock,
+  buildProjectPlan,
+  persistProjectPlan,
+  loadProjectPlan,
+  appendAnswerToplan,
+  updatePlanTaskStatus,
+  updatePlanTaskRetryCount,
+  buildTaskHandoffInput,
+  getTaskErrorContext,
+  buildFixHandoffInput,
+  buildPlanReport,
+  persistPlanReport,
+} from "./project_plan.js";
+import { newExecutionWorkspaceId, newRunId } from "./id.js";
+import {
+  appendExecutionWorkspace,
+  appendTaskLedgerEntry,
+  clearActiveRunId,
+  listRuns,
+  maybeAutoRecordHandoffExecution,
+  readActiveRunId,
+  readContinuationPacket,
+  readExecutionWorkspaces,
+  readRunRecord,
+  readTaskLedgerEntries,
+  setActiveRunId,
+  updateExecutionWorkspaceStatus,
+  writeContinuationPacket,
+  writeRunRecord,
+} from "./run_ledger.js";
+import type {
+  ContinuationPacket,
+  ExecutionWorkspace,
+  RunRecord,
+} from "./schema.js";
+import { execSync } from "node:child_process";
 
 export interface CliIO {
   stdout: { write: (chunk: string) => unknown; isTTY?: boolean };
@@ -74,7 +115,7 @@ export interface CliIO {
 }
 
 function usage(): string {
-  return "usage: relayos [banner|launch|policy|checkpoint|diff-risk|report|overseer|chat|settings] [--force] [args...]\n";
+  return "usage: relayos [banner|launch|policy|checkpoint|diff-risk|report|overseer|chat|settings|setup] [--force] [args...]\n";
 }
 
 function readAllFromStdin(): Promise<string> {
@@ -96,6 +137,11 @@ function isSlashCommand(input: string): boolean {
 export async function runChatSingleInput(input: string, io: CliIO): Promise<number> {
   const message = input.trim();
   if (!message) return 0;
+
+  if (message === "/") {
+    io.stdout.write(buildChatHelpText());
+    return 0;
+  }
 
   if (isSlashCommand(message)) {
     const normalized = message.split(/\s+/, 1)[0];
@@ -130,7 +176,7 @@ export async function runChatSingleInput(input: string, io: CliIO): Promise<numb
   const visibleReply = parsed.visibleReply.length > 0 ? parsed.visibleReply : result.reply;
   io.stdout.write(`${visibleReply}\n`);
   if (parsed.actionIntent && parsed.actionIntent.intent_type !== "conversation" && parsed.actionIntent.confidence >= 0.7) {
-    const plan = planRouteFromActionIntent(parsed.actionIntent);
+    const plan = planRouteFromActionIntent(parsed.actionIntent, loaded.config);
     const proposal = buildActionProposal(plan);
     io.stdout.write("ACTION PROPOSAL:\n");
     io.stdout.write(`${JSON.stringify(proposal, null, 2)}\n`);
@@ -153,6 +199,15 @@ async function runSettings(args: string[], io: CliIO): Promise<number> {
     return 1;
   }
   await runSettingsWizard(process.cwd(), { write: (text) => io.stdout.write(text) });
+  return 0;
+}
+
+async function runSetup(args: string[], io: CliIO): Promise<number> {
+  if (args.length > 0) {
+    io.stderr.write("usage: relayos setup\n");
+    return 1;
+  }
+  await runProviderSetupWizard(process.cwd(), { write: (text) => io.stdout.write(text) });
   return 0;
 }
 
@@ -1837,13 +1892,23 @@ function parseOverseerHandoffResultShowArgs(
 
 function parseOverseerExecuteHandoffArgs(
   args: string[],
-): { handoffId: string; dryRun: boolean } | null {
+): { handoffId: string; dryRun: boolean; recordRunLedger: boolean } | null {
   let handoffId: string | null = null;
   let dryRun = false;
+  let recordRunLedger = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
     if (arg === "--dry-run") {
       dryRun = true;
+      continue;
+    }
+    // P2-T2 opt-in: when set, after a successful spawn the CLI records
+    // a SourceIndexEntry per allowed_file plus one ExecutionWorkspace
+    // record into the active run's ledger. Default OFF — without this
+    // flag (or the env var below), execute-handoff behavior is
+    // identical to the pre-T2 default.
+    if (arg === "--record-run-ledger") {
+      recordRunLedger = true;
       continue;
     }
     if (arg.startsWith("--")) return null;
@@ -1851,8 +1916,13 @@ function parseOverseerExecuteHandoffArgs(
     handoffId = arg;
   }
   if (!handoffId || handoffId.trim().length === 0) return null;
-  return { handoffId: handoffId.trim(), dryRun };
+  return { handoffId: handoffId.trim(), dryRun, recordRunLedger };
 }
+
+// Note: the opt-in gate that used to live here as
+// `shouldAutoRecordRunLedger` moved to `isRunLedgerAutoRecordEnabled`
+// in `src/run_ledger.ts` so all three handoff-execution paths share
+// one source of truth.
 
 function parseArgv(command: string): string[] {
   const argv: string[] = [];
@@ -1902,7 +1972,12 @@ function parseArgv(command: string): string[] {
 async function runOverseerExecuteHandoff(args: string[], io: CliIO): Promise<number> {
   const parsed = parseOverseerExecuteHandoffArgs(args);
   if (!parsed) {
-    io.stderr.write("Usage: relayos overseer execute-handoff <handoff_id> [--dry-run]\n");
+    io.stderr.write(
+      "Usage: relayos overseer execute-handoff <handoff_id> [--dry-run] [--record-run-ledger]\n" +
+        "  --record-run-ledger   opt-in: append SourceIndexEntry + ExecutionWorkspace to the\n" +
+        "                        active run ledger after a successful spawn. Default OFF.\n" +
+        "                        Also enabled by RELAYOS_RUN_LEDGER_AUTO_RECORD=1.\n",
+    );
     return 1;
   }
 
@@ -1926,17 +2001,37 @@ async function runOverseerExecuteHandoff(args: string[], io: CliIO): Promise<num
     return 0;
   }
 
-  let detection: Awaited<ReturnType<typeof detectCli>>;
+  // Build the ordered failover attempt list: the envelope's own target first,
+  // then any distinct codex/claude provider resolved from backup_providers.
+  const triedTargets = new Set<string>();
+  const attempts: Array<{ target: "codex" | "claude"; launchCommand: string }> = [];
+  const addAttempt = (rawTarget: string): void => {
+    const target = rawTarget.trim().toLowerCase();
+    if (target !== "codex" && target !== "claude") return;
+    if (triedTargets.has(target)) return;
+    triedTargets.add(target);
+    if (target === envelope.target_agent) {
+      attempts.push({ target, launchCommand: envelope.launch_command });
+      return;
+    }
+    const swapped: Envelope = { ...envelope, target_agent: target };
+    const rendered =
+      target === "codex" ? renderCodexTarget(swapped) : renderClaudeTarget(swapped);
+    attempts.push({ target, launchCommand: rendered.launch_command });
+  };
+  addAttempt(envelope.target_agent);
   try {
-    detection = await detectCli(envelope.target_agent);
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    io.stderr.write(`Failed to detect CLI for "${envelope.target_agent}": ${errMsg}\n`);
-    return 1;
-  }
-  if (!detection.found || !detection.resolved_path) {
-    io.stderr.write(`CLI binary for "${envelope.target_agent}" not found. Is it installed and on PATH?\n`);
-    return 1;
+    const cfg = loadProjectConfig({ cwd: process.cwd() }).config;
+    const providers = cfg.overseer?.providers;
+    const backups = cfg.overseer?.backup_providers ?? [];
+    if (Array.isArray(providers)) {
+      for (const id of backups) {
+        const entry = providers.find((p) => p.id === id);
+        if (entry) addAttempt(entry.name);
+      }
+    }
+  } catch {
+    // config unavailable — proceed with the primary attempt only
   }
 
   const spawningEnvelope: Envelope = {
@@ -1946,55 +2041,117 @@ async function runOverseerExecuteHandoff(args: string[], io: CliIO): Promise<num
   };
   writeFileSync(envelopePath, `${JSON.stringify(spawningEnvelope, null, 2)}\n`, "utf8");
 
-  const argv = parseArgv(envelope.launch_command);
-  let result: SpawnResult;
-  try {
-    result = await runTarget({
-      layout,
-      handoffId: parsed.handoffId,
-      binary: detection.resolved_path,
-      argv,
-      workingDir: envelope.working_dir,
-    });
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
+  const overseerLayout = resolveOverseerLayout(process.cwd());
+  const failureNotes: string[] = [];
+  let result: SpawnResult | null = null;
+  let ranTarget: "codex" | "claude" | null = null;
+
+  for (let i = 0; i < attempts.length; i += 1) {
+    const attempt = attempts[i]!;
+    let detection: Awaited<ReturnType<typeof detectCli>>;
+    try {
+      detection = await detectCli(attempt.target);
+    } catch (err) {
+      failureNotes.push(
+        `${attempt.target}: CLI detection error: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      continue;
+    }
+    if (!detection.found || !detection.resolved_path) {
+      failureNotes.push(`${attempt.target}: CLI binary not found on PATH`);
+      continue;
+    }
+    if (i > 0) {
+      io.stdout.write(`Provider failed; failing over to "${attempt.target}"...\n`);
+    }
+    try {
+      const spawnResult = await runTarget({
+        layout,
+        handoffId: parsed.handoffId,
+        binary: detection.resolved_path,
+        argv: parseArgv(attempt.launchCommand),
+        workingDir: envelope.working_dir,
+      });
+      result = spawnResult;
+      ranTarget = attempt.target;
+      if (spawnResult.exit_code === 0) break;
+      failureNotes.push(`${attempt.target}: exit_code=${spawnResult.exit_code}`);
+    } catch (err) {
+      failureNotes.push(
+        `${attempt.target}: spawn error: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  if (!result || ranTarget == null) {
     const failedEnvelope: Envelope = {
       ...spawningEnvelope,
       status: "failed",
       updated_at: new Date().toISOString(),
     };
     writeFileSync(envelopePath, `${JSON.stringify(failedEnvelope, null, 2)}\n`, "utf8");
-    const overseerLayout = resolveOverseerLayout(process.cwd());
     await appendHandoffResult(overseerLayout, {
       run_id: parsed.handoffId,
       status: "failed",
-      summary: `${envelope.target_agent} execution failed for handoff ${parsed.handoffId}: ${errMsg}`,
+      summary: `handoff ${parsed.handoffId} could not be executed: ${failureNotes.join("; ") || "no runnable provider"}`,
     });
-    io.stderr.write(`Failed to execute handoff: ${errMsg}\n`);
+    io.stderr.write(`Failed to execute handoff. ${failureNotes.join("; ")}\n`);
     return 1;
   }
+
   const finalStatus = result.exit_code === 0 ? "completed" : "failed";
+  const failedOver = ranTarget !== envelope.target_agent;
+  const failoverNote = failedOver ? ` (failed over from ${envelope.target_agent})` : "";
 
   const finalEnvelope: Envelope = {
     ...spawningEnvelope,
+    target_agent: ranTarget,
     status: finalStatus,
     updated_at: new Date().toISOString(),
     spawn: result,
   };
   writeFileSync(envelopePath, `${JSON.stringify(finalEnvelope, null, 2)}\n`, "utf8");
 
-  const overseerLayout = resolveOverseerLayout(process.cwd());
   await appendHandoffResult(overseerLayout, {
     run_id: parsed.handoffId,
     status: finalStatus as OverseerHandoffResultStatus,
-    summary: `${envelope.target_agent} execution ${finalStatus} for handoff ${parsed.handoffId}`,
+    summary: `${ranTarget} execution ${finalStatus} for handoff ${parsed.handoffId}${failoverNote}`,
     test_result: `exit_code=${result.exit_code}`,
   });
 
-  io.stdout.write(`\nHandoff: ${parsed.handoffId}\nStatus:  ${finalStatus}\nExit code: ${result.exit_code}\n`);
+  io.stdout.write(
+    `\nHandoff: ${parsed.handoffId}\nProvider: ${ranTarget}${failoverNote}\nStatus:  ${finalStatus}\nExit code: ${result.exit_code}\n`,
+  );
   if (result.stdout_tail) io.stdout.write(`\n--- stdout tail ---\n${result.stdout_tail}\n`);
   if (result.stderr_tail) io.stdout.write(`\n--- stderr tail ---\n${result.stderr_tail}\n`);
   io.stdout.write(`\nResult recorded: ${overseerLayout.handoffResultsPath}\n`);
+
+  // ── P2-T2 / consistency: opt-in Run Ledger auto-record ──────────────
+  // Default OFF. Identical opt-in semantics across CLI execute-handoff,
+  // CLI plan-execute-task, and MCP create_handoff(auto_spawn:true) —
+  // see `maybeAutoRecordHandoffExecution` in `src/run_ledger.ts`.
+  const autoRec = await maybeAutoRecordHandoffExecution(process.cwd(), {
+    handoffId: parsed.handoffId,
+    allowedFiles: envelope.allowed_files,
+    workingDir: envelope.working_dir,
+    ownerAgent: ranTarget,
+    finalStatus,
+    flagFromCaller: parsed.recordRunLedger,
+  });
+  if (autoRec.kind === "no_active_run") {
+    io.stderr.write(
+      "[run-ledger] auto-record requested but no active run; skipped (start one with `overseer run start`).\n",
+    );
+  } else if (autoRec.kind === "error") {
+    io.stderr.write(`[run-ledger] auto-record skipped due to error: ${autoRec.message}\n`);
+  } else if (autoRec.kind === "recorded") {
+    if (autoRec.sourcesRecorded > 0) {
+      io.stdout.write(
+        `[run-ledger] source-index: recorded ${autoRec.sourcesRecorded} file touch${autoRec.sourcesRecorded === 1 ? "" : "es"} for ${parsed.handoffId}\n`,
+      );
+    }
+    io.stdout.write(`[run-ledger] workspace recorded: ${autoRec.workspaceId}\n`);
+  }
 
   return result.exit_code === 0 ? 0 : 1;
 }
@@ -2004,6 +2161,336 @@ export async function runOverseerExecuteHandoffById(
   io: { stdout: { write: (chunk: string) => unknown }; stderr: { write: (chunk: string) => unknown } },
 ): Promise<number> {
   return runOverseerExecuteHandoff([handoffId], io);
+}
+
+/**
+ * Parse the `<PROJECT_PLAN>` block from a completed plan handoff's output,
+ * persist it as a ProjectPlan, and emit it on an `@@RELAYOS_PLAN@@` line.
+ */
+async function runOverseerPlanExtract(args: string[], io: CliIO): Promise<number> {
+  const handoffId = args.find((a) => !a.startsWith("--"));
+  if (!handoffId) {
+    io.stderr.write("Usage: relayos overseer plan-extract <handoff_id>\n");
+    return 1;
+  }
+
+  const layout = resolveStorageLayout();
+  const envPath = join(layout.envelopesDir, `${handoffId}.json`);
+  if (!existsSync(envPath)) {
+    io.stderr.write(`Handoff not found: ${handoffId}\n`);
+    return 1;
+  }
+
+  const envelope = JSON.parse(readFileSync(envPath, "utf8")) as Envelope;
+  // Prefer the full stdout log; fall back to the captured tail on the envelope.
+  const logPath = stdoutLogPath(layout, handoffId);
+  const output = existsSync(logPath)
+    ? readFileSync(logPath, "utf8")
+    : envelope.spawn?.stdout_tail ?? "";
+
+  const parsed = parseProjectPlanBlock(output);
+  if (!parsed) {
+    io.stderr.write(
+      `No valid PROJECT_PLAN block found in handoff ${handoffId} output.\n`,
+    );
+    return 1;
+  }
+
+  const plan = buildProjectPlan(parsed, handoffId);
+  const overseerLayout = resolveOverseerLayout(process.cwd());
+  const planPath = persistProjectPlan(overseerLayout, plan);
+
+  io.stdout.write("@@RELAYOS_PLAN@@ " + JSON.stringify(plan) + "\n");
+  io.stdout.write(`Plan saved: ${planPath}\n`);
+  return 0;
+}
+
+/** `relayos overseer plan-answer <plan_id> <answer text...>` */
+async function runOverseerPlanAnswer(args: string[], io: CliIO): Promise<number> {
+  const planId = args[0];
+  const answer = args.slice(1).join(" ").trim();
+  if (!planId || answer.length === 0) {
+    io.stderr.write("Usage: relayos overseer plan-answer <plan_id> <answer text...>\n");
+    return 1;
+  }
+  const layout = resolveOverseerLayout(process.cwd());
+  const updated = appendAnswerToplan(layout, planId, answer);
+  if (!updated) {
+    io.stderr.write(`Plan not found: ${planId}\n`);
+    return 1;
+  }
+  io.stdout.write(`Answer recorded (${updated.answers.length} total) for plan ${planId}\n`);
+  io.stdout.write("@@RELAYOS_PLAN_ANSWER@@ " + JSON.stringify({ plan_id: planId, answers: updated.answers }) + "\n");
+  return 0;
+}
+
+/**
+ * `relayos overseer plan-task-handoff <plan_id> <task_id>`
+ * Creates a handoff envelope for one task and updates the plan.
+ * Emits: `@@RELAYOS_TASK_HANDOFF@@ {"plan_id","task_id","handoff_id","title"}`
+ */
+async function runOverseerPlanTaskHandoff(args: string[], io: CliIO): Promise<number> {
+  const planId = args[0];
+  const taskId = args[1];
+  if (!planId || !taskId) {
+    io.stderr.write("Usage: relayos overseer plan-task-handoff <plan_id> <task_id>\n");
+    return 1;
+  }
+  const overseerLayout = resolveOverseerLayout(process.cwd());
+  const plan = loadProjectPlan(overseerLayout, planId);
+  if (!plan) {
+    io.stderr.write(`Plan not found: ${planId}\n`);
+    return 1;
+  }
+  const task = plan.tasks.find((t) => t.id === taskId);
+  if (!task) {
+    io.stderr.write(`Task not found: ${taskId} in plan ${planId}\n`);
+    return 1;
+  }
+  if (task.handoff_id) {
+    // Already has a handoff — re-emit so RTUI can re-sync
+    io.stdout.write(
+      "@@RELAYOS_TASK_HANDOFF@@ " +
+        JSON.stringify({ plan_id: planId, task_id: taskId, handoff_id: task.handoff_id, title: task.title }) +
+        "\n",
+    );
+    return 0;
+  }
+
+  const storageLayout = resolveStorageLayout();
+  const audit = createAuditWriter(storageLayout);
+  const handoffInput = buildTaskHandoffInput(task, plan, process.cwd());
+  const result = await createHandoff(handoffInput, { layout: storageLayout, audit });
+
+  // Update plan with the handoff id + mark task running
+  updatePlanTaskStatus(overseerLayout, planId, taskId, "running", result.handoff_id);
+
+  io.stdout.write(
+    "@@RELAYOS_TASK_HANDOFF@@ " +
+      JSON.stringify({ plan_id: planId, task_id: taskId, handoff_id: result.handoff_id, title: task.title }) +
+      "\n",
+  );
+  io.stdout.write(`Task handoff created: ${result.handoff_id}\n`);
+  return 0;
+}
+
+/**
+ * `relayos overseer plan-report <plan_id>`
+ * Builds a report from plan + handoff_results.jsonl and emits a sentinel.
+ * Emits: `@@RELAYOS_PLAN_REPORT@@ <json without markdown>`
+ */
+async function runOverseerPlanReport(args: string[], io: CliIO): Promise<number> {
+  const [planId] = args;
+  if (!planId) {
+    io.stderr.write("Usage: relayos overseer plan-report <plan_id>\n");
+    return 1;
+  }
+  const layout = resolveOverseerLayout(process.cwd());
+  const plan = loadProjectPlan(layout, planId);
+  if (!plan) {
+    io.stderr.write(`Plan ${planId} not found\n`);
+    return 1;
+  }
+  const report = buildPlanReport(layout, plan);
+  persistPlanReport(layout, planId, report);
+  const { markdown: _md, ...sentinelData } = report;
+  io.stdout.write(`@@RELAYOS_PLAN_REPORT@@ ${JSON.stringify(sentinelData)}\n`);
+  return 0;
+}
+
+const MAX_TASK_RETRIES = 2;
+
+/**
+ * `relayos overseer plan-execute-task <plan_id> <task_id>`
+ * Creates a handoff for the task, executes it, and retries on failure (up to 2 times).
+ * Emits: `@@RELAYOS_TASK_RESULT@@ {"plan_id","task_id","status","handoff_id","exit_code","retries","error_summary"}`
+ */
+async function runOverseerPlanExecuteTask(args: string[], io: CliIO): Promise<number> {
+  const planId = args[0];
+  const taskId = args[1];
+  if (!planId || !taskId) {
+    io.stderr.write("Usage: relayos overseer plan-execute-task <plan_id> <task_id>\n");
+    return 1;
+  }
+
+  const overseerLayout = resolveOverseerLayout(process.cwd());
+  const plan = loadProjectPlan(overseerLayout, planId);
+  if (!plan) {
+    io.stderr.write(`Plan not found: ${planId}\n`);
+    return 1;
+  }
+
+  const task = plan.tasks.find((t) => t.id === taskId);
+  if (!task) {
+    io.stderr.write(`Task not found: ${taskId} in plan ${planId}\n`);
+    return 1;
+  }
+
+  const storageLayout = resolveStorageLayout();
+  const audit = createAuditWriter(storageLayout);
+  const cwd = process.cwd();
+
+  /** Execute a single handoff and return exit code. */
+  async function executeHandoffById(handoffId: string): Promise<number> {
+    const envelopePath = join(storageLayout.envelopesDir, `${handoffId}.json`);
+    if (!existsSync(envelopePath)) return 1;
+
+    const envelope = JSON.parse(readFileSync(envelopePath, "utf8")) as Envelope;
+    if (envelope.status !== "recorded") return 1;
+
+    const triedTargets = new Set<string>();
+    const attempts: Array<{ target: "codex" | "claude"; launchCommand: string }> = [];
+    const addAttempt = (rawTarget: string): void => {
+      const target = rawTarget.trim().toLowerCase();
+      if (target !== "codex" && target !== "claude") return;
+      if (triedTargets.has(target)) return;
+      triedTargets.add(target);
+      if (target === envelope.target_agent) {
+        attempts.push({ target, launchCommand: envelope.launch_command });
+        return;
+      }
+      const swapped: Envelope = { ...envelope, target_agent: target };
+      const rendered = target === "codex" ? renderCodexTarget(swapped) : renderClaudeTarget(swapped);
+      attempts.push({ target, launchCommand: rendered.launch_command });
+    };
+    addAttempt(envelope.target_agent);
+    try {
+      const cfg = loadProjectConfig({ cwd: process.cwd() }).config;
+      const providers = cfg.overseer?.providers;
+      const backups = cfg.overseer?.backup_providers ?? [];
+      if (Array.isArray(providers)) {
+        for (const id of backups) {
+          const entry = providers.find((p: { id: string; name: string }) => p.id === id);
+          if (entry) addAttempt(entry.name);
+        }
+      }
+    } catch { /* config unavailable */ }
+
+    const spawningEnvelope: Envelope = { ...envelope, status: "spawning", updated_at: new Date().toISOString() };
+    writeFileSync(envelopePath, `${JSON.stringify(spawningEnvelope, null, 2)}\n`, "utf8");
+
+    let spawnResult: SpawnResult | null = null;
+    let ranTarget: "codex" | "claude" | null = null;
+
+    for (const attempt of attempts) {
+      let detection: Awaited<ReturnType<typeof detectCli>>;
+      try { detection = await detectCli(attempt.target); } catch { continue; }
+      if (!detection.found || !detection.resolved_path) continue;
+      try {
+        const sr = await runTarget({
+          layout: storageLayout,
+          handoffId,
+          binary: detection.resolved_path,
+          argv: parseArgv(attempt.launchCommand),
+          workingDir: envelope.working_dir,
+        });
+        spawnResult = sr;
+        ranTarget = attempt.target;
+        if (sr.exit_code === 0) break;
+      } catch { /* try next */ }
+    }
+
+    if (!spawnResult || ranTarget == null) {
+      const failedEnvelope: Envelope = { ...spawningEnvelope, status: "failed", updated_at: new Date().toISOString() };
+      writeFileSync(envelopePath, `${JSON.stringify(failedEnvelope, null, 2)}\n`, "utf8");
+      return 1;
+    }
+
+    const finalStatus = spawnResult.exit_code === 0 ? "completed" : "failed";
+    const finalEnvelope: Envelope = {
+      ...spawningEnvelope,
+      target_agent: ranTarget,
+      status: finalStatus,
+      updated_at: new Date().toISOString(),
+      spawn: spawnResult,
+    };
+    writeFileSync(envelopePath, `${JSON.stringify(finalEnvelope, null, 2)}\n`, "utf8");
+    await appendHandoffResult(overseerLayout, {
+      run_id: handoffId,
+      status: finalStatus as OverseerHandoffResultStatus,
+      summary: `${ranTarget} execution ${finalStatus} for handoff ${handoffId}`,
+      test_result: `exit_code=${spawnResult.exit_code}`,
+    });
+
+    // Keep plan-execute-task on the same run-ledger auto-record helper as
+    // execute-handoff and MCP create_handoff(auto_spawn=true). This path has
+    // no dedicated CLI flag; env-var opt-in still applies.
+    const autoRec = await maybeAutoRecordHandoffExecution(cwd, {
+      handoffId,
+      allowedFiles: envelope.allowed_files,
+      workingDir: envelope.working_dir,
+      ownerAgent: ranTarget,
+      finalStatus,
+      flagFromCaller: false,
+    });
+    if (autoRec.kind === "no_active_run") {
+      io.stderr.write(
+        "[run-ledger] auto-record requested but no active run; skipped (start one with `overseer run start`).\n",
+      );
+    } else if (autoRec.kind === "error") {
+      io.stderr.write(`[run-ledger] auto-record skipped due to error: ${autoRec.message}\n`);
+    } else if (autoRec.kind === "recorded") {
+      if (autoRec.sourcesRecorded > 0) {
+        io.stdout.write(
+          `[run-ledger] source-index: recorded ${autoRec.sourcesRecorded} file touch${autoRec.sourcesRecorded === 1 ? "" : "es"} for ${handoffId}\n`,
+        );
+      }
+      io.stdout.write(`[run-ledger] workspace recorded: ${autoRec.workspaceId}\n`);
+    }
+
+    return spawnResult.exit_code;
+  }
+
+  // Create the initial handoff
+  const initialInput = buildTaskHandoffInput(task, plan, cwd);
+  const initialResult = await createHandoff(initialInput, { layout: storageLayout, audit });
+  const initialHandoffId = initialResult.handoff_id;
+
+  updatePlanTaskStatus(overseerLayout, planId, taskId, "running", initialHandoffId);
+
+  io.stdout.write(`Executing task [${taskId}]: ${task.title} (handoff: ${initialHandoffId})\n`);
+  let exitCode = await executeHandoffById(initialHandoffId);
+  let currentHandoffId = initialHandoffId;
+  let retries = 0;
+  let errorSummary = "";
+
+  while (exitCode !== 0 && retries < MAX_TASK_RETRIES) {
+    retries += 1;
+    errorSummary = getTaskErrorContext(storageLayout, currentHandoffId);
+    io.stdout.write(`Task [${taskId}] failed (attempt ${retries}/${MAX_TASK_RETRIES}), retrying…\n`);
+
+    const fixInput = buildFixHandoffInput(task, plan, cwd, currentHandoffId, errorSummary, retries);
+    const fixResult = await createHandoff(fixInput, { layout: storageLayout, audit });
+    currentHandoffId = fixResult.handoff_id;
+
+    updatePlanTaskStatus(overseerLayout, planId, taskId, "running", currentHandoffId);
+    updatePlanTaskRetryCount(overseerLayout, planId, taskId, retries);
+
+    exitCode = await executeHandoffById(currentHandoffId);
+  }
+
+  const finalTaskStatus = exitCode === 0 ? "completed" : "blocked";
+  if (exitCode !== 0) {
+    errorSummary = getTaskErrorContext(storageLayout, currentHandoffId);
+  }
+
+  updatePlanTaskStatus(overseerLayout, planId, taskId, finalTaskStatus, currentHandoffId);
+  updatePlanTaskRetryCount(overseerLayout, planId, taskId, retries);
+
+  const resultPayload = {
+    plan_id: planId,
+    task_id: taskId,
+    status: finalTaskStatus,
+    handoff_id: currentHandoffId,
+    exit_code: exitCode,
+    retries,
+    error_summary: errorSummary ? errorSummary.slice(0, 500) : "",
+  };
+
+  io.stdout.write("@@RELAYOS_TASK_RESULT@@ " + JSON.stringify(resultPayload) + "\n");
+  io.stdout.write(`Task [${taskId}] ${finalTaskStatus}. Retries: ${retries}. Handoff: ${currentHandoffId}\n`);
+
+  return finalTaskStatus === "completed" ? 0 : 1;
 }
 
 async function runOverseerHandoffResult(args: string[], io: CliIO): Promise<number> {
@@ -2493,6 +2980,304 @@ async function runOverseerProgress(args: string[], io: CliIO): Promise<number> {
   return 0;
 }
 
+/**
+ * `overseer run <sub>` dispatcher — the Run Ledger / Continuity Layer CLI.
+ *
+ * Storage is in `<cwd>/.relayos/overseer/runs/<run_id>/...` via the
+ * helpers in `src/run_ledger.ts` (landed in Batch 1).
+ *
+ * Subcommands: start | current | resume | compact | complete | abandon | list
+ */
+async function runOverseerRun(
+  sub: string,
+  args: string[],
+  io: CliIO,
+): Promise<number> {
+  const cwd = process.cwd();
+
+  const goalFlagIdx = args.indexOf("--goal");
+  const goal = goalFlagIdx >= 0 ? args[goalFlagIdx + 1] : undefined;
+
+  switch (sub) {
+    case "start": {
+      const existing = await readActiveRunId(cwd);
+      if (existing) {
+        io.stdout.write(existing + "\n");
+        return 0;
+      }
+      const id = newRunId();
+      let branch: string | undefined;
+      let head_sha: string | undefined;
+      try {
+        branch = execSync("git rev-parse --abbrev-ref HEAD", {
+          cwd,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        }).trim();
+        head_sha = execSync("git rev-parse HEAD", {
+          cwd,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        }).trim();
+      } catch {
+        // Not a git repo — leave branch/head_sha undefined.
+      }
+      const run: RunRecord = {
+        id,
+        status: "active",
+        started_at: new Date().toISOString(),
+        goal,
+        branch,
+        head_sha,
+        task_count: 0,
+        handoff_ids: [],
+      };
+      await writeRunRecord(cwd, run);
+      await setActiveRunId(cwd, id);
+      io.stdout.write(id + "\n");
+      return 0;
+    }
+
+    case "current": {
+      const runId = await readActiveRunId(cwd);
+      if (!runId) {
+        io.stderr.write("No active run\n");
+        return 1;
+      }
+      const run = await readRunRecord(cwd, runId);
+      const recent_tasks = await readTaskLedgerEntries(cwd, runId, 10);
+      const continuation = await readContinuationPacket(cwd, runId);
+      io.stdout.write(JSON.stringify({ run, recent_tasks, continuation }, null, 2) + "\n");
+      return 0;
+    }
+
+    case "resume": {
+      const runId = args.find((a) => a.startsWith("r_"));
+      if (!runId) {
+        io.stderr.write("Usage: overseer run resume <run-id>\n");
+        return 1;
+      }
+      const run = await readRunRecord(cwd, runId);
+      if (!run) {
+        io.stderr.write(`Run ${runId} not found\n`);
+        return 1;
+      }
+      if (run.status === "abandoned") {
+        io.stderr.write(`Run ${runId} was abandoned; cannot resume\n`);
+        return 1;
+      }
+      await setActiveRunId(cwd, runId);
+      const continuation = await readContinuationPacket(cwd, runId);
+      io.stdout.write(
+        JSON.stringify({ resumed: runId, continuation }, null, 2) + "\n",
+      );
+      return 0;
+    }
+
+    case "compact": {
+      const runId = await readActiveRunId(cwd);
+      if (!runId) {
+        io.stderr.write("No active run\n");
+        return 1;
+      }
+      const run = await readRunRecord(cwd, runId);
+      // Use the full deduplicated ledger for compaction so old tasks
+      // are never dropped from recovery state on long runs.
+      const allEntries = await readTaskLedgerEntries(
+        cwd,
+        runId,
+        Number.MAX_SAFE_INTEGER,
+      );
+      const completed = allEntries
+        .filter((e) => e.status === "completed")
+        .map((e) => e.task_id);
+      const pending = allEntries
+        // Any non-completed task remains actionable for continuity.
+        .filter((e) => e.status !== "completed")
+        .map((e) => e.task_id);
+      const lastWithHandoff = [...allEntries]
+        .reverse()
+        .find((e) => e.handoff_id);
+      const packet: ContinuationPacket = {
+        run_id: runId,
+        generated_at: new Date().toISOString(),
+        context_summary: (run?.goal ?? "No goal set").slice(0, 500),
+        completed_task_ids: completed,
+        pending_task_ids: pending,
+        last_handoff_id: lastWithHandoff?.handoff_id,
+        last_handoff_status: lastWithHandoff?.status,
+        open_questions: [],
+        next_action:
+          pending.length > 0
+            ? `Continue task: ${pending[0]}`
+            : "All tasks complete",
+        files_modified: [],
+        token_budget_note: `${allEntries.length} total tasks; compact at ${new Date().toISOString()}`,
+      };
+      await writeContinuationPacket(cwd, runId, packet);
+      io.stdout.write(JSON.stringify(packet, null, 2) + "\n");
+      return 0;
+    }
+
+    case "complete": {
+      const runId = await readActiveRunId(cwd);
+      if (!runId) {
+        io.stderr.write("No active run\n");
+        return 1;
+      }
+      const run = await readRunRecord(cwd, runId);
+      if (!run) {
+        io.stderr.write(`Run record missing for ${runId}\n`);
+        return 1;
+      }
+      await writeRunRecord(cwd, {
+        ...run,
+        status: "completed",
+        ended_at: new Date().toISOString(),
+      });
+      await clearActiveRunId(cwd);
+      io.stdout.write(`Run ${runId} completed\n`);
+      return 0;
+    }
+
+    case "abandon": {
+      const runId = await readActiveRunId(cwd);
+      if (!runId) {
+        io.stderr.write("No active run\n");
+        return 1;
+      }
+      const run = await readRunRecord(cwd, runId);
+      if (run) {
+        await writeRunRecord(cwd, {
+          ...run,
+          status: "abandoned",
+          ended_at: new Date().toISOString(),
+        });
+      }
+      await clearActiveRunId(cwd);
+      io.stdout.write(`Run ${runId} abandoned\n`);
+      return 0;
+    }
+
+    case "list": {
+      const all = await listRuns(cwd);
+      io.stdout.write(JSON.stringify(all, null, 2) + "\n");
+      return 0;
+    }
+
+    case "register-workspace": {
+      const runId = await readActiveRunId(cwd);
+      if (!runId) {
+        io.stderr.write("No active run\n");
+        return 1;
+      }
+      const arg = (flag: string): string | undefined => {
+        const i = args.indexOf(flag);
+        return i >= 0 ? args[i + 1] : undefined;
+      };
+      const kind = arg("--kind");
+      const wsPath = arg("--path");
+      const owner = arg("--owner");
+      if (!kind || !wsPath || !owner) {
+        io.stderr.write(
+          "Usage: overseer run register-workspace --kind <git_worktree|main_checkout|external_checkout>" +
+            " --path <abs-path> --owner <claude|codex|human|other> [--branch ...] [--base-sha ...]" +
+            " [--head-sha ...] [--task-id ...] [--purpose ...]" +
+            " [--cleanup manual|auto_on_merge|auto_on_complete] [--handoff h_...]\n",
+        );
+        return 1;
+      }
+      const cleanup = arg("--cleanup") ?? "manual";
+      const id = newExecutionWorkspaceId();
+      const now = new Date().toISOString();
+      const ws: ExecutionWorkspace = {
+        id,
+        run_id: runId,
+        kind: kind as ExecutionWorkspace["kind"],
+        path: wsPath,
+        owner_agent: owner as ExecutionWorkspace["owner_agent"],
+        branch: arg("--branch"),
+        base_sha: arg("--base-sha"),
+        head_sha: arg("--head-sha"),
+        task_id: arg("--task-id"),
+        purpose: arg("--purpose"),
+        status: "active",
+        created_at: now,
+        updated_at: now,
+        cleanup_policy: cleanup as ExecutionWorkspace["cleanup_policy"],
+        related_handoff_id: arg("--handoff"),
+      };
+      try {
+        await appendExecutionWorkspace(cwd, runId, ws);
+      } catch (e) {
+        io.stderr.write(
+          `register-workspace failed: ${e instanceof Error ? e.message : String(e)}\n`,
+        );
+        return 1;
+      }
+      io.stdout.write(id + "\n");
+      return 0;
+    }
+
+    case "list-workspaces": {
+      const explicitRunId = args.find((a) => a.startsWith("r_"));
+      const targetRunId = explicitRunId ?? (await readActiveRunId(cwd));
+      if (!targetRunId) {
+        io.stderr.write("No active run (and no run id given)\n");
+        return 1;
+      }
+      const all = await readExecutionWorkspaces(cwd, targetRunId);
+      io.stdout.write(JSON.stringify(all, null, 2) + "\n");
+      return 0;
+    }
+
+    case "update-workspace": {
+      const runId = await readActiveRunId(cwd);
+      if (!runId) {
+        io.stderr.write("No active run\n");
+        return 1;
+      }
+      const wsId = args.find((a) => a.startsWith("w_"));
+      if (!wsId) {
+        io.stderr.write(
+          "Usage: overseer run update-workspace <w_id> --status <active|merged|abandoned|cleaned>\n",
+        );
+        return 1;
+      }
+      const statusIdx = args.indexOf("--status");
+      const status =
+        statusIdx >= 0 ? (args[statusIdx + 1] as string | undefined) : undefined;
+      if (!status) {
+        io.stderr.write("--status required\n");
+        return 1;
+      }
+      try {
+        const updated = await updateExecutionWorkspaceStatus(
+          cwd,
+          runId,
+          wsId,
+          status as ExecutionWorkspace["status"],
+        );
+        io.stdout.write(`Workspace ${wsId} → ${updated.status}\n`);
+        return 0;
+      } catch (e) {
+        io.stderr.write(
+          `update-workspace failed: ${e instanceof Error ? e.message : String(e)}\n`,
+        );
+        return 1;
+      }
+    }
+
+    default:
+      io.stderr.write(
+        `Unknown run subcommand: ${sub || "(none)"}\n` +
+          "usage: overseer run <start|current|resume|compact|complete|abandon|list|" +
+          "register-workspace|list-workspaces|update-workspace> [args...]\n",
+      );
+      return 1;
+  }
+}
+
 async function runOverseer(args: string[], io: CliIO): Promise<number> {
   const [sub, ...rest] = args;
   if (sub === "status") return runOverseerStatus(rest, io);
@@ -2514,6 +3299,11 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "handoff-result") return runOverseerHandoffResult(rest, io);
   if (sub === "handoff-results") return runOverseerHandoffResults(rest, io);
   if (sub === "execute-handoff") return runOverseerExecuteHandoff(rest, io);
+  if (sub === "plan-extract") return runOverseerPlanExtract(rest, io);
+  if (sub === "plan-answer") return runOverseerPlanAnswer(rest, io);
+  if (sub === "plan-task-handoff") return runOverseerPlanTaskHandoff(rest, io);
+  if (sub === "plan-execute-task") return runOverseerPlanExecuteTask(rest, io);
+  if (sub === "plan-report") return runOverseerPlanReport(rest, io);
   if (sub === "next") return runOverseerNext(rest, io);
   if (sub === "start") return runOverseerStart(rest, io);
   if (sub === "mode") return runOverseerMode(rest, io);
@@ -2526,10 +3316,18 @@ async function runOverseer(args: string[], io: CliIO): Promise<number> {
   if (sub === "init-context") return runOverseerInitContext(rest, io);
   if (sub === "branch") return runOverseerBranch(rest, io);
   if (sub === "progress") return runOverseerProgress(rest, io);
+  if (sub === "run") {
+    const [runSub, ...runRest] = rest;
+    return runOverseerRun(runSub ?? "", runRest, io);
+  }
   io.stderr.write(
-    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|capabilities|summary|memory-index|doctor|role-profile|wake-instructions|init|note|decision|decisions|handoff-result|handoff-results|execute-handoff|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress> [args...]\n" +
+    "usage: relayos overseer <status|context|handshake|recent|context-pack|run-preflight|capabilities|summary|memory-index|doctor|role-profile|wake-instructions|init|note|decision|decisions|handoff-result|handoff-results|execute-handoff|plan-extract|plan-answer|plan-task-handoff|plan-execute-task|plan-report|next|start|mode|env|activate-runtime|runtime-check|brief|init-context|branch|progress|run> [args...]\n" +
       "  overseer execute-handoff <id>   launch Codex for a recorded handoff and capture result\n" +
-      "  overseer execute-handoff --dry-run <id>  print launch_command without executing\n",
+      "  overseer plan-extract <id>              parse the PROJECT_PLAN block from a completed plan handoff\n" +
+      "  overseer plan-answer <plan_id> <text>   append an answer to an open plan\n" +
+      "  overseer plan-task-handoff <plan_id> <task_id>  create a handoff envelope for one task\n" +
+      "  overseer plan-execute-task <plan_id> <task_id>  create + execute a task handoff with up to 2 fix retries\n" +
+      "  overseer execute-handoff --dry-run <id>         print launch_command without executing\n",
   );
   return 1;
 }
@@ -2555,7 +3353,9 @@ export async function runCli(
   if (command === "report") return runReport(rest, io);
   if (command === "overseer") return runOverseer(rest, io);
   if (command === "chat") return runChatWithConversationMode(rest, io);
+  if (command === "chat-turn") return runChatTurn(rest[0] ?? "", io);
   if (command === "settings") return runSettings(rest, io);
+  if (command === "setup") return runSetup(rest, io);
 
   io.stderr.write(usage());
   return 1;

@@ -45,6 +45,12 @@ import { writeOverseerNote } from "./tools/write_overseer_note.js";
 import { inspectConfig } from "./tools/inspect_config.js";
 import { doctor } from "./tools/doctor.js";
 import { listOpenHandoffs } from "./tools/list_open_handoffs.js";
+import { writeRunEvent } from "./tools/write_run_event.js";
+import { readCurrentRun } from "./tools/read_current_run.js";
+import { readCurrentTaskLedger } from "./tools/read_current_task_ledger.js";
+import { updateTaskLedger } from "./tools/update_task_ledger.js";
+import { registerExecutionWorkspace } from "./tools/register_execution_workspace.js";
+import { readExecutionWorkspacesTool } from "./tools/read_execution_workspaces.js";
 import { SERVER_VERSION } from "./version.js";
 
 const HandoffInputShape = {
@@ -64,6 +70,7 @@ const HandoffInputShape = {
   ]),
   working_dir: z.string().optional(),
   auto_spawn: z.boolean().default(false),
+  record_run_ledger: z.boolean().optional(),
   audit_metadata: AuditMetadataInput.optional(),
 } as const;
 
@@ -661,6 +668,137 @@ export async function buildServer() {
     },
     async (args) => {
       const result = await listOpenHandoffs(args, { layout });
+      return jsonResult(result);
+    },
+  );
+
+  // ── Run Ledger / Continuity Layer (Plan Task 6) ──────────────────────
+
+  server.registerTool(
+    "write_run_event",
+    {
+      title: "Write run event",
+      description:
+        "Append a task ledger entry to the active run's task_ledger.jsonl. " +
+        "Records the work you are about to do or just completed. Errors if no run is active — " +
+        "start one with `overseer run start`. The `seq` field is the durable task sequence; " +
+        "writing twice with the same seq is treated as an update via last-write-wins on read.",
+      inputSchema: {
+        seq: z.number().int().min(1),
+        user_input: z.string().min(1),
+        status: z.enum(["pending", "dispatched", "completed", "failed", "blocked"]),
+        handoff_id: z.string().optional(),
+        target_agent: z.string().optional(),
+        model: z.string().optional(),
+        effort: z.string().optional(),
+        mode: z.string().optional(),
+        result_summary: z.string().max(200).optional(),
+      },
+    },
+    async (args) => {
+      const result = await writeRunEvent(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "read_current_run",
+    {
+      title: "Read current run",
+      description:
+        "Read the active run record, the last 10 task ledger entries (deduplicated, last-write-wins per seq), " +
+        "and the continuation packet (null if no compact has happened yet). Read-only.",
+      inputSchema: {},
+    },
+    async (args) => {
+      const result = await readCurrentRun(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "read_current_task_ledger",
+    {
+      title: "Read current task ledger",
+      description:
+        "Read the active run's task ledger with optional last_n bound (default 20, max 100). " +
+        "Returns deduplicated entries sorted by seq ascending. Read-only.",
+      inputSchema: {
+        last_n: z.number().int().min(1).max(100).optional(),
+      },
+    },
+    async (args) => {
+      const result = await readCurrentTaskLedger(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "update_task_ledger",
+    {
+      title: "Update task ledger entry",
+      description:
+        "Update a task ledger entry by seq number. Appends a new record; the dedup-on-read in " +
+        "read_current_task_ledger makes this the effective update path (same seq, later updated_at wins). " +
+        "Errors if no run is active or the seq does not exist.",
+      inputSchema: {
+        seq: z.number().int().min(1),
+        status: z.enum(["pending", "dispatched", "completed", "failed", "blocked"]).optional(),
+        handoff_id: z.string().optional(),
+        result_summary: z.string().max(200).optional(),
+      },
+    },
+    async (args) => {
+      const result = await updateTaskLedger(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "register_execution_workspace",
+    {
+      title: "Register execution workspace",
+      description:
+        "Record where work happened (git worktree, main checkout, or external checkout) and who " +
+        "owns it. Use when spawning a new working tree or before a handoff applies patches. " +
+        "Append-only — every call adds a new ExecutionWorkspace record with id=w_<ULID> and " +
+        "status=\"active\". Errors if no run is active.",
+      inputSchema: {
+        kind: z.enum(["git_worktree", "main_checkout", "external_checkout"]),
+        path: z.string().min(1),
+        owner_agent: z.enum(["claude", "codex", "human", "other"]),
+        branch: z.string().optional(),
+        base_sha: z.string().optional(),
+        head_sha: z.string().optional(),
+        task_id: z.string().optional(),
+        purpose: z.string().optional(),
+        cleanup_policy: z
+          .enum(["manual", "auto_on_merge", "auto_on_complete"])
+          .optional(),
+        related_handoff_id: z.string().optional(),
+      },
+    },
+    async (args) => {
+      const result = await registerExecutionWorkspace(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "read_execution_workspaces",
+    {
+      title: "Read execution workspaces",
+      description:
+        "List execution workspaces for a run (defaults to the active run). Returns deduplicated " +
+        "workspaces (last-write-wins by id), sorted by created_at ascending. Optionally filter by " +
+        "status. Read-only.",
+      inputSchema: {
+        run_id: z.string().optional(),
+        status: z.enum(["active", "merged", "abandoned", "cleaned"]).optional(),
+      },
+    },
+    async (args) => {
+      const result = await readExecutionWorkspacesTool(args);
       return jsonResult(result);
     },
   );

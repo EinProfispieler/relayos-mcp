@@ -130,6 +130,32 @@ Never commit solely on the executing agent's report that tests pass and the buil
 
 Do not bundle multiple task changes into one commit. If a task is blocked or incomplete, commit only the safe subset and record the remainder as a follow-up.
 
+### Step and build mode
+
+The Overseer runs in one of two per-project autonomy modes.
+
+**Step mode (default).** One handoff per turn. The Overseer replies, plans, and
+records the handoff envelope; the user must approve it before it runs. After the
+handoff executes, the Overseer stops and waits.
+
+**Build mode (opt-in).** After a single approval, the Overseer continues through
+the task list — but only as a *foreground, supervised, interruptible* loop:
+
+- Foreground supervised continuation loop.
+- Visible streaming progress.
+- User can interrupt at any time.
+- Stops at hard approval boundaries.
+- Stops on test failure, uncertainty, or scope change.
+
+Build mode is supervised continuation, not autonomous orchestration. These remain
+forbidden in every mode:
+
+- Daemon / background runners.
+- Detached execution while the user is not watching.
+- Parallel project/worktree orchestration without explicit approval.
+- Autonomous commits, releases, destructive actions, production/server changes,
+  credential changes, or high-cost external API usage.
+
 ---
 
 ## 6. Source repo vs. runtime workspace
