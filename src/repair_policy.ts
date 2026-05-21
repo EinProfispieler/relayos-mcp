@@ -160,6 +160,29 @@ export function evaluateRepairPolicy(
   const { finding, attempts, proposed_next, triggers, ladder } = input;
   const latest = attempts.length > 0 ? attempts[attempts.length - 1]! : null;
   const budget = clampGuidanceBudget(input.guidance_budget_words);
+  const isFailed =
+    latest !== null &&
+    (latest.result === "incomplete" || latest.result === "failed");
+
+  // ── Stage 0 — structured Attempt 3 stop boundary (wins over everything) ──
+  // §3.3 / §3.5: after MAX_STRUCTURED_ATTEMPTS structured attempts,
+  // if the latest is still incomplete/failed, the automated/
+  // semi-automated loop ends. A human can continue by appending a
+  // new RepairAttempt directly; the engine does not gate that.
+  //
+  // This boundary is checked BEFORE triggers, BEFORE the ladder, and
+  // BEFORE the variable-change rule. Changing effort / model /
+  // provider / mode / scope / tests / reviewer does NOT lift it —
+  // the structured loop is over.
+  if (latest !== null && latest.attempt_number >= MAX_STRUCTURED_ATTEMPTS && isFailed) {
+    return decide({
+      finding,
+      decision: "stop_needs_human",
+      proposed_next,
+      reason_codes: ["max_attempts_reached"],
+      budget,
+    });
+  }
 
   // ── Stage 1 — triggers (precedence above ladder + variable-change) ──
   const triggerDecision = evaluateTriggers({
@@ -183,24 +206,11 @@ export function evaluateRepairPolicy(
     });
   }
 
-  // ── Stage 3 — attempt-count stop boundary ──
-  // §3.5: attempt_number >= 3 AND the next move introduces no new
-  // variable → stop. The ladder check below handles the case where
-  // an escalation is still possible.
+  // ── Stage 3 — failed-repair invariant + ladder ──
+  // The Stage 0 stop already handled attempt_number >= MAX_STRUCTURED_ATTEMPTS
+  // when failed/incomplete; from here we're at attempt_number < 3.
   const changedAxes = diffVariableAxes(latest, proposed_next);
-  const isFailed = latest.result === "incomplete" || latest.result === "failed";
 
-  if (latest.attempt_number >= MAX_STRUCTURED_ATTEMPTS && changedAxes.length === 0) {
-    return decide({
-      finding,
-      decision: "stop_needs_human",
-      proposed_next,
-      reason_codes: ["max_attempts_reached", "no_remaining_variables_to_change"],
-      budget,
-    });
-  }
-
-  // ── Stage 4 — failed-repair invariant + ladder ──
   if (isFailed && changedAxes.length === 0) {
     // Same-everything retry — must escalate or stop.
     const escalation = pickEscalation({
@@ -233,7 +243,7 @@ export function evaluateRepairPolicy(
     });
   }
 
-  // ── Stage 5 — variables changed; treat as a valid retry ──
+  // ── Stage 4 — variables changed; treat as a valid retry ──
   // If the latest attempt failed AND we have a real change → it's a
   // legitimate next attempt. If the latest succeeded but the caller
   // is following up anyway, also fine.

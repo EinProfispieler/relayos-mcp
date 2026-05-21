@@ -505,8 +505,15 @@ describe("Escalation ladder (Plan §3.3)", () => {
 
 // ── §3.5 — Stop conditions ───────────────────────────────────────────
 
-describe("Stop conditions (Plan §3.5)", () => {
-  it("attempt_number >= MAX with no new variable: stop_needs_human(max_attempts_reached)", () => {
+describe("Attempt 3 stop boundary (Plan §3.3 / §3.5)", () => {
+  // The structured automated/semi-automated loop bound is fixed at
+  // MAX_STRUCTURED_ATTEMPTS (3). After three failed/incomplete
+  // attempts, the engine MUST stop regardless of what the caller
+  // proposes — variable changes do NOT lift this boundary. A human
+  // can resume by appending a new RepairAttempt directly; the
+  // engine does not gate that path.
+
+  it("Attempt 3 failed + same-everything → stop_needs_human + max_attempts_reached", () => {
     const latest = makeAttempt({
       result: "failed",
       attempt_number: MAX_STRUCTURED_ATTEMPTS,
@@ -522,9 +529,103 @@ describe("Stop conditions (Plan §3.5)", () => {
     assertHumanApprovalAndReasonCodes(d);
   });
 
-  it("attempt_number >= MAX but a variable changed: allows non-stop progression", () => {
+  it("Attempt 3 failed + changed effort → still stop_needs_human + max_attempts_reached", () => {
+    // Before this fix, changing any RepairVariableChange axis caused
+    // the engine to fall through to the ladder/variable-change stages
+    // and emit allow_retry. The corrected boundary stops here.
     const latest = makeAttempt({
       result: "failed",
+      attempt_number: MAX_STRUCTURED_ATTEMPTS,
+      effort: "medium",
+    });
+    const d = evaluateRepairPolicy(
+      baseInput({
+        attempts: [latest],
+        proposed_next: makeProposed({ effort: "high" }),
+      }),
+    );
+    expect(d.decision).toBe("stop_needs_human");
+    expect(d.reason_codes).toContain("max_attempts_reached");
+    assertHumanApprovalAndReasonCodes(d);
+  });
+
+  it("Attempt 3 incomplete + changed model → still stop_needs_human + max_attempts_reached", () => {
+    const latest = makeAttempt({
+      result: "incomplete",
+      attempt_number: MAX_STRUCTURED_ATTEMPTS,
+      provider: "codex",
+      model: "gpt-5.3-codex",
+    });
+    const d = evaluateRepairPolicy(
+      baseInput({
+        attempts: [latest],
+        proposed_next: makeProposed({ model: "gpt-5.5" }),
+      }),
+    );
+    expect(d.decision).toBe("stop_needs_human");
+    expect(d.reason_codes).toContain("max_attempts_reached");
+    assertHumanApprovalAndReasonCodes(d);
+  });
+
+  it("Attempt 3 incomplete + changed mode → still stop_needs_human + max_attempts_reached", () => {
+    const latest = makeAttempt({
+      result: "incomplete",
+      attempt_number: MAX_STRUCTURED_ATTEMPTS,
+      mode: "patch",
+    });
+    const d = evaluateRepairPolicy(
+      baseInput({
+        attempts: [latest],
+        proposed_next: makeProposed({ mode: "patch_after_diagnosis" }),
+      }),
+    );
+    expect(d.decision).toBe("stop_needs_human");
+    expect(d.reason_codes).toContain("max_attempts_reached");
+    assertHumanApprovalAndReasonCodes(d);
+  });
+
+  it("Attempt 3 incomplete + changed provider → still stop_needs_human + max_attempts_reached", () => {
+    const latest = makeAttempt({
+      result: "incomplete",
+      attempt_number: MAX_STRUCTURED_ATTEMPTS,
+      provider: "codex",
+    });
+    const d = evaluateRepairPolicy(
+      baseInput({
+        attempts: [latest],
+        proposed_next: makeProposed({ provider: "claude" }),
+      }),
+    );
+    expect(d.decision).toBe("stop_needs_human");
+    expect(d.reason_codes).toContain("max_attempts_reached");
+    assertHumanApprovalAndReasonCodes(d);
+  });
+
+  it("boundary holds for attempt_number > MAX too (e.g. 4)", () => {
+    // A human can manually author Attempt 4. If evaluateRepairPolicy
+    // is then asked about Attempt 5, the boundary still applies —
+    // the engine has no automated path forward, the human is the
+    // only legitimate writer of more attempts.
+    const latest = makeAttempt({
+      result: "failed",
+      attempt_number: MAX_STRUCTURED_ATTEMPTS + 1,
+    });
+    const d = evaluateRepairPolicy(
+      baseInput({
+        attempts: [latest],
+        proposed_next: makeProposed({ reviewer: "static_analysis" }),
+      }),
+    );
+    expect(d.decision).toBe("stop_needs_human");
+    expect(d.reason_codes).toContain("max_attempts_reached");
+  });
+
+  it("boundary does NOT trigger when Attempt 3's result was 'fixed'", () => {
+    // The boundary only fires on failed/incomplete latest results.
+    // A successful Attempt 3 followed by a "just to be safe" follow-up
+    // proposal should not be force-stopped.
+    const latest = makeAttempt({
+      result: "fixed",
       attempt_number: MAX_STRUCTURED_ATTEMPTS,
     });
     const d = evaluateRepairPolicy(
@@ -533,8 +634,6 @@ describe("Stop conditions (Plan §3.5)", () => {
         proposed_next: makeProposed({ effort: "high" }),
       }),
     );
-    // Either allow_retry (a real change) or an escalate decision —
-    // never max_attempts_reached because a variable changed.
     expect(d.reason_codes).not.toContain("max_attempts_reached");
   });
 });
