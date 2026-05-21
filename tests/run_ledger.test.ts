@@ -26,6 +26,7 @@ import {
   readRunRecord,
   readSourceIndexEntries,
   readTaskLedgerEntries,
+  recordHandoffSourceTouches,
   resolveActiveRunPath,
   resolveRunLayout,
   resolveRunsDir,
@@ -326,6 +327,99 @@ describe("source index", () => {
     await appendSourceIndexEntry(cwd, runId, makeEntry({ path: "src/b.ts" }));
     const all = await readSourceIndexEntries(cwd, runId);
     expect(all.map((e) => e.path)).toEqual(["src/a.ts", "src/b.ts"]);
+  });
+});
+
+// ── recordHandoffSourceTouches (P2-T1) ───────────────────────────────
+
+describe("recordHandoffSourceTouches", () => {
+  const runId = "r_01HXABCDEFGHJKMNPQRSTVWXYZ";
+
+  it("appends one entry per distinct path", async () => {
+    const result = await recordHandoffSourceTouches(cwd, runId, {
+      paths: ["src/a.ts", "src/b.ts", "src/c.ts"],
+      action: "modified",
+      handoff_id: "h_01HXYZ",
+      task_seq: 1,
+      ts: "2026-05-22T10:00:00Z",
+    });
+    expect(result.recorded).toBe(3);
+    const all = await readSourceIndexEntries(cwd, runId);
+    expect(all.map((e) => e.path)).toEqual(["src/a.ts", "src/b.ts", "src/c.ts"]);
+    expect(all.every((e) => e.handoff_id === "h_01HXYZ")).toBe(true);
+    expect(all.every((e) => e.task_seq === 1)).toBe(true);
+    expect(all.every((e) => e.action === "modified")).toBe(true);
+    expect(all.every((e) => e.ts === "2026-05-22T10:00:00Z")).toBe(true);
+  });
+
+  it("dedups within a single call (the same path is recorded once)", async () => {
+    const result = await recordHandoffSourceTouches(cwd, runId, {
+      paths: ["src/a.ts", "src/a.ts", "src/b.ts", "src/a.ts"],
+      action: "modified",
+      ts: "2026-05-22T10:00:00Z",
+    });
+    expect(result.recorded).toBe(2);
+    const all = await readSourceIndexEntries(cwd, runId);
+    expect(all.map((e) => e.path)).toEqual(["src/a.ts", "src/b.ts"]);
+  });
+
+  it("empty input writes no entries and does not create the file", async () => {
+    const result = await recordHandoffSourceTouches(cwd, runId, {
+      paths: [],
+      action: "modified",
+    });
+    expect(result.recorded).toBe(0);
+    const layout = resolveRunLayout(cwd, runId);
+    const { existsSync } = await import("node:fs");
+    expect(existsSync(layout.sourceIndex)).toBe(false);
+  });
+
+  it("skips whitespace-only / empty path strings", async () => {
+    const result = await recordHandoffSourceTouches(cwd, runId, {
+      paths: ["", "   ", "src/real.ts"],
+      action: "created",
+      ts: "2026-05-22T10:00:00Z",
+    });
+    expect(result.recorded).toBe(1);
+    const all = await readSourceIndexEntries(cwd, runId);
+    expect(all.map((e) => e.path)).toEqual(["src/real.ts"]);
+    expect(all[0]!.action).toBe("created");
+  });
+
+  it("honors the action argument and never guesses", async () => {
+    await recordHandoffSourceTouches(cwd, runId, {
+      paths: ["src/del.ts"],
+      action: "deleted",
+      ts: "2026-05-22T10:00:00Z",
+    });
+    const all = await readSourceIndexEntries(cwd, runId);
+    expect(all[0]!.action).toBe("deleted");
+  });
+
+  it("falls back to current ISO timestamp when ts is omitted", async () => {
+    const before = new Date().toISOString();
+    await recordHandoffSourceTouches(cwd, runId, {
+      paths: ["src/x.ts"],
+      action: "modified",
+    });
+    const after = new Date().toISOString();
+    const all = await readSourceIndexEntries(cwd, runId);
+    expect(all[0]!.ts >= before).toBe(true);
+    expect(all[0]!.ts <= after).toBe(true);
+  });
+
+  it("omits handoff_id / task_seq fields when not provided (does not write undefined)", async () => {
+    await recordHandoffSourceTouches(cwd, runId, {
+      paths: ["src/y.ts"],
+      action: "modified",
+      ts: "2026-05-22T10:00:00Z",
+    });
+    const all = await readSourceIndexEntries(cwd, runId);
+    expect(all[0]).toEqual({
+      path: "src/y.ts",
+      action: "modified",
+      ts: "2026-05-22T10:00:00Z",
+    });
   });
 });
 

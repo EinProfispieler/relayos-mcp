@@ -91,6 +91,7 @@ import {
   appendTaskLedgerEntry,
   clearActiveRunId,
   listRuns,
+  maybeAutoRecordHandoffExecution,
   readActiveRunId,
   readContinuationPacket,
   readExecutionWorkspaces,
@@ -1891,13 +1892,23 @@ function parseOverseerHandoffResultShowArgs(
 
 function parseOverseerExecuteHandoffArgs(
   args: string[],
-): { handoffId: string; dryRun: boolean } | null {
+): { handoffId: string; dryRun: boolean; recordRunLedger: boolean } | null {
   let handoffId: string | null = null;
   let dryRun = false;
+  let recordRunLedger = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
     if (arg === "--dry-run") {
       dryRun = true;
+      continue;
+    }
+    // P2-T2 opt-in: when set, after a successful spawn the CLI records
+    // a SourceIndexEntry per allowed_file plus one ExecutionWorkspace
+    // record into the active run's ledger. Default OFF — without this
+    // flag (or the env var below), execute-handoff behavior is
+    // identical to the pre-T2 default.
+    if (arg === "--record-run-ledger") {
+      recordRunLedger = true;
       continue;
     }
     if (arg.startsWith("--")) return null;
@@ -1905,8 +1916,13 @@ function parseOverseerExecuteHandoffArgs(
     handoffId = arg;
   }
   if (!handoffId || handoffId.trim().length === 0) return null;
-  return { handoffId: handoffId.trim(), dryRun };
+  return { handoffId: handoffId.trim(), dryRun, recordRunLedger };
 }
+
+// Note: the opt-in gate that used to live here as
+// `shouldAutoRecordRunLedger` moved to `isRunLedgerAutoRecordEnabled`
+// in `src/run_ledger.ts` so all three handoff-execution paths share
+// one source of truth.
 
 function parseArgv(command: string): string[] {
   const argv: string[] = [];
@@ -1957,7 +1973,10 @@ async function runOverseerExecuteHandoff(args: string[], io: CliIO): Promise<num
   const parsed = parseOverseerExecuteHandoffArgs(args);
   if (!parsed) {
     io.stderr.write(
-      "Usage: relayos overseer execute-handoff <handoff_id> [--dry-run] (or --dry-run <handoff_id>)\n",
+      "Usage: relayos overseer execute-handoff <handoff_id> [--dry-run] [--record-run-ledger]\n" +
+        "  --record-run-ledger   opt-in: append SourceIndexEntry + ExecutionWorkspace to the\n" +
+        "                        active run ledger after a successful spawn. Default OFF.\n" +
+        "                        Also enabled by RELAYOS_RUN_LEDGER_AUTO_RECORD=1.\n",
     );
     return 1;
   }
@@ -2106,6 +2125,33 @@ async function runOverseerExecuteHandoff(args: string[], io: CliIO): Promise<num
   if (result.stdout_tail) io.stdout.write(`\n--- stdout tail ---\n${result.stdout_tail}\n`);
   if (result.stderr_tail) io.stdout.write(`\n--- stderr tail ---\n${result.stderr_tail}\n`);
   io.stdout.write(`\nResult recorded: ${overseerLayout.handoffResultsPath}\n`);
+
+  // ── P2-T2 / consistency: opt-in Run Ledger auto-record ──────────────
+  // Default OFF. Identical opt-in semantics across CLI execute-handoff,
+  // CLI plan-execute-task, and MCP create_handoff(auto_spawn:true) —
+  // see `maybeAutoRecordHandoffExecution` in `src/run_ledger.ts`.
+  const autoRec = await maybeAutoRecordHandoffExecution(process.cwd(), {
+    handoffId: parsed.handoffId,
+    allowedFiles: envelope.allowed_files,
+    workingDir: envelope.working_dir,
+    ownerAgent: ranTarget,
+    finalStatus,
+    flagFromCaller: parsed.recordRunLedger,
+  });
+  if (autoRec.kind === "no_active_run") {
+    io.stderr.write(
+      "[run-ledger] auto-record requested but no active run; skipped (start one with `overseer run start`).\n",
+    );
+  } else if (autoRec.kind === "error") {
+    io.stderr.write(`[run-ledger] auto-record skipped due to error: ${autoRec.message}\n`);
+  } else if (autoRec.kind === "recorded") {
+    if (autoRec.sourcesRecorded > 0) {
+      io.stdout.write(
+        `[run-ledger] source-index: recorded ${autoRec.sourcesRecorded} file touch${autoRec.sourcesRecorded === 1 ? "" : "es"} for ${parsed.handoffId}\n`,
+      );
+    }
+    io.stdout.write(`[run-ledger] workspace recorded: ${autoRec.workspaceId}\n`);
+  }
 
   return result.exit_code === 0 ? 0 : 1;
 }
@@ -2365,6 +2411,32 @@ async function runOverseerPlanExecuteTask(args: string[], io: CliIO): Promise<nu
       summary: `${ranTarget} execution ${finalStatus} for handoff ${handoffId}`,
       test_result: `exit_code=${spawnResult.exit_code}`,
     });
+
+    // Keep plan-execute-task on the same run-ledger auto-record helper as
+    // execute-handoff and MCP create_handoff(auto_spawn=true). This path has
+    // no dedicated CLI flag; env-var opt-in still applies.
+    const autoRec = await maybeAutoRecordHandoffExecution(cwd, {
+      handoffId,
+      allowedFiles: envelope.allowed_files,
+      workingDir: envelope.working_dir,
+      ownerAgent: ranTarget,
+      finalStatus,
+      flagFromCaller: false,
+    });
+    if (autoRec.kind === "no_active_run") {
+      io.stderr.write(
+        "[run-ledger] auto-record requested but no active run; skipped (start one with `overseer run start`).\n",
+      );
+    } else if (autoRec.kind === "error") {
+      io.stderr.write(`[run-ledger] auto-record skipped due to error: ${autoRec.message}\n`);
+    } else if (autoRec.kind === "recorded") {
+      if (autoRec.sourcesRecorded > 0) {
+        io.stdout.write(
+          `[run-ledger] source-index: recorded ${autoRec.sourcesRecorded} file touch${autoRec.sourcesRecorded === 1 ? "" : "es"} for ${handoffId}\n`,
+        );
+      }
+      io.stdout.write(`[run-ledger] workspace recorded: ${autoRec.workspaceId}\n`);
+    }
 
     return spawnResult.exit_code;
   }

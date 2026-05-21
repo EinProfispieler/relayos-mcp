@@ -52,6 +52,7 @@ export const HandoffInput = z
     expected_output: ExpectedOutputInput,
     working_dir: z.string().optional(),
     auto_spawn: z.boolean().default(false),
+    record_run_ledger: z.boolean().optional(),
     audit_metadata: AuditMetadataInput.optional(),
   })
   .strict();

@@ -16,6 +16,7 @@ import type { AuditWriter } from "../audit.js";
 import { renderCodexTarget } from "../render/codex.js";
 import { renderClaudeTarget } from "../render/claude.js";
 import { detectCli, runTarget } from "../spawn/index.js";
+import { maybeAutoRecordHandoffExecution } from "../run_ledger.js";
 
 export interface CreateHandoffResult {
   handoff_id: string;
@@ -139,6 +140,21 @@ export async function createHandoff(
       },
     );
     await writeEnvelope(deps.layout, env);
+
+    // Keep MCP auto_spawn on the same Run Ledger helper as CLI paths.
+    // Default OFF unless per-call or env opt-in is enabled.
+    // Use the actual execution workspace as the ledger root when provided.
+    // This keeps MCP auto_spawn aligned with the handoff's target project
+    // instead of forcing writes into the MCP server's process cwd.
+    const ledgerCwd = env.working_dir ?? process.cwd();
+    await maybeAutoRecordHandoffExecution(ledgerCwd, {
+      handoffId: env.id,
+      allowedFiles: env.allowed_files,
+      workingDir: env.working_dir,
+      ownerAgent: env.target_agent,
+      finalStatus: result.exit_code === 0 ? "completed" : "failed",
+      flagFromCaller: input.record_run_ledger === true,
+    });
 
     const fresh = (await readEnvelope(deps.layout, env.id)) ?? env;
     return {

@@ -25,6 +25,7 @@
 import { existsSync } from "node:fs";
 import { appendFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { newExecutionWorkspaceId } from "./id.js";
 import {
   ContinuationPacket as ContinuationPacketSchema,
   DraftReply as DraftReplySchema,
@@ -40,6 +41,7 @@ import {
   type ContinuationPacket,
   type DraftReply,
   type ExecutionWorkspace,
+  type ExecutionWorkspaceOwner,
   type ExecutionWorkspaceStatus,
   type RepairAttempt,
   type RepairPolicyDecision,
@@ -299,6 +301,173 @@ export async function readSourceIndexEntries(
     if (result.success) out.push(result.data);
   }
   return out;
+}
+
+/**
+ * Batch-append source-index entries for files touched by a handoff.
+ *
+ * Plan §10 Q4 / Q5 follow-on (P2 round, T1): provide a structured
+ * helper that callers (Task 2 — `execute-handoff` integration, default
+ * OFF) can use to record `SourceIndexEntry` rows for the files listed
+ * in a handoff's allowed_files / explicit EvidenceRef[].
+ *
+ * Pure addition: wraps `appendSourceIndexEntry` — does not change its
+ * shape or write path. Distinct paths are written exactly once per
+ * call (the caller passing duplicates is silently dedup'd in this
+ * batch so the log doesn't get spammed with redundant rows from a
+ * single handoff). Empty `paths` is a no-op.
+ *
+ * Caller controls `action` explicitly (`"created" | "modified" |
+ * "deleted"`) — the helper never guesses. Timestamp is the caller's
+ * choice via `ts` (defaults to `new Date().toISOString()`), keeping
+ * the helper deterministic when tests pass an explicit value.
+ */
+export async function recordHandoffSourceTouches(
+  cwd: string,
+  runId: string,
+  opts: {
+    paths: string[];
+    action: SourceIndexEntry["action"];
+    handoff_id?: string;
+    task_seq?: number;
+    ts?: string;
+  },
+): Promise<{ recorded: number }> {
+  if (opts.paths.length === 0) return { recorded: 0 };
+  const seen = new Set<string>();
+  const distinct: string[] = [];
+  for (const p of opts.paths) {
+    if (typeof p !== "string") continue;
+    const trimmed = p.trim();
+    if (trimmed.length === 0) continue;
+    if (seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    distinct.push(trimmed);
+  }
+  if (distinct.length === 0) return { recorded: 0 };
+  const ts = opts.ts ?? new Date().toISOString();
+  for (const path of distinct) {
+    const entry: SourceIndexEntry = {
+      path,
+      action: opts.action,
+      ts,
+      ...(opts.handoff_id !== undefined ? { handoff_id: opts.handoff_id } : {}),
+      ...(opts.task_seq !== undefined ? { task_seq: opts.task_seq } : {}),
+    };
+    await appendSourceIndexEntry(cwd, runId, entry);
+  }
+  return { recorded: distinct.length };
+}
+
+// ── Shared opt-in gate for Run Ledger auto-record (P2-T2 consistency) ─
+
+/**
+ * Outcome reported by `maybeAutoRecordHandoffExecution`. Callers use
+ * this to decide what (if anything) to log to their own IO. The
+ * helper itself does NOT write to stdout/stderr — callers do.
+ */
+export type AutoRecordOutcome =
+  | { kind: "disabled" }
+  | { kind: "no_active_run" }
+  | { kind: "recorded"; runId: string; sourcesRecorded: number; workspaceId: string }
+  | { kind: "error"; runId: string | null; message: string };
+
+/**
+ * Read-only opt-in check used by EVERY handoff-execution path (CLI
+ * `execute-handoff`, CLI `plan-execute-task`, MCP `create_handoff`
+ * with `auto_spawn: true`). Two equally-weighted opt-ins:
+ *   • per-call flag (e.g. `--record-run-ledger` from a CLI parser, or
+ *     `record_run_ledger: true` from an MCP input — the caller passes
+ *     this in as `flagFromCaller`)
+ *   • `RELAYOS_RUN_LEDGER_AUTO_RECORD` env var (process-wide)
+ *
+ * Default: returns false (i.e. auto-record disabled). Without either
+ * signal no Run Ledger mutation happens.
+ *
+ * Accepts an optional `env` argument so tests can override
+ * `process.env` deterministically; production calls pass nothing.
+ */
+export function isRunLedgerAutoRecordEnabled(
+  flagFromCaller: boolean,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (flagFromCaller) return true;
+  const raw = env.RELAYOS_RUN_LEDGER_AUTO_RECORD;
+  if (typeof raw !== "string") return false;
+  const v = raw.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+/**
+ * Conditionally appends a `SourceIndexEntry` per touched file PLUS one
+ * `ExecutionWorkspace` record for the spawn. Default OFF — only runs
+ * when `isRunLedgerAutoRecordEnabled(flagFromCaller)` is true.
+ *
+ * Tolerant of "no active run" — returns `{ kind: "no_active_run" }`,
+ * never throws. Tolerant of write errors — returns `{ kind: "error",
+ * ... }` so the surrounding execute flow can never be failed by an
+ * auto-record problem.
+ *
+ * Identical semantics across all three execution paths; this helper
+ * is the single point of enforcement so the rule cannot drift.
+ */
+export async function maybeAutoRecordHandoffExecution(
+  cwd: string,
+  opts: {
+    handoffId: string;
+    allowedFiles?: string[];
+    workingDir?: string;
+    ownerAgent: ExecutionWorkspaceOwner;
+    finalStatus: "completed" | "failed";
+    flagFromCaller: boolean;
+    env?: NodeJS.ProcessEnv;
+    /** Optional clock override for deterministic tests. */
+    now?: () => string;
+  },
+): Promise<AutoRecordOutcome> {
+  if (!isRunLedgerAutoRecordEnabled(opts.flagFromCaller, opts.env)) {
+    return { kind: "disabled" };
+  }
+  let runId: string | null = null;
+  try {
+    runId = await readActiveRunId(cwd);
+    if (!runId) return { kind: "no_active_run" };
+    const ts = opts.now ? opts.now() : new Date().toISOString();
+    const allowed = Array.isArray(opts.allowedFiles)
+      ? opts.allowedFiles.filter((f): f is string => typeof f === "string")
+      : [];
+    let sourcesRecorded = 0;
+    if (allowed.length > 0) {
+      const { recorded } = await recordHandoffSourceTouches(cwd, runId, {
+        paths: allowed,
+        action: "modified",
+        handoff_id: opts.handoffId,
+        ts,
+      });
+      sourcesRecorded = recorded;
+    }
+    const workspaceId = newExecutionWorkspaceId();
+    await appendExecutionWorkspace(cwd, runId, {
+      id: workspaceId,
+      run_id: runId,
+      kind: "main_checkout",
+      path: opts.workingDir ?? cwd,
+      owner_agent: opts.ownerAgent,
+      purpose: `handoff ${opts.handoffId}`,
+      status: opts.finalStatus === "completed" ? "merged" : "active",
+      created_at: ts,
+      updated_at: ts,
+      cleanup_policy: "manual",
+      related_handoff_id: opts.handoffId,
+    });
+    return { kind: "recorded", runId, sourcesRecorded, workspaceId };
+  } catch (err) {
+    return {
+      kind: "error",
+      runId,
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 // ── ExecutionWorkspace (append-only JSONL, dedup by id) ──────────────
