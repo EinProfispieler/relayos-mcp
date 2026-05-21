@@ -14,13 +14,19 @@ import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildOverseerContextPack } from "../src/overseer.js";
 import {
+  appendExecutionWorkspace,
   appendTaskLedgerEntry,
   resolveActiveRunPath,
   setActiveRunId,
   writeContinuationPacket,
   writeRunRecord,
 } from "../src/run_ledger.js";
-import type { ContinuationPacket, RunRecord, TaskLedgerEntry } from "../src/schema.js";
+import type {
+  ContinuationPacket,
+  ExecutionWorkspace,
+  RunRecord,
+  TaskLedgerEntry,
+} from "../src/schema.js";
 
 let cwd: string;
 
@@ -159,5 +165,86 @@ describe("buildOverseerContextPack — active_run", () => {
     expect(pack.active_run!.recent_task_summaries[0]!.user_input).toHaveLength(
       120,
     );
+  });
+});
+
+// ── Task 9 — active_workspaces in active_run ────────────────────────
+
+describe("buildOverseerContextPack — active_workspaces", () => {
+  function makeWs(overrides: Partial<ExecutionWorkspace> = {}): ExecutionWorkspace {
+    const now = isoNow();
+    return {
+      id: "w_01HXABCDEFGHJKMNPQRSTVWXYZ",
+      run_id: RUN_ID,
+      kind: "git_worktree",
+      path: "/tmp/wt-a",
+      owner_agent: "codex",
+      status: "active",
+      created_at: now,
+      updated_at: now,
+      cleanup_policy: "auto_on_merge",
+      ...overrides,
+    };
+  }
+
+  it("active_workspaces is [] when no workspaces registered", async () => {
+    await writeRunRecord(cwd, makeRun());
+    await setActiveRunId(cwd, RUN_ID);
+    const pack = await buildOverseerContextPack(cwd, 5);
+    expect(pack.active_run!.active_workspaces).toEqual([]);
+  });
+
+  it("active_workspaces lists only status=active workspaces with compact fields", async () => {
+    await writeRunRecord(cwd, makeRun());
+    await setActiveRunId(cwd, RUN_ID);
+    await appendExecutionWorkspace(
+      cwd,
+      RUN_ID,
+      makeWs({
+        id: "w_01AAAAAAAAAAAAAAAAAAAAAAAA",
+        path: "/tmp/wt-a",
+        branch: "feat/a",
+        purpose: "task 1",
+      }),
+    );
+    await appendExecutionWorkspace(
+      cwd,
+      RUN_ID,
+      makeWs({
+        id: "w_01BBBBBBBBBBBBBBBBBBBBBBBB",
+        path: "/tmp/wt-b",
+        owner_agent: "human",
+        status: "merged",
+      }),
+    );
+
+    const pack = await buildOverseerContextPack(cwd, 5);
+    const aws = pack.active_run!.active_workspaces;
+    expect(aws).toHaveLength(1);
+    expect(aws[0]!.id).toBe("w_01AAAAAAAAAAAAAAAAAAAAAAAA");
+    expect(aws[0]!.kind).toBe("git_worktree");
+    expect(aws[0]!.path).toBe("/tmp/wt-a");
+    expect(aws[0]!.owner_agent).toBe("codex");
+    expect(aws[0]!.branch).toBe("feat/a");
+    expect(aws[0]!.purpose).toBe("task 1");
+  });
+
+  it("excludes workspaces after they transition to abandoned/cleaned", async () => {
+    await writeRunRecord(cwd, makeRun());
+    await setActiveRunId(cwd, RUN_ID);
+    const wsId = "w_01CCCCCCCCCCCCCCCCCCCCCCCC";
+    await appendExecutionWorkspace(
+      cwd,
+      RUN_ID,
+      makeWs({ id: wsId, status: "active", updated_at: "2026-05-20T10:00:00Z" }),
+    );
+    // Same id, later updated_at, status -> abandoned (dedup wins)
+    await appendExecutionWorkspace(
+      cwd,
+      RUN_ID,
+      makeWs({ id: wsId, status: "abandoned", updated_at: "2026-05-20T11:00:00Z" }),
+    );
+    const pack = await buildOverseerContextPack(cwd, 5);
+    expect(pack.active_run!.active_workspaces).toEqual([]);
   });
 });

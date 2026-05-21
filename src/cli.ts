@@ -85,21 +85,25 @@ import {
   buildPlanReport,
   persistPlanReport,
 } from "./project_plan.js";
-import { newRunId } from "./id.js";
+import { newExecutionWorkspaceId, newRunId } from "./id.js";
 import {
+  appendExecutionWorkspace,
   appendTaskLedgerEntry,
   clearActiveRunId,
   listRuns,
   readActiveRunId,
   readContinuationPacket,
+  readExecutionWorkspaces,
   readRunRecord,
   readTaskLedgerEntries,
   setActiveRunId,
+  updateExecutionWorkspaceStatus,
   writeContinuationPacket,
   writeRunRecord,
 } from "./run_ledger.js";
 import type {
   ContinuationPacket,
+  ExecutionWorkspace,
   RunRecord,
 } from "./schema.js";
 import { execSync } from "node:child_process";
@@ -3080,10 +3084,114 @@ async function runOverseerRun(
       return 0;
     }
 
+    case "register-workspace": {
+      const runId = await readActiveRunId(cwd);
+      if (!runId) {
+        io.stderr.write("No active run\n");
+        return 1;
+      }
+      const arg = (flag: string): string | undefined => {
+        const i = args.indexOf(flag);
+        return i >= 0 ? args[i + 1] : undefined;
+      };
+      const kind = arg("--kind");
+      const wsPath = arg("--path");
+      const owner = arg("--owner");
+      if (!kind || !wsPath || !owner) {
+        io.stderr.write(
+          "Usage: overseer run register-workspace --kind <git_worktree|main_checkout|external_checkout>" +
+            " --path <abs-path> --owner <claude|codex|human|other> [--branch ...] [--base-sha ...]" +
+            " [--head-sha ...] [--task-id ...] [--purpose ...]" +
+            " [--cleanup manual|auto_on_merge|auto_on_complete] [--handoff h_...]\n",
+        );
+        return 1;
+      }
+      const cleanup = arg("--cleanup") ?? "manual";
+      const id = newExecutionWorkspaceId();
+      const now = new Date().toISOString();
+      const ws: ExecutionWorkspace = {
+        id,
+        run_id: runId,
+        kind: kind as ExecutionWorkspace["kind"],
+        path: wsPath,
+        owner_agent: owner as ExecutionWorkspace["owner_agent"],
+        branch: arg("--branch"),
+        base_sha: arg("--base-sha"),
+        head_sha: arg("--head-sha"),
+        task_id: arg("--task-id"),
+        purpose: arg("--purpose"),
+        status: "active",
+        created_at: now,
+        updated_at: now,
+        cleanup_policy: cleanup as ExecutionWorkspace["cleanup_policy"],
+        related_handoff_id: arg("--handoff"),
+      };
+      try {
+        await appendExecutionWorkspace(cwd, runId, ws);
+      } catch (e) {
+        io.stderr.write(
+          `register-workspace failed: ${e instanceof Error ? e.message : String(e)}\n`,
+        );
+        return 1;
+      }
+      io.stdout.write(id + "\n");
+      return 0;
+    }
+
+    case "list-workspaces": {
+      const explicitRunId = args.find((a) => a.startsWith("r_"));
+      const targetRunId = explicitRunId ?? (await readActiveRunId(cwd));
+      if (!targetRunId) {
+        io.stderr.write("No active run (and no run id given)\n");
+        return 1;
+      }
+      const all = await readExecutionWorkspaces(cwd, targetRunId);
+      io.stdout.write(JSON.stringify(all, null, 2) + "\n");
+      return 0;
+    }
+
+    case "update-workspace": {
+      const runId = await readActiveRunId(cwd);
+      if (!runId) {
+        io.stderr.write("No active run\n");
+        return 1;
+      }
+      const wsId = args.find((a) => a.startsWith("w_"));
+      if (!wsId) {
+        io.stderr.write(
+          "Usage: overseer run update-workspace <w_id> --status <active|merged|abandoned|cleaned>\n",
+        );
+        return 1;
+      }
+      const statusIdx = args.indexOf("--status");
+      const status =
+        statusIdx >= 0 ? (args[statusIdx + 1] as string | undefined) : undefined;
+      if (!status) {
+        io.stderr.write("--status required\n");
+        return 1;
+      }
+      try {
+        const updated = await updateExecutionWorkspaceStatus(
+          cwd,
+          runId,
+          wsId,
+          status as ExecutionWorkspace["status"],
+        );
+        io.stdout.write(`Workspace ${wsId} → ${updated.status}\n`);
+        return 0;
+      } catch (e) {
+        io.stderr.write(
+          `update-workspace failed: ${e instanceof Error ? e.message : String(e)}\n`,
+        );
+        return 1;
+      }
+    }
+
     default:
       io.stderr.write(
         `Unknown run subcommand: ${sub || "(none)"}\n` +
-          "usage: overseer run <start|current|resume|compact|complete|abandon|list> [args...]\n",
+          "usage: overseer run <start|current|resume|compact|complete|abandon|list|" +
+          "register-workspace|list-workspaces|update-workspace> [args...]\n",
       );
       return 1;
   }

@@ -49,6 +49,8 @@ import { writeRunEvent } from "./tools/write_run_event.js";
 import { readCurrentRun } from "./tools/read_current_run.js";
 import { readCurrentTaskLedger } from "./tools/read_current_task_ledger.js";
 import { updateTaskLedger } from "./tools/update_task_ledger.js";
+import { registerExecutionWorkspace } from "./tools/register_execution_workspace.js";
+import { readExecutionWorkspacesTool } from "./tools/read_execution_workspaces.js";
 import { SERVER_VERSION } from "./version.js";
 
 const HandoffInputShape = {
@@ -747,6 +749,55 @@ export async function buildServer() {
     },
     async (args) => {
       const result = await updateTaskLedger(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "register_execution_workspace",
+    {
+      title: "Register execution workspace",
+      description:
+        "Record where work happened (git worktree, main checkout, or external checkout) and who " +
+        "owns it. Use when spawning a new working tree or before a handoff applies patches. " +
+        "Append-only — every call adds a new ExecutionWorkspace record with id=w_<ULID> and " +
+        "status=\"active\". Errors if no run is active.",
+      inputSchema: {
+        kind: z.enum(["git_worktree", "main_checkout", "external_checkout"]),
+        path: z.string().min(1),
+        owner_agent: z.enum(["claude", "codex", "human", "other"]),
+        branch: z.string().optional(),
+        base_sha: z.string().optional(),
+        head_sha: z.string().optional(),
+        task_id: z.string().optional(),
+        purpose: z.string().optional(),
+        cleanup_policy: z
+          .enum(["manual", "auto_on_merge", "auto_on_complete"])
+          .optional(),
+        related_handoff_id: z.string().optional(),
+      },
+    },
+    async (args) => {
+      const result = await registerExecutionWorkspace(args);
+      return jsonResult(result);
+    },
+  );
+
+  server.registerTool(
+    "read_execution_workspaces",
+    {
+      title: "Read execution workspaces",
+      description:
+        "List execution workspaces for a run (defaults to the active run). Returns deduplicated " +
+        "workspaces (last-write-wins by id), sorted by created_at ascending. Optionally filter by " +
+        "status. Read-only.",
+      inputSchema: {
+        run_id: z.string().optional(),
+        status: z.enum(["active", "merged", "abandoned", "cleaned"]).optional(),
+      },
+    },
+    async (args) => {
+      const result = await readExecutionWorkspacesTool(args);
       return jsonResult(result);
     },
   );

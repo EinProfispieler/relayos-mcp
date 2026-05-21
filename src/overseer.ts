@@ -6,6 +6,7 @@ import { TaskRecord as TaskRecordSchema, type TaskRecord } from "./schema.js";
 import {
   readActiveRunId,
   readContinuationPacket,
+  readExecutionWorkspaces,
   readRunRecord,
   readTaskLedgerEntries,
 } from "./run_ledger.js";
@@ -329,6 +330,20 @@ export interface ActiveRunSummary {
     next_action: string;
     files_modified: string[];
   } | null;
+  /**
+   * Active execution workspaces for this run (status === "active").
+   * Surfaces "where the work is happening + who owns it" so a resuming
+   * agent doesn't have to read WORKSPACES.jsonl directly. Empty array
+   * when no workspaces are registered.
+   */
+  active_workspaces: Array<{
+    id: string;
+    kind: "git_worktree" | "main_checkout" | "external_checkout";
+    path: string;
+    owner_agent: "claude" | "codex" | "human" | "other";
+    branch: string | null;
+    purpose: string | null;
+  }>;
 }
 
 export interface OverseerContextPack {
@@ -691,9 +706,10 @@ async function buildActiveRunSummary(
   if (!runId) return null;
   const run = await readRunRecord(cwd, runId);
   if (!run) return null;
-  const [recent, continuation] = await Promise.all([
+  const [recent, continuation, workspaces] = await Promise.all([
     readTaskLedgerEntries(cwd, runId, 5),
     readContinuationPacket(cwd, runId),
+    readExecutionWorkspaces(cwd, runId),
   ]);
   return {
     run_id: runId,
@@ -717,6 +733,16 @@ async function buildActiveRunSummary(
           files_modified: continuation.files_modified,
         }
       : null,
+    active_workspaces: workspaces
+      .filter((w) => w.status === "active")
+      .map((w) => ({
+        id: w.id,
+        kind: w.kind,
+        path: w.path,
+        owner_agent: w.owner_agent,
+        branch: w.branch ?? null,
+        purpose: w.purpose ?? null,
+      })),
   };
 }
 

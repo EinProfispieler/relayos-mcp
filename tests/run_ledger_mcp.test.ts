@@ -18,6 +18,8 @@ import { writeRunEvent } from "../src/tools/write_run_event.js";
 import { readCurrentRun } from "../src/tools/read_current_run.js";
 import { readCurrentTaskLedger } from "../src/tools/read_current_task_ledger.js";
 import { updateTaskLedger } from "../src/tools/update_task_ledger.js";
+import { registerExecutionWorkspace } from "../src/tools/register_execution_workspace.js";
+import { readExecutionWorkspacesTool } from "../src/tools/read_execution_workspaces.js";
 import {
   clearActiveRunId,
   setActiveRunId,
@@ -184,5 +186,139 @@ describe("update_task_ledger", () => {
     await expect(
       updateTaskLedger({ seq: 1, status: "completed" }, cwd),
     ).rejects.toThrow(/no active run/i);
+  });
+});
+
+// ── Task 9 — register_execution_workspace ───────────────────────────
+
+describe("register_execution_workspace", () => {
+  it("registers a workspace and returns ok + workspace_id + path", async () => {
+    const result = await registerExecutionWorkspace(
+      {
+        kind: "git_worktree",
+        path: "/tmp/x",
+        owner_agent: "codex",
+      },
+      cwd,
+    );
+    expect(result.ok).toBe(true);
+    expect(result.workspace_id).toMatch(/^w_[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(result.run_id).toBe(RUN_ID);
+    expect(result.path).toBe("/tmp/x");
+  });
+
+  it("defaults cleanup_policy to manual", async () => {
+    await registerExecutionWorkspace(
+      { kind: "main_checkout", path: "/tmp/y", owner_agent: "human" },
+      cwd,
+    );
+    const listed = await readExecutionWorkspacesTool({}, cwd);
+    expect(listed.workspaces[0]!.cleanup_policy).toBe("manual");
+  });
+
+  it("preserves optional fields (branch, base_sha, purpose, handoff)", async () => {
+    await registerExecutionWorkspace(
+      {
+        kind: "git_worktree",
+        path: "/tmp/z",
+        owner_agent: "codex",
+        branch: "feat/x",
+        base_sha: "abcdef1",
+        purpose: "task 3",
+        cleanup_policy: "auto_on_merge",
+        related_handoff_id: "h_01HXYZ",
+      },
+      cwd,
+    );
+    const listed = await readExecutionWorkspacesTool({}, cwd);
+    const w = listed.workspaces[0]!;
+    expect(w.branch).toBe("feat/x");
+    expect(w.base_sha).toBe("abcdef1");
+    expect(w.purpose).toBe("task 3");
+    expect(w.cleanup_policy).toBe("auto_on_merge");
+    expect(w.related_handoff_id).toBe("h_01HXYZ");
+  });
+
+  it("errors when no active run", async () => {
+    await clearActiveRunId(cwd);
+    await expect(
+      registerExecutionWorkspace(
+        { kind: "git_worktree", path: "/tmp/x", owner_agent: "codex" },
+        cwd,
+      ),
+    ).rejects.toThrow(/no active run/i);
+  });
+
+  it("rejects unknown kind", async () => {
+    await expect(
+      registerExecutionWorkspace(
+        { kind: "tarball" as never, path: "/tmp/x", owner_agent: "codex" },
+        cwd,
+      ),
+    ).rejects.toThrow();
+  });
+});
+
+// ── Task 9 — read_execution_workspaces ──────────────────────────────
+
+describe("read_execution_workspaces", () => {
+  it("returns [] when no workspaces registered", async () => {
+    const result = await readExecutionWorkspacesTool({}, cwd);
+    expect(result.run_id).toBe(RUN_ID);
+    expect(result.workspaces).toEqual([]);
+  });
+
+  it("returns all workspaces deduped (no filter)", async () => {
+    await registerExecutionWorkspace(
+      { kind: "git_worktree", path: "/tmp/a", owner_agent: "codex" },
+      cwd,
+    );
+    await registerExecutionWorkspace(
+      { kind: "main_checkout", path: "/tmp/b", owner_agent: "human" },
+      cwd,
+    );
+    const result = await readExecutionWorkspacesTool({}, cwd);
+    expect(result.workspaces).toHaveLength(2);
+    expect(result.workspaces.map((w) => w.path).sort()).toEqual([
+      "/tmp/a",
+      "/tmp/b",
+    ]);
+  });
+
+  it("filters by status when provided", async () => {
+    await registerExecutionWorkspace(
+      { kind: "git_worktree", path: "/tmp/a", owner_agent: "codex" },
+      cwd,
+    );
+    const onlyActive = await readExecutionWorkspacesTool(
+      { status: "active" },
+      cwd,
+    );
+    expect(onlyActive.workspaces).toHaveLength(1);
+    const onlyMerged = await readExecutionWorkspacesTool(
+      { status: "merged" },
+      cwd,
+    );
+    expect(onlyMerged.workspaces).toEqual([]);
+  });
+
+  it("accepts an explicit run_id (does not require active run)", async () => {
+    await registerExecutionWorkspace(
+      { kind: "git_worktree", path: "/tmp/a", owner_agent: "codex" },
+      cwd,
+    );
+    await clearActiveRunId(cwd);
+    const result = await readExecutionWorkspacesTool(
+      { run_id: RUN_ID },
+      cwd,
+    );
+    expect(result.workspaces).toHaveLength(1);
+  });
+
+  it("errors when no run_id given and no active run", async () => {
+    await clearActiveRunId(cwd);
+    await expect(readExecutionWorkspacesTool({}, cwd)).rejects.toThrow(
+      /no active run/i,
+    );
   });
 });

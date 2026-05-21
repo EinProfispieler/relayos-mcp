@@ -201,3 +201,225 @@ describe("overseer run <unknown>", () => {
     expect(cap.stderr).toContain("Unknown run subcommand");
   });
 });
+
+// ── Task 9 — ExecutionWorkspace CLI ──────────────────────────────────
+
+describe("overseer run register-workspace", () => {
+  it("errors when no active run", async () => {
+    const cap = captureIO();
+    const code = await runCli(
+      [
+        "overseer",
+        "run",
+        "register-workspace",
+        "--kind",
+        "git_worktree",
+        "--path",
+        "/tmp/x",
+        "--owner",
+        "codex",
+      ],
+      cap.io,
+    );
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("No active run");
+  });
+
+  it("errors when required flags are missing", async () => {
+    await runCli(["overseer", "run", "start"], captureIO().io);
+    const cap = captureIO();
+    const code = await runCli(
+      ["overseer", "run", "register-workspace", "--kind", "git_worktree"],
+      cap.io,
+    );
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("Usage");
+  });
+
+  it("creates a workspace record and prints w_<ULID>", async () => {
+    await runCli(["overseer", "run", "start"], captureIO().io);
+    const cap = captureIO();
+    const code = await runCli(
+      [
+        "overseer",
+        "run",
+        "register-workspace",
+        "--kind",
+        "git_worktree",
+        "--path",
+        "/tmp/test-wt",
+        "--owner",
+        "codex",
+        "--branch",
+        "feat/x",
+        "--purpose",
+        "task 1",
+      ],
+      cap.io,
+    );
+    expect(code).toBe(0);
+    const wsId = cap.stdout.trim();
+    expect(wsId).toMatch(/^w_[0-9A-HJKMNP-TV-Z]{26}$/);
+  });
+
+  it("rejects invalid enum values via schema (kind)", async () => {
+    await runCli(["overseer", "run", "start"], captureIO().io);
+    const cap = captureIO();
+    const code = await runCli(
+      [
+        "overseer",
+        "run",
+        "register-workspace",
+        "--kind",
+        "tarball",
+        "--path",
+        "/tmp/x",
+        "--owner",
+        "codex",
+      ],
+      cap.io,
+    );
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("register-workspace failed");
+  });
+});
+
+describe("overseer run list-workspaces", () => {
+  it("returns [] when active run has no workspaces", async () => {
+    await runCli(["overseer", "run", "start"], captureIO().io);
+    const cap = captureIO();
+    const code = await runCli(["overseer", "run", "list-workspaces"], cap.io);
+    expect(code).toBe(0);
+    expect(JSON.parse(cap.stdout)).toEqual([]);
+  });
+
+  it("lists multiple workspaces sorted by created_at", async () => {
+    await runCli(["overseer", "run", "start"], captureIO().io);
+    await runCli(
+      [
+        "overseer",
+        "run",
+        "register-workspace",
+        "--kind",
+        "git_worktree",
+        "--path",
+        "/tmp/a",
+        "--owner",
+        "codex",
+      ],
+      captureIO().io,
+    );
+    await runCli(
+      [
+        "overseer",
+        "run",
+        "register-workspace",
+        "--kind",
+        "main_checkout",
+        "--path",
+        "/tmp/b",
+        "--owner",
+        "human",
+      ],
+      captureIO().io,
+    );
+    const cap = captureIO();
+    await runCli(["overseer", "run", "list-workspaces"], cap.io);
+    const arr = JSON.parse(cap.stdout);
+    expect(arr).toHaveLength(2);
+    expect(arr[0].path).toBe("/tmp/a");
+    expect(arr[1].path).toBe("/tmp/b");
+  });
+});
+
+describe("overseer run update-workspace", () => {
+  it("appends a status transition; readers see the new status", async () => {
+    await runCli(["overseer", "run", "start"], captureIO().io);
+    const reg = captureIO();
+    await runCli(
+      [
+        "overseer",
+        "run",
+        "register-workspace",
+        "--kind",
+        "git_worktree",
+        "--path",
+        "/tmp/c",
+        "--owner",
+        "codex",
+      ],
+      reg.io,
+    );
+    const wsId = reg.stdout.trim();
+
+    const upd = captureIO();
+    const code = await runCli(
+      ["overseer", "run", "update-workspace", wsId, "--status", "merged"],
+      upd.io,
+    );
+    expect(code).toBe(0);
+    expect(upd.stdout).toContain(`Workspace ${wsId} → merged`);
+
+    const list = captureIO();
+    await runCli(["overseer", "run", "list-workspaces"], list.io);
+    const arr = JSON.parse(list.stdout);
+    expect(arr).toHaveLength(1);
+    expect(arr[0].status).toBe("merged");
+  });
+
+  it("errors when no workspace id is provided", async () => {
+    await runCli(["overseer", "run", "start"], captureIO().io);
+    const cap = captureIO();
+    const code = await runCli(
+      ["overseer", "run", "update-workspace", "--status", "merged"],
+      cap.io,
+    );
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("Usage");
+  });
+
+  it("errors when --status is missing", async () => {
+    await runCli(["overseer", "run", "start"], captureIO().io);
+    const reg = captureIO();
+    await runCli(
+      [
+        "overseer",
+        "run",
+        "register-workspace",
+        "--kind",
+        "git_worktree",
+        "--path",
+        "/tmp/d",
+        "--owner",
+        "codex",
+      ],
+      reg.io,
+    );
+    const wsId = reg.stdout.trim();
+    const cap = captureIO();
+    const code = await runCli(
+      ["overseer", "run", "update-workspace", wsId],
+      cap.io,
+    );
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("--status required");
+  });
+
+  it("errors when the workspace id is unknown", async () => {
+    await runCli(["overseer", "run", "start"], captureIO().io);
+    const cap = captureIO();
+    const code = await runCli(
+      [
+        "overseer",
+        "run",
+        "update-workspace",
+        "w_01NOPE000000000000000000000",
+        "--status",
+        "merged",
+      ],
+      cap.io,
+    );
+    expect(code).toBe(1);
+    expect(cap.stderr).toContain("update-workspace failed");
+  });
+});
