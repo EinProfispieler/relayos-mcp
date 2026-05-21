@@ -40,7 +40,13 @@ export async function updateTaskLedger(
   if (!runId) {
     throw new Error("No active run");
   }
-  const allEntries = await readTaskLedgerEntries(cwd, runId, 1000);
+  // Read the full deduplicated ledger so early tasks in long runs
+  // remain updateable (no 1000-entry lookup cap).
+  const allEntries = await readTaskLedgerEntries(
+    cwd,
+    runId,
+    Number.MAX_SAFE_INTEGER,
+  );
   const existing = allEntries.find((e) => e.seq === input.seq);
   if (!existing) {
     throw new Error(`No task with seq ${input.seq} in run ${runId}`);

@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runCli } from "../src/cli.js";
+import { appendTaskLedgerEntry } from "../src/run_ledger.js";
 
 function captureIO() {
   let stdout = "";
@@ -108,6 +109,38 @@ describe("overseer run compact", () => {
         join(cwd, ".relayos", "overseer", "runs", id, "continuation.json"),
       ),
     ).toBe(true);
+  });
+
+  it("treats failed/blocked tasks as pending work for continuation", async () => {
+    const startCap = captureIO();
+    await runCli(["overseer", "run", "start", "--goal", "compact status check"], startCap.io);
+    const runId = startCap.stdout.trim();
+    const now = new Date().toISOString();
+    await appendTaskLedgerEntry(cwd, runId, {
+      seq: 1,
+      task_id: "t_1",
+      run_id: runId,
+      user_input: "first task failed",
+      status: "failed",
+      created_at: now,
+      updated_at: now,
+    });
+    await appendTaskLedgerEntry(cwd, runId, {
+      seq: 2,
+      task_id: "t_2",
+      run_id: runId,
+      user_input: "second task blocked",
+      status: "blocked",
+      created_at: now,
+      updated_at: now,
+    });
+
+    const cap = captureIO();
+    const code = await runCli(["overseer", "run", "compact"], cap.io);
+    expect(code).toBe(0);
+    const packet = JSON.parse(cap.stdout);
+    expect(packet.pending_task_ids).toEqual(["t_1", "t_2"]);
+    expect(packet.next_action).toBe("Continue task: t_1");
   });
 });
 

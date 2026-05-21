@@ -1956,7 +1956,9 @@ function parseArgv(command: string): string[] {
 async function runOverseerExecuteHandoff(args: string[], io: CliIO): Promise<number> {
   const parsed = parseOverseerExecuteHandoffArgs(args);
   if (!parsed) {
-    io.stderr.write("Usage: relayos overseer execute-handoff <handoff_id> [--dry-run]\n");
+    io.stderr.write(
+      "Usage: relayos overseer execute-handoff <handoff_id> [--dry-run] (or --dry-run <handoff_id>)\n",
+    );
     return 1;
   }
 
@@ -3007,12 +3009,19 @@ async function runOverseerRun(
         return 1;
       }
       const run = await readRunRecord(cwd, runId);
-      const allEntries = await readTaskLedgerEntries(cwd, runId, 1000);
+      // Use the full deduplicated ledger for compaction so old tasks
+      // are never dropped from recovery state on long runs.
+      const allEntries = await readTaskLedgerEntries(
+        cwd,
+        runId,
+        Number.MAX_SAFE_INTEGER,
+      );
       const completed = allEntries
         .filter((e) => e.status === "completed")
         .map((e) => e.task_id);
       const pending = allEntries
-        .filter((e) => e.status === "pending" || e.status === "dispatched")
+        // Any non-completed task remains actionable for continuity.
+        .filter((e) => e.status !== "completed")
         .map((e) => e.task_id);
       const lastWithHandoff = [...allEntries]
         .reverse()

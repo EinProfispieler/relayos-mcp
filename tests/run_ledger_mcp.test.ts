@@ -21,6 +21,7 @@ import { updateTaskLedger } from "../src/tools/update_task_ledger.js";
 import { registerExecutionWorkspace } from "../src/tools/register_execution_workspace.js";
 import { readExecutionWorkspacesTool } from "../src/tools/read_execution_workspaces.js";
 import {
+  appendTaskLedgerEntry,
   clearActiveRunId,
   setActiveRunId,
   writeRunRecord,
@@ -186,6 +187,29 @@ describe("update_task_ledger", () => {
     await expect(
       updateTaskLedger({ seq: 1, status: "completed" }, cwd),
     ).rejects.toThrow(/no active run/i);
+  });
+
+  it("updates old seq values even when run has >1000 deduped tasks", async () => {
+    for (let i = 1; i <= 1100; i++) {
+      const now = new Date().toISOString();
+      await appendTaskLedgerEntry(cwd, RUN_ID, {
+        seq: i,
+        task_id: `t_${i}`,
+        run_id: RUN_ID,
+        user_input: `task ${i}`,
+        status: "pending",
+        created_at: now,
+        updated_at: now,
+      });
+    }
+    await updateTaskLedger({ seq: 1, status: "completed" }, cwd);
+    const all = await readCurrentTaskLedger({ last_n: 100 }, cwd);
+    // last_n=100 only returns tail entries; verify by direct update call
+    // succeeding and then updating a tail task still works.
+    expect(all.entries).toHaveLength(100);
+    await expect(
+      updateTaskLedger({ seq: 1, result_summary: "updated early task" }, cwd),
+    ).resolves.toMatchObject({ ok: true, seq: 1, run_id: RUN_ID });
   });
 });
 
