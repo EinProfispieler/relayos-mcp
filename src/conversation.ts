@@ -587,8 +587,24 @@ function providerKey(cfg: ResolvedConversationProviderConfig): string {
   return cfg.id ?? `${cfg.provider}:${cfg.model}:${cfg.kind}`;
 }
 
-async function readProviderCooldowns(): Promise<ProviderCooldownState> {
-  const dir = join(process.cwd(), ".relayos", "overseer");
+/**
+ * Read provider cooldown state from
+ * `<projectRoot>/.relayos/overseer/provider_cooldowns.json`.
+ *
+ * `projectRoot` is REQUIRED. Previously this used `process.cwd()`,
+ * which leaked the cooldown file into `bin/.relayos/overseer/` when
+ * invoked off-root (same class as the `appendConversationLog` bug
+ * fixed in Batch 2).
+ *
+ * Exported for tests.
+ */
+export async function readProviderCooldowns(
+  projectRoot: string,
+): Promise<ProviderCooldownState> {
+  if (!projectRoot) {
+    throw new Error("readProviderCooldowns: projectRoot is required");
+  }
+  const dir = join(projectRoot, ".relayos", "overseer");
   const file = join(dir, PROVIDER_COOLDOWN_FILE);
   try {
     const raw = await readFile(file, "utf8");
@@ -602,8 +618,21 @@ async function readProviderCooldowns(): Promise<ProviderCooldownState> {
   }
 }
 
-async function writeProviderCooldowns(state: ProviderCooldownState): Promise<void> {
-  const dir = join(process.cwd(), ".relayos", "overseer");
+/**
+ * Write provider cooldown state to
+ * `<projectRoot>/.relayos/overseer/provider_cooldowns.json`.
+ *
+ * `projectRoot` is REQUIRED. Throws on empty string — no silent
+ * fallback to cwd. Exported for tests.
+ */
+export async function writeProviderCooldowns(
+  state: ProviderCooldownState,
+  projectRoot: string,
+): Promise<void> {
+  if (!projectRoot) {
+    throw new Error("writeProviderCooldowns: projectRoot is required");
+  }
+  const dir = join(projectRoot, ".relayos", "overseer");
   await mkdir(dir, { recursive: true });
   const file = join(dir, PROVIDER_COOLDOWN_FILE);
   await writeFile(file, `${JSON.stringify(state, null, 2)}\n`, "utf8");
@@ -613,21 +642,25 @@ async function setProviderCooldown(
   cfg: ResolvedConversationProviderConfig,
   durationMs: number,
   reason: string,
+  projectRoot: string,
 ): Promise<void> {
   const key = providerKey(cfg);
-  const state = await readProviderCooldowns();
+  const state = await readProviderCooldowns(projectRoot);
   const until = new Date(Date.now() + durationMs).toISOString();
   state.providers[key] = {
     blocked_until: until,
     reason,
     updated_at: new Date().toISOString(),
   };
-  await writeProviderCooldowns(state);
+  await writeProviderCooldowns(state, projectRoot);
 }
 
-async function isProviderBlocked(cfg: ResolvedConversationProviderConfig): Promise<boolean> {
+async function isProviderBlocked(
+  cfg: ResolvedConversationProviderConfig,
+  projectRoot: string,
+): Promise<boolean> {
   const key = providerKey(cfg);
-  const state = await readProviderCooldowns();
+  const state = await readProviderCooldowns(projectRoot);
   const entry = state.providers[key];
   if (!entry) return false;
   const until = Date.parse(entry.blocked_until);
@@ -695,7 +728,7 @@ export async function handleConversation(
   let used = "configured";
   const active: ResolvedConversationProviderConfig[] = [];
   for (const cfg of configs) {
-    if (!(await isProviderBlocked(cfg))) active.push(cfg);
+    if (!(await isProviderBlocked(cfg, scope.projectRoot))) active.push(cfg);
   }
   const effective = active.length > 0 ? active : configs;
   for (let i = 0; i < effective.length; i++) {
@@ -704,7 +737,12 @@ export async function handleConversation(
     const reply = await provider.chat(messages);
     used = `${cfg.provider}/${cfg.model}/${cfg.kind}`;
     if (isUsageLimitFailure(reply)) {
-      await setProviderCooldown(cfg, 5 * 60 * 60 * 1000, "usage limit reached");
+      await setProviderCooldown(
+        cfg,
+        5 * 60 * 60 * 1000,
+        "usage limit reached",
+        scope.projectRoot,
+      );
     }
     if (!isFallbackEligibleFailure(reply) || i === effective.length - 1) {
       lastReply = reply;
