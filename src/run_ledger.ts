@@ -26,21 +26,16 @@ import { existsSync } from "node:fs";
 import { appendFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  BatchReport as BatchReportSchema,
   ContinuationPacket as ContinuationPacketSchema,
   DraftReply as DraftReplySchema,
   ExecutionWorkspace as ExecutionWorkspaceSchema,
   RepairAttempt as RepairAttemptSchema,
   RepairPolicyDecision as RepairPolicyDecisionSchema,
-  ReplySent as ReplySentSchema,
-  Result as ResultSchema,
   ReviewFinding as ReviewFindingSchema,
   ReviewLoopEvent as ReviewLoopEventSchema,
-  ReviewPass as ReviewPassSchema,
   RunRecord as RunRecordSchema,
   SourceIndexEntry as SourceIndexEntrySchema,
   TaskLedgerEntry as TaskLedgerEntrySchema,
-  UserApproval as UserApprovalSchema,
   type BatchReport,
   type ContinuationPacket,
   type DraftReply,
@@ -757,20 +752,3 @@ export type {
   ReviewPass,
   UserApproval,
 };
-
-// Touch the imported schemas to ensure tree-shaking doesn't drop them
-// — they're used by the helpers above, but kept here so a future
-// caller can still parse a record by hand if they need to. (No-op at
-// runtime.)
-export const __taskScopedSchemas = {
-  BatchReport: BatchReportSchema,
-  DraftReply: DraftReplySchema,
-  RepairAttempt: RepairAttemptSchema,
-  RepairPolicyDecision: RepairPolicyDecisionSchema,
-  ReplySent: ReplySentSchema,
-  Result: ResultSchema,
-  ReviewFinding: ReviewFindingSchema,
-  ReviewLoopEvent: ReviewLoopEventSchema,
-  ReviewPass: ReviewPassSchema,
-  UserApproval: UserApprovalSchema,
-} as const;
