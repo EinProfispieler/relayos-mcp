@@ -177,7 +177,10 @@ Stored append-only at `.relayos/overseer/runs/r_<ULID>/WORKSPACES.jsonl`. Update
 ### 2.6 RunLayout — path resolver
 
 ```typescript
-// src/overseer.ts — add RunLayout interface and resolveRunLayout(cwd, runId)
+// src/run_ledger.ts — RunLayout interface and resolveRunLayout(cwd, runId).
+// (Originally drafted as an addition to src/overseer.ts; landed in a
+// dedicated src/run_ledger.ts module — see §9 shipped-status note for
+// Task 4.)
 export interface RunLayout {
   runDir: string;           // .relayos/overseer/runs/r_<ULID>/
   runJson: string;          // run.json
@@ -203,9 +206,424 @@ export function resolveRunsDir(cwd: string): string;
 // read_current_run MCP tool reads this file first.
 ```
 
+### 2.8 ReviewFinding — a single problem identified by review
+
+```typescript
+// src/schema.ts — add
+export interface ReviewFinding {
+  id: string;                          // "f_<ULID>"
+  run_id: string;
+  task_id: string;
+  reviewer: "human" | "claude" | "codex" | "static_analysis" | "test_runner";
+  severity: "info" | "warn" | "error" | "blocker";
+  category:
+    | "incorrect_behavior"
+    | "missing_tests"
+    | "test_modified_to_pass"
+    | "scope_expansion"
+    | "forbidden_file_touched"
+    | "evidence_contradiction"
+    | "regression"
+    | "unexplained_change"
+    | "other";
+  title: string;                       // ≤ 120 chars
+  summary: string;                     // ≤ 600 chars; no transcript
+  evidence_refs: EvidenceRef[];        // see §2.12
+  related_handoff_id?: string;
+  status:
+    | "open"
+    | "under_repair"
+    | "needs_human_intervention"
+    | "resolved"
+    | "wontfix";
+  created_at: string;
+  updated_at: string;
+}
+```
+
+Stored append-only at `.relayos/overseer/runs/r_<ULID>/tasks/<task_id>/REVIEW_FINDINGS.jsonl`. Updates append new records with the same `id`; dedup last-write-wins on `updated_at`. A finding is "the unit a repair attempt targets" — exactly one finding per attempt.
+
+### 2.9 RepairAttempt — one structured attempt to fix a finding
+
+```typescript
+// src/schema.ts — add
+export type RepairMode =
+  | "patch"
+  | "patch_with_tests"
+  | "patch_after_diagnosis"
+  | "diagnosis_only"
+  | "root_cause_then_patch_plan"
+  | "review_only";
+
+export type RepairResult =
+  | "fixed"
+  | "incomplete"
+  | "failed"
+  | "escalated"
+  | "stopped";
+
+export type RepairVariableChange =
+  | "effort"
+  | "model"
+  | "provider"
+  | "mode"
+  | "scope"
+  | "tests"
+  | "reviewer";
+
+export interface RepairAttempt {
+  id: string;                          // "a_<ULID>"
+  finding_id: string;
+  run_id: string;
+  task_id: string;
+  attempt_number: number;              // 1-based, monotonically increasing per finding
+  provider: "claude" | "codex" | "other";
+  model: string;
+  effort: "low" | "medium" | "high" | "xhigh" | "max";
+  mode: RepairMode;
+  previous_attempt_id?: string;
+  changed_variables_since_previous_attempt: RepairVariableChange[];   // empty only on attempt 1
+  escalation_reason?: string;          // ≤ 240 chars; required when attempt_number > 1
+  prompt_summary: string;              // ≤ 240 chars; NOT a transcript dump
+  required_scope: { allowed_files: string[]; forbidden_files: string[] };  // axis: "scope"
+  required_tests: string[];            // axis: "tests" — e.g. ["tests/foo.test.ts", "tests/bar.test.ts::case_x"]
+  reviewer: "human" | "claude" | "codex" | "static_analysis" | "test_runner";  // axis: "reviewer"
+  result: RepairResult;
+  evidence_refs: EvidenceRef[];
+  next_policy_decision?: string;       // forward link to RepairPolicyDecision.id
+  created_at: string;
+  completed_at?: string;
+}
+```
+
+All seven `RepairVariableChange` axes are first-class fields on `RepairAttempt`: `provider`, `model`, `effort`, `mode`, `required_scope` (→ axis `"scope"`), `required_tests` (→ axis `"tests"`), `reviewer`. This is what makes the §3.2 rule machine-checkable — the policy engine can compare like-for-like across attempts without inferring values from prose.
+
+Stored append-only at `.relayos/overseer/runs/r_<ULID>/tasks/<task_id>/REPAIR_ATTEMPTS.jsonl`. Dedup last-write-wins by `id`. The `attempt_number` is the durable sequence — agents and the policy engine must read it (not rely on file order).
+
+**Invariant enforced by `evaluateRepairPolicy()` (§3):** for `attempt_number > 1`, `changed_variables_since_previous_attempt` MUST be non-empty. Same-everything retries are a policy violation, surfaced as a reason code rather than silently accepted.
+
+### 2.10 RepairPolicyDecision — machine judgment for the next step
+
+```typescript
+// src/schema.ts — add
+export type RepairDecisionKind =
+  | "allow_retry"
+  | "escalate_effort"
+  | "escalate_model"
+  | "switch_provider"
+  | "switch_to_diagnosis"
+  | "stop_needs_human";
+
+export type RepairReasonCode =
+  // failure-pattern codes
+  | "same_class_bug_remains"
+  | "test_modified_to_pass"
+  | "scope_expanded"
+  | "forbidden_file_touched"
+  | "evidence_contradiction"
+  | "agent_cannot_explain_root_cause"
+  | "tests_pass_but_grep_unresolved"
+  | "report_contradicts_repo_evidence"
+  | "same_model_effort_mode_requested"
+  // exhaustion codes
+  | "max_attempts_reached"
+  | "no_remaining_variables_to_change"
+  // success codes
+  | "variables_changed_ok"
+  | "escalation_ladder_step_available";
+
+export interface RepairPolicyDecision {
+  id: string;                          // "d_<ULID>"
+  finding_id: string;
+  run_id: string;
+  task_id: string;
+  decision: RepairDecisionKind;
+  next_provider?: "claude" | "codex" | "other";
+  next_model?: string;
+  next_effort?: "low" | "medium" | "high" | "xhigh" | "max";
+  next_mode?: RepairMode;
+  next_required_scope?: { allowed_files: string[]; forbidden_files: string[] };
+  requires_human_approval: boolean;    // default true
+  reason_codes: RepairReasonCode[];    // compact, machine-checkable; ≥ 1
+  guidance_path?: string;              // relative to run dir; only set when guidance was written
+  guidance_budget_words: number;       // see §3.8; default 750, hard cap 1200
+  created_at: string;
+}
+```
+
+Stored append-only at `.relayos/overseer/runs/r_<ULID>/tasks/<task_id>/REPAIR_DECISIONS.jsonl`; the latest decision per `finding_id` is the active one.
+
+`reason_codes` are deliberately compact strings — the policy engine emits them instead of prose so downstream tools and tests can branch on them.
+
+### 2.11 DraftReply — corrective message awaiting human approval
+
+```typescript
+// src/schema.ts — add
+export interface DraftReply {
+  id: string;                          // "dr_<ULID>"
+  finding_id: string;
+  run_id: string;
+  task_id: string;
+  target_handoff_id?: string;          // the handoff this reply will be sent against
+  decision_id: string;                 // link to the RepairPolicyDecision that produced it
+  body_path: string;                   // relative path to REPAIR_GUIDANCE.md (see §3.8)
+  body_word_count: number;             // capped; see §3.8
+  approval_status: "pending" | "approved" | "rejected" | "expired";
+  approved_by?: "human";               // never auto-approved by default; see §3.6
+  approved_at?: string;
+  rejected_reason?: string;
+  created_at: string;
+}
+```
+
+Stored append-only at `.relayos/overseer/runs/r_<ULID>/tasks/<task_id>/DRAFT_REPLIES.jsonl`. Dedup last-write-wins by `id`. A reply is "approved" only when a human writes the approval — there is no path by which the policy engine self-approves (§3.6).
+
+### 2.12 EvidenceRef — pointer to exact files/lines/commands
+
+```typescript
+// src/schema.ts — add
+export type EvidenceRef =
+  | { kind: "file"; path: string; line_start?: number; line_end?: number }
+  | { kind: "test"; file: string; name?: string }
+  | { kind: "command"; argv: string[]; exit_code?: number; output_excerpt?: string }
+  | { kind: "handoff"; handoff_id: string }
+  | { kind: "commit"; sha: string }
+  | { kind: "ledger"; run_id: string; task_seq?: number };
+```
+
+EvidenceRefs are how findings, attempts, and policy decisions point at the **actual** code/state being discussed — not by quoting transcripts but by pointing at where the truth lives. The repair-guidance generator (§3.7) uses these refs to keep the corrective message compact.
+
+### 2.13 Review loop event records
+
+The review loop is recorded as structured ledger events, not as free-form chat. These records may be implemented as individual schemas or as a tagged `ReviewLoopEvent` union, but the durable event names stay stable so tools can project the history without parsing prose.
+
+```typescript
+// src/schema.ts — add in a later repair-policy batch
+export interface BatchReport {
+  id: string;                          // "br_<ULID>"
+  run_id: string;
+  task_id: string;
+  source: "human" | "claude" | "codex" | "static_analysis" | "test_runner";
+  summary: string;                     // ≤ 600 chars
+  finding_ids: string[];
+  result_id?: string;
+  created_at: string;
+}
+
+export interface ReviewPass {
+  id: string;                          // "rp_<ULID>"
+  run_id: string;
+  task_id: string;
+  reviewer: "human" | "claude" | "codex" | "static_analysis" | "test_runner";
+  scope: { files: string[]; commands: string[] };
+  finding_ids: string[];
+  evidence_refs: EvidenceRef[];
+  created_at: string;
+}
+
+export interface UserApproval {
+  id: string;                          // "ua_<ULID>"
+  run_id: string;
+  task_id: string;
+  draft_reply_id: string;
+  decision: "approved" | "rejected";
+  note?: string;
+  created_at: string;
+}
+
+export interface ReplySent {
+  id: string;                          // "rs_<ULID>"
+  run_id: string;
+  task_id: string;
+  draft_reply_id: string;
+  target_handoff_id?: string;
+  provider: "claude" | "codex" | "other";
+  created_at: string;
+}
+
+export interface Result {
+  id: string;                          // "res_<ULID>"
+  run_id: string;
+  task_id: string;
+  finding_id?: string;
+  status: "fixed" | "incomplete" | "failed" | "blocked" | "needs_human_intervention";
+  summary: string;                     // ≤ 600 chars
+  evidence_refs: EvidenceRef[];
+  created_at: string;
+}
+```
+
+Stored append-only under `.relayos/overseer/runs/r_<ULID>/tasks/<task_id>/` using event-specific JSONL files or a single tagged `REVIEW_EVENTS.jsonl`. The first implementation should prefer event-specific files only if that matches the existing helper style better; the product contract is the typed event vocabulary above.
+
 ---
 
-## 3 · File Layout
+## 3 · Review / Repair / Escalation Policy
+
+The Run Ledger is an **observation surface**. This section defines the **policy** that decides what happens when review (human, AI, static, or test-runner) produces a finding — how a repair gets attempted, when to escalate, and when to stop and bring in a human.
+
+### 3.1 Why a machine-checkable policy
+
+A Markdown policy doc is readable but unenforceable. If the only enforcement mechanism is prose, the system relies on every agent and contributor remembering and applying the same rule. That doesn't survive context loss, model substitution, or a tired human.
+
+The policy in this section is therefore split into **two artifacts** that must agree:
+
+1. **Human contract** — `docs/overseer/REPAIR_ESCALATION_POLICY.md` (Markdown). Principles, examples, model ladder, scope boundaries. Read by humans. Not executed.
+2. **Machine judgment** — `src/repair_policy.ts` (TypeScript). Takes structured ledger input, returns a `RepairPolicyDecision`. Exercised by tests. The CLI/MCP repair tools (deferred to a later batch) call this — there is no path that bypasses it.
+
+If the two ever disagree, the test suite that exercises `evaluateRepairPolicy()` against documented examples must fail. The Markdown is updated to match the code, not the other way around — code is the source of truth at runtime; Markdown is the source of truth for **intent**.
+
+**No Python.** RelayOS is TypeScript/Node. Adding Python for policy logic would add a runtime and a test surface for zero benefit, and would split enforcement across two languages. Python may be mentioned as an *ad hoc offline analysis* tool (e.g. for one-off ledger archaeology by a human), but it never participates in the live decision path.
+
+### 3.2 Repair attempt protocol — the variable-change rule
+
+The core rule is:
+
+> **A failed repair attempt may continue only if at least one variable changes between attempts.**
+
+The set of "variables" is finite and is exactly the `RepairVariableChange` union from §2.9: `effort | model | provider | mode | scope | tests | reviewer`. `evaluateRepairPolicy()` checks the proposed next attempt against the most recent attempt for the same finding and rejects the case where all seven are identical with reason code `same_model_effort_mode_requested`.
+
+Concretely, the protocol per finding is:
+
+1. **Attempt 1** — try at the assigned task's `(provider, model, effort, mode)`. Mode defaults to `patch` or `patch_with_tests`. Narrow scope (only the files the finding implicates).
+2. **If the attempt result is `incomplete` or `failed`**, the next call to `evaluateRepairPolicy()` MUST produce a decision whose proposed next attempt differs in ≥ 1 variable, OR a `stop_needs_human` decision.
+3. **Loops are not allowed at the same `(provider, model, effort, mode, scope, tests, reviewer)` setting.** This is enforced by the policy engine, not by convention.
+
+### 3.3 Model / effort escalation ladder
+
+The ladder is a **default**, not a vendor lock-in. Concrete model names are listed as starting points; the policy engine reads from a small config table so models can be swapped without code changes.
+
+| Step | Trigger | Default move |
+|---|---|---|
+| **Attempt 1** | first try after finding opens | starting `(provider, model, effort, mode)` from the task |
+| **Attempt 2** | Attempt 1 = `incomplete` or `failed` | **escalate effort within the same provider**, OR switch to `patch_after_diagnosis`. Agent MUST first explain why Attempt 1 failed and enumerate exact files/lines before patching. Examples (defaults — overridable):<br>• `codex / gpt-5.3-codex / medium` → `codex / gpt-5.3-codex / high` or `xhigh`<br>• `claude / sonnet / medium` → `claude / sonnet / high` or `max` |
+| **Attempt 3** | Attempt 2 = `incomplete` or `failed` | **escalate model**, possibly **switch provider** if a vendor blind spot is suspected, and force `diagnosis_only` or `root_cause_then_patch_plan` before any further edits. Human approval required before sending. Examples (defaults — overridable):<br>• `claude / sonnet / max` → `claude / opus-4.7` (or highest available)<br>• `codex / gpt-5.3-codex / xhigh` → `codex / gpt-5.5` (or highest available)<br>• same-vendor stuck → switch provider |
+| **After Attempt 3** | still `incomplete` or `failed` | **`stop_needs_human`**. The automated/semi-automated loop ends. Finding status moves to `needs_human_intervention`. All evidence preserved in the ledger. |
+
+**Important framing.** "Three attempts" is the **structured automated/semi-automated loop bound**, not a permanent ceiling. A human can still resume work on a finding after `stop_needs_human` by appending a new `RepairAttempt` directly to `REPAIR_ATTEMPTS.jsonl` — the engine does NOT gate human-authored attempts (it only gates the automated loop). If `evaluateRepairPolicy()` is then asked about a hypothetical further attempt, the Attempt 3 boundary still fires; only the human can keep moving work forward past that point. The intent is to prevent endless same-model thrashing without a human checkpoint, not to declare findings forever unfixable.
+
+### 3.4 Escalation triggers
+
+The following observations, when produced by review or by the policy engine examining ledger state, force a non-`allow_retry` decision (escalation, mode change, or stop):
+
+| Trigger | Reason code | Forced action |
+|---|---|---|
+| Same finding remains after a patch landed | `same_class_bug_remains` | escalate effort or switch mode |
+| Same class of bug appears in a nearby file | `same_class_bug_remains` | escalate model or switch mode to `root_cause_then_patch_plan` |
+| Patch changed a test to match broken behavior | `test_modified_to_pass` | stop attempt, require diagnosis; human approval before next attempt |
+| Review report contradicts repo evidence (e.g. claims a function exists that grep can't find) | `report_contradicts_repo_evidence` | switch reviewer or run `static_analysis` reviewer; never auto-retry the same reviewer |
+| Patch expanded scope beyond the finding's allowed files | `scope_expanded` | reject, force narrower `required_scope` |
+| Patch touched a forbidden / private / runtime file | `forbidden_file_touched` | reject; never retry the same agent on the same finding without scope narrowing + human approval |
+| Tests pass but `grep` / static evidence still shows the bug | `tests_pass_but_grep_unresolved` | switch reviewer; switch mode to `diagnosis_only` |
+| Agent cannot articulate root cause when asked | `agent_cannot_explain_root_cause` | escalate model or force `root_cause_then_patch_plan` |
+| Caller proposes a repeat of the previous failed attempt at the same `(provider, model, effort, mode)` | `same_model_effort_mode_requested` | reject; require a variable change |
+
+These triggers are evaluated by `evaluateRepairPolicy()` from structured input — not by parsing prose reports. The reviewer is responsible for emitting findings whose `category` and `evidence_refs` make the triggers detectable.
+
+### 3.5 Stop conditions
+
+The policy engine emits `stop_needs_human` when any of the following holds:
+
+- **Attempt 3 boundary:** `latest.attempt_number ≥ MAX_STRUCTURED_ATTEMPTS` (3) AND `latest.result` is `"failed"` or `"incomplete"`. **Changes to effort, model, provider, mode, scope, tests, or reviewer do NOT lift this** — the structured automated/semi-automated loop is over. (This is the runtime rule in `src/repair_policy.ts`; it is stricter than an earlier draft of this section that gated the stop on "no new variable", and was fixed in commit `2871dec`.)
+- the proposed escalation has no remaining ladder step (no stronger model available, no higher effort, no other provider configured)
+- the finding has a `forbidden_file_touched` or `evidence_contradiction` reason code AND the proposed next attempt would still touch a forbidden file (or still uses the same agent reviewer, for `evidence_contradiction`)
+- the same reason code repeats across the last two attempts (loop detection beyond simple variable-change check)
+
+On `stop_needs_human`, the finding's `status` moves to `needs_human_intervention`. No further automatic attempts are dispatched. A human can override by appending a new `RepairAttempt` (the policy engine does not gate human-authored attempts — it only gates automated ones).
+
+### 3.6 Human approval is the default
+
+Default repair flow:
+
+```
+auto-detect (reviewer)
+  → auto-draft (repair_guidance generator)
+  → human approval
+  → send to Claude/Codex
+  → append RepairAttempt result to Run Ledger
+```
+
+`RepairPolicyDecision.requires_human_approval = true` is the default and the only value emitted by `evaluateRepairPolicy()` in this batch. A `DraftReply` cannot move to `approval_status = "approved"` except by a human-authored `UserApproval` event (§2.13). The transition path is: human appends `UserApproval { decision: "approved", draft_reply_id }` → the draft reply's status is updated to `"approved"` → only then may `ReplySent` be appended and the message dispatched. The policy engine never emits `UserApproval`; it has no path to.
+
+#### Future optional mode (out of scope for this plan)
+
+A future plan revision may introduce `auto_reply_policy = "safe_review_only"`. **If** ever introduced, it MUST enforce all of:
+
+- only the active run and current task
+- only findings whose reviewer is `static_analysis` or `test_runner` (not AI-generated review)
+- no merge approval, no push, no tag, no release
+- no scope expansion beyond the finding's `allowed_files`
+- no new feature requests; no broad refactors
+- explicit max-loop count per task
+- every action appended to the ledger
+- stop on any ambiguity or conflicting evidence
+
+It is **explicitly not** part of this plan. Mentioned here only so future contributors understand the boundary if they propose adding it.
+
+### 3.7 Token-saving guidance generator
+
+The next agent/model receives a compact `REPAIR_GUIDANCE.md`, **never** a raw transcript dump. `src/repair_guidance.ts` produces it from structured ledger inputs:
+
+```typescript
+// src/repair_guidance.ts — shipped in commit d7b233b (Plan Task 13)
+export interface GuidanceInputs {
+  finding: ReviewFinding;
+  prior_attempts: RepairAttempt[];         // chronological
+  decision: RepairPolicyDecision;
+  source_index_excerpt: SourceIndexEntry[]; // only files touched in this finding
+  evidence_refs: EvidenceRef[];
+}
+
+export interface GeneratedGuidance {
+  markdown: string;
+  word_count: number;                       // enforced ≤ budget; see §3.8
+  truncated: boolean;
+}
+
+export function generateRepairGuidance(
+  inputs: GuidanceInputs,
+  budgetWords: number,
+): GeneratedGuidance;
+```
+
+The generator's contract:
+
+- It receives **structured ledger objects**, not chat history.
+- It refuses to emit text exceeding `budgetWords`. If the natural rendering would exceed the budget, it truncates sections in a documented priority order (see §3.8) and sets `truncated = true`.
+- It never quotes raw model output. Past attempts are summarised by their `prompt_summary`, `result`, and `evidence_refs` — not by appending their full prompts or replies.
+- It includes pointers (file paths, line ranges, commands) instead of inlining file contents.
+
+This is the **single concession that keeps the cost of an Attempt 2 or Attempt 3 model call from scaling with conversation length**. The cold-start cost is bounded by the guidance budget, regardless of how chatty the run has been.
+
+### 3.8 `REPAIR_GUIDANCE.md` format and word budget
+
+**Path:** `.relayos/overseer/runs/<run_id>/tasks/<task_id>/REPAIR_GUIDANCE.md`
+
+**Word budget:**
+- **Default budget:** 600–900 words.
+- **Hard cap:** 1,200 words. The generator MUST refuse to emit beyond this, even with explicit override. (The cap is checked by `repair_guidance.test.ts`.)
+- **`guidance_budget_words` in `RepairPolicyDecision`** is the per-decision budget choice within `[300, 1200]`. Default is 750.
+
+**Required sections (in this order):**
+
+1. **Finding summary** (≤ 120 words) — the title + a one-paragraph summary. No transcript.
+2. **Evidence refs** (≤ 100 words) — bullet list of exact file:line, test names, and commands. Pulled from `finding.evidence_refs`.
+3. **Previous attempts** (≤ 250 words) — one bullet per prior `RepairAttempt`, each containing: `attempt_number`, `(provider, model, effort, mode)`, `result`, `escalation_reason` (when present), and one-line `prompt_summary`. Never the raw prompt or reply.
+4. **What failed** (≤ 120 words) — the reason codes from the active `RepairPolicyDecision`, expanded to one sentence each.
+5. **Policy decision** (≤ 60 words) — `decision`, `next_provider/model/effort/mode`, and `requires_human_approval`.
+6. **Forbidden scope expansion** (≤ 60 words) — explicit list of files NOT to touch (from `next_required_scope.forbidden_files`).
+7. **Required tests** (≤ 80 words) — tests that must pass before declaring the attempt `fixed`.
+8. **Expected output** (≤ 60 words) — what counts as success for this attempt.
+9. **Stop conditions** (≤ 60 words) — what would trigger `stop_needs_human` even if patches land.
+
+**Truncation priority** (when the natural rendering exceeds budget): sections 3 (Previous attempts) and 4 (What failed) are truncated first — older attempts are summarised more tersely. Sections 1, 2, 5, 6, 7, 8, 9 are never truncated. If the document still exceeds the cap after these truncations, the generator returns `truncated = true` and writes a stub guidance file pointing at the run ledger for the missing detail.
+
+**No raw conversation dump.** This is checked by `repair_guidance.test.ts`: any guidance output containing patterns characteristic of prompt/reply transcripts (e.g. `\nuser:`, `\nassistant:`, `<message>`) fails the test.
+
+---
+
+## 4 · File Layout
+
+Run-scoped state lives under `.relayos/overseer/runs/<run_id>/`. Task-scoped state — review findings, repair attempts, policy decisions, draft replies, and guidance — lives one level deeper at `runs/<run_id>/tasks/<task_id>/`. The split keeps run-wide concerns (continuation packet, source index, workspaces) separate from per-task review state, so a long-running task does not bloat the run-level files.
 
 ```
 .relayos/overseer/
@@ -217,6 +635,16 @@ export function resolveRunsDir(cwd: string): string;
       continuation.json              # ContinuationPacket — replaced on compact
       source_index.jsonl             # SourceIndexEntry — append-only
       WORKSPACES.jsonl               # ExecutionWorkspace — append-only, last-wins by id
+      tasks/
+        <task_id>/
+          TASK_LEDGER.md             # human summary, regenerated; ≤ 1,500 words
+          REVIEW_FINDINGS.jsonl      # ReviewFinding — append-only, last-wins by id
+          REPAIR_ATTEMPTS.jsonl      # RepairAttempt — append-only, last-wins by id
+          REPAIR_DECISIONS.jsonl     # RepairPolicyDecision — append-only (latest per finding)
+          DRAFT_REPLIES.jsonl        # DraftReply — append-only, last-wins by id
+          REPAIR_GUIDANCE.md         # compact generated guidance, word-budgeted (§3.8)
+          REVIEW_EVENTS.jsonl        # §2.13 tagged events: BatchReport, ReviewPass,
+                                     # UserApproval, ReplySent, Result. Append-only.
   # existing files unchanged:
   timeline.jsonl
   decisions.jsonl
@@ -226,30 +654,53 @@ export function resolveRunsDir(cwd: string): string;
   chat_sessions.jsonl
   CURRENT_STATE.md  NEXT_ACTION.md  etc.
 
+docs/
+  overseer/
+    REPAIR_ESCALATION_POLICY.md      # human contract (Markdown); see §3.
+
 src/
   schema.ts          # + RunRecord, TaskLedgerEntry, ContinuationPacket,
-                     #   SourceIndexEntry, ExecutionWorkspace
-                     #   (Zod schemas + inferred types)
-  overseer.ts        # + RunLayout, resolveRunLayout, resolveRunsDir,
-                     #   run CRUD helpers (appendTaskLedgerEntry, updateRunRecord,
-                     #   readActiveRunId, setActiveRunId, clearActiveRunId,
-                     #   readContinuationPacket, writeContinuationPacket,
-                     #   buildCompactContinuation,
-                     #   appendExecutionWorkspace, readExecutionWorkspaces,
-                     #   updateExecutionWorkspaceStatus)
-  id.ts              # + newRunId(): "r_<ULID>"
-  cli.ts             # + case "run": delegating to runOverseerRun()
-  tools/
-    write_run_event.ts          # MCP: append TaskLedgerEntry
-    read_current_run.ts         # MCP: active_run.json → run.json + recent ledger
-    read_current_task_ledger.ts # MCP: task_ledger.jsonl (last-N entries, deduped)
-    update_task_ledger.ts       # MCP: update a TaskLedgerEntry by seq
+                     #   SourceIndexEntry, ExecutionWorkspace (Batch 1, landed);
+                     #   Task 10 adds: ReviewFinding, RepairAttempt,
+                     #   RepairPolicyDecision, DraftReply, EvidenceRef.
+  run_ledger.ts      # storage helpers. Batch 1 (landed):
+                     #   resolveRunLayout, resolveRunsDir,
+                     #   readActiveRunId/setActiveRunId/clearActiveRunId,
+                     #   writeRunRecord/readRunRecord/listRuns,
+                     #   append/readTaskLedgerEntries (dedup by seq),
+                     #   write/readContinuationPacket,
+                     #   append/readSourceIndexEntries,
+                     #   append/readExecutionWorkspaces,
+                     #   updateExecutionWorkspaceStatus.
+                     # Task 11 extends with task-scoped helpers:
+                     #   resolveTaskLayout(cwd, runId, taskId),
+                     #   appendReviewFinding/readReviewFindings,
+                     #   appendRepairAttempt/readRepairAttempts,
+                     #   appendRepairDecision/readActiveRepairDecision,
+                     #   appendDraftReply/readDraftReplies,
+                     #   writeRepairGuidance/readRepairGuidance.
+  repair_policy.ts   # Task 12 — evaluateRepairPolicy(input): RepairPolicyDecision.
+                     # Pure function, no IO. TypeScript only — no Python.
+                     # Tests in tests/repair_policy.test.ts.
+  repair_guidance.ts # Task 13 — generateRepairGuidance(inputs, budgetWords):
+                     # GeneratedGuidance. Pure function. Tests in
+                     # tests/repair_guidance.test.ts (budget + no-transcript checks).
+  id.ts              # + newRunId, newExecutionWorkspaceId (Batch 1, landed).
+                     # Task 10 also adds: newReviewFindingId (f_),
+                     # newRepairAttemptId (a_), newRepairDecisionId (d_),
+                     # newDraftReplyId (dr_).
+  cli.ts             # CLI subcommands for the repair layer are deferred
+                     # (Task 15, separate batch). No CLI surface lands until
+                     # storage + policy + guidance are reviewed.
 
 tests/
-  run_ledger.test.ts            # unit tests for all helpers
-  run_ledger_cli.test.ts        # CLI subcommand integration tests
-  run_ledger_mcp.test.ts        # MCP tool tests (follows existing mcp tool test pattern)
+  run_ledger.test.ts            # extended in Task 11 with task-scoped helpers
+  run_ledger_schema.test.ts     # extended in Task 10 with the new schemas
+  repair_policy.test.ts         # Task 12 — variable-change, ladder, stop, triggers
+  repair_guidance.test.ts       # Task 13 — budget cap, no transcript, truncation
 ```
+
+**`TASK_LEDGER.md`** is a human-readable summary regenerated by the policy/guidance pipeline (not a source of truth). It is bounded to 1,500 words. The source of truth for any field shown in it is the corresponding JSONL.
 
 **Append-only discipline:**
 - `task_ledger.jsonl`, `source_index.jsonl`, `WORKSPACES.jsonl` — never truncated; records only appended. Last-write-wins on read (by `seq` / by `id`).
@@ -266,9 +717,9 @@ tests/
 
 ---
 
-## 4 · CLI/MCP Surface
+## 5 · CLI/MCP Surface
 
-### 4.1 CLI — `overseer run <subcommand>`
+### 5.1 CLI — `overseer run <subcommand>`
 
 Registered in `src/cli.ts` under `case "run":` → `runOverseerRun(sub, args, cwd)`.
 
@@ -284,7 +735,7 @@ Registered in `src/cli.ts` under `case "run":` → `runOverseerRun(sub, args, cw
 
 All subcommands print machine-readable JSON (no pretty-print prose) when `--json` flag is set; default is human-readable one-liners. Exit code 0 on success, 1 on error.
 
-### 4.2 MCP tools
+### 5.2 MCP tools
 
 Four new tools following the exact pattern of `src/tools/write_overseer_note.ts`:
 
@@ -342,15 +793,15 @@ const UpdateTaskLedgerInput = z.object({
 // Returns: { ok: true, seq, path }
 ```
 
-### 4.3 MCP tool registration
+### 5.3 MCP tool registration
 
 All four tools registered in `src/tools/index.ts` following the existing registration pattern. No MCP server configuration file changes needed — tools are auto-discovered by the existing registration mechanism.
 
 ---
 
-## 5 · Agent Recovery Protocol
+## 6 · Agent Recovery Protocol
 
-### 5.1 Startup sequence (what an agent reads on session start)
+### 6.1 Startup sequence (what an agent reads on session start)
 
 Order matters. Read top-to-bottom; stop early if you have enough orientation.
 
@@ -372,35 +823,48 @@ Order matters. Read top-to-bottom; stop early if you have enough orientation.
     → Look for any "dispatched" entries without matching "completed" — those
       are in-flight handoffs to check.
 
-5.  ~/.claude/handoff/audit.jsonl  (only for in-flight handoff IDs from step 4)
+5.  .relayos/overseer/runs/<run_id>/tasks/<active_task_id>/REPAIR_GUIDANCE.md
+    → If this file exists for the task you are about to act on, READ IT
+      INSTEAD of the raw ledger. It is bounded to ≤ 1,200 words and
+      already contains: finding summary, evidence refs, prior attempts,
+      next policy decision, forbidden scope, required tests, and stop
+      conditions. This is the §3.7/§3.8 contract.
+    → Do NOT also pull the full REVIEW_FINDINGS.jsonl /
+      REPAIR_ATTEMPTS.jsonl unless guidance.truncated = true or you
+      need a specific evidence ref the guidance points at.
+
+6.  ~/.claude/handoff/audit.jsonl  (only for in-flight handoff IDs from step 4)
     → Verify actual handoff status. Do NOT read the full audit log.
 
-6.  .relayos/overseer/NEXT_ACTION.md  (existing file, unchanged)
+7.  .relayos/overseer/NEXT_ACTION.md  (existing file, unchanged)
     → Absolute ground truth for what to do next.
 
-7.  Stop reading. Do not read conversation_log.jsonl.
+8.  Stop reading. Do not read conversation_log.jsonl.
     Do not read timeline.jsonl unless debugging.
     Do not read all of task_ledger.jsonl — only last N entries.
+    Do not read raw REVIEW_FINDINGS.jsonl / REPAIR_ATTEMPTS.jsonl unless
+    REPAIR_GUIDANCE.md tells you to drill into a specific id.
 ```
 
-### 5.2 Token budget guidance
+### 6.2 Token budget guidance
 
 The continuation packet is designed to fit in 1,000 tokens. Reading steps 1–4 above uses < 3,000 tokens. The full cold-start context (all 4 layers + run ledger) should stay under 10,000 tokens for a typical in-progress run.
 
 `buildOverseerContextPack` (Layer 3) is extended to append a "Run Ledger" section when an active run exists. The section is: run ID + goal + continuation packet summary. This is injected automatically into every conversation turn.
 
-### 5.3 What agents skip
+### 6.3 What agents skip
 
 - `conversation_log.jsonl` — contains full message history; skip unless explicitly debugging. The continuation packet captures the semantic outcome, not the conversation.
 - All `runs/` directories except the active one.
 - Full `task_ledger.jsonl` beyond last-N entries.
 - `source_index.jsonl` — read only when doing affected-file analysis.
+- Raw `REVIEW_FINDINGS.jsonl` / `REPAIR_ATTEMPTS.jsonl` / `REPAIR_DECISIONS.jsonl` / `DRAFT_REPLIES.jsonl` — the compact `REPAIR_GUIDANCE.md` is the agent-facing surface. Drill into the JSONL only when guidance points you at a specific id, or when reconstructing audit history (§7).
 
 ---
 
-## 6 · Audit and Rollback
+## 7 · Audit and Rollback
 
-### 6.1 Connecting commits, patches, handoffs, and workspaces
+### 7.1 Connecting commits, patches, handoffs, and workspaces
 
 Each `TaskLedgerEntry` stores `handoff_id`. The existing audit log at `~/.claude/handoff/audit.jsonl` stores every event for that handoff (spawning, patch_applied, completed, etc.) via `createAuditWriter`. The `Checkpoint` stored at `~/.claude/handoff/checkpoints/c_<ULID>.json` records `git.head`, `git.branch`, `git.dirty`, and `files.diff_path`.
 
@@ -416,11 +880,17 @@ WORKSPACES.jsonl[related_handoff_id=h_XXX]   audit.jsonl[handoff_id=h_XXX]
      head_sha, status)                       checkpoints/c_YYY.json
                                               ↓
                                              git.head = <SHA>
+
+tasks/<task_id>/REPAIR_ATTEMPTS.jsonl  →  attempts that produced h_XXX
+  ↓ (attempt_number, provider, model, effort, mode, result,
+     changed_variables_since_previous_attempt, escalation_reason)
+  ↓ next_policy_decision → REPAIR_DECISIONS.jsonl[id=d_ZZZ]
+  ↓ originating finding  → REVIEW_FINDINGS.jsonl[id=f_WWW]
 ```
 
-This gives the full **where + who + what** picture without duplicating storage.
+This gives the full **where + who + what + why** picture without duplicating storage: the workspace tells you where, the handoff/audit tell you what, the repair-attempt chain tells you why this attempt was made and what variables changed from the prior one.
 
-### 6.2 Rollback points
+### 7.2 Rollback points
 
 A rollback point is implicit at each `TaskLedgerEntry` with `status = "completed"` that has a linked `handoff_id`. The path to a usable SHA depends on whether the work happened in a workspace:
 
@@ -444,7 +914,7 @@ git checkout <SHA>
 
 The `overseer run` CLI does not automate this — it surfaces SHAs and workspace paths. Actual `git checkout` and `git worktree remove` remain the user's action.
 
-### 6.3 Workspace cleanup
+### 7.3 Workspace cleanup
 
 When a run completes or is abandoned, `WORKSPACES.jsonl` is the source of truth for what physical state needs cleaning up:
 
@@ -455,19 +925,19 @@ When a run completes or is abandoned, `WORKSPACES.jsonl` is the source of truth 
 
 The CLI surfaces these states via `overseer run current` (active workspaces section) and `overseer run list-workspaces <run-id>`. **Automated cleanup is out of scope for this plan** — `cleanup_policy` is captured but not acted on. A follow-on can add `overseer workspace cleanup --auto` once the surfacing tools are proven.
 
-### 6.4 Keeping private logs out of git
+### 7.4 Keeping private logs out of git
 
 **Immediate action (part of Task 1 below):** Add `bin/.relayos/` to `.gitignore`. This prevents future commits of `bin/.relayos/overseer/conversation_log.jsonl` and `bin/.relayos/overseer/chat_sessions.jsonl`. The already-committed versions in git history remain (no rewrite of history).
 
-**Long-term:** `appendConversationLog()` in `src/conversation.ts` already writes to `.relayos/overseer/conversation_log.jsonl` (project-root-relative). The write path is correct when CWD = project root. The `bin/.relayos/` leak happens when RelayOS is invoked from `bin/` as CWD. Fix in Task 2: pass explicit `projectRoot` to `appendConversationLog()` instead of relying on `process.cwd()`.
+**Long-term:** `appendConversationLog()` in `src/conversation.ts` already writes to `.relayos/overseer/conversation_log.jsonl` (project-root-relative). The write path is correct when CWD = project root. The `bin/.relayos/` leak happens when RelayOS is invoked from `bin/` as CWD. The migration must pass explicit `projectRoot` to conversation/provider state writers instead of relying on `process.cwd()`.
 
 **Run Ledger files** at `.relayos/overseer/runs/` are already covered by the existing `.gitignore` entry for `.relayos/overseer/`. No new gitignore entries needed for the runs directory.
 
 ---
 
-## 7 · Migration Plan
+## 8 · Migration Plan
 
-### 7.1 What changes
+### 8.1 What changes
 
 | Before | After |
 |---|---|
@@ -477,7 +947,7 @@ The CLI surfaces these states via `overseer run current` (active workspaces sect
 | `buildOverseerContextPack` has no run layer | Extended to inject Run Ledger summary when active run exists |
 | `schema.ts` has `Envelope`, `TaskRecord`, `AuditEvent` | Adds `RunRecord`, `TaskLedgerEntry`, `ContinuationPacket`, `SourceIndexEntry` |
 
-### 7.2 No breaking changes
+### 8.2 No breaking changes
 
 - All existing MCP tools (`write_overseer_note`, `write_overseer_decision`, `write_handoff_result`, `read_overseer_recent`, `read_overseer_summary`, etc.) are unchanged.
 - All existing CLI subcommands are unchanged.
@@ -485,7 +955,7 @@ The CLI surfaces these states via `overseer run current` (active workspaces sect
 - `tasks.jsonl` (existing `TaskRecord` appends) continue unchanged. `TaskLedgerEntry` is a different, run-scoped record.
 - `.relayos/overseer/CURRENT_STATE.md`, `NEXT_ACTION.md`, and all other canonical files are read-only from this feature's perspective.
 
-### 7.3 Migration of existing data
+### 8.3 Migration of existing data
 
 No migration of existing `tasks.jsonl`, `timeline.jsonl`, `decisions.jsonl`, or `handoff_results.jsonl`. These continue to accumulate as before. The Run Ledger is additive.
 
@@ -499,7 +969,7 @@ echo "bin/.relayos/" >> .gitignore
 
 This is a one-time cleanup commit, done in Task 1.
 
-### 7.4 Rollout order
+### 8.4 Rollout order
 
 1. Fix `bin/.relayos/` gitignore leak (standalone commit, safe to ship immediately).
 2. Add schema types (additive, no behavior change).
@@ -508,12 +978,41 @@ This is a one-time cleanup commit, done in Task 1.
 5. Add four MCP tools with tests.
 6. Extend `buildOverseerContextPack` to inject run layer.
 7. Fix `appendConversationLog` project-root param.
+8. Add ExecutionWorkspace CLI/MCP surfacing (record-only; no cleanup automation).
+9. Add repair-policy documentation and schemas as a separate batch: `docs/overseer/REPAIR_ESCALATION_POLICY.md`, `ReviewFinding`, `RepairAttempt`, `RepairPolicyDecision`, `DraftReply`, `EvidenceRef`, and review-loop event records.
+10. Add `src/repair_policy.ts` and `src/repair_guidance.ts` only after the base Run Ledger is green. These modules evaluate policy and generate compact guidance; they do not send replies or dispatch repairs without human approval.
 
 Each step is independently green and releasable.
 
 ---
 
-## 8 · TDD Task Breakdown
+## 9 · TDD Task Breakdown
+
+### Shipped status (as of 2026-05-21, branch `feat/run-ledger-continuity`)
+
+| Task | Status | Landing commit(s) |
+|---|---|---|
+| 1. Fix `bin/.relayos/` git tracking leak | ✅ shipped | `c1e0b39` |
+| 2. Add `newRunId()` to `src/id.ts` | ✅ shipped | `b03240d` |
+| 3. Run Ledger schemas (incl. `ExecutionWorkspace`) | ✅ shipped | `b03240d` |
+| 4. `RunLayout` + run helpers (landed in `src/run_ledger.ts`, see §4 file-layout note) | ✅ shipped | `b03240d` |
+| 5. CLI `overseer run` subcommands | ✅ shipped | `120c3b0` |
+| 6. MCP tools (`write_run_event` etc.) | ✅ shipped | `120c3b0` |
+| 7. Extend `buildOverseerContextPack` with Run Ledger layer | ✅ shipped | `120c3b0` |
+| 8. `appendConversationLog` `projectRoot` dependency (+ cooldown follow-up `27d5b1c`) | ✅ shipped | `d7795b5`, `27d5b1c` |
+| 9. ExecutionWorkspace CLI + MCP + context-pack surface | ✅ shipped | `c8a0f80` |
+| 10. Review / repair schemas + IDs (§2.8–§2.13) | ✅ shipped | `c70a058` |
+| 11. Task-scoped storage helpers in `src/run_ledger.ts` | ✅ shipped | `c70a058` |
+| 12. Repair policy engine (`src/repair_policy.ts`) — incl. Attempt 3 boundary fix `2871dec` | ✅ shipped | `d7b233b`, `2871dec` |
+| 13. Repair guidance generator (`src/repair_guidance.ts`) | ✅ shipped | `d7b233b` |
+| 14. Human-contract Markdown (`docs/overseer/REPAIR_ESCALATION_POLICY.md`) | ✅ shipped | `8482654` |
+| 15. Repair-layer CLI + MCP tools | ⏸️ **explicitly deferred** | — |
+
+Task 4's helpers landed in a new dedicated module (`src/run_ledger.ts`) rather than being added inline to `src/overseer.ts` as the original task body described. The `src/` listing in §4 of this plan reflects the shipped reality.
+
+The remaining detailed Task entries below preserve the original step-by-step plan for audit purposes; they describe what was implemented, not what is still to do.
+
+---
 
 ### Task 1: Fix `bin/.relayos/` git tracking leak
 
@@ -2217,7 +2716,170 @@ git commit -m "feat: add ExecutionWorkspace CLI (register/list/update) + MCP too
 
 ---
 
-## 9 · Open Questions
+### Task 10: Review / repair schemas + IDs
+
+**Files:**
+- Modify: `src/schema.ts`
+- Modify: `src/id.ts`
+- Modify: `tests/run_ledger_schema.test.ts` (extend; do not create a parallel file)
+
+This task turns §2.8–§2.13 into Zod schemas + inferred types. It changes no runtime behavior. Implementation only — no CLI, no MCP, no storage helpers yet.
+
+- [ ] **Step 1:** Add `ReviewFinding`, `RepairAttempt` (with `RepairMode`, `RepairResult`, `RepairVariableChange` unions), `RepairPolicyDecision` (with `RepairDecisionKind`, `RepairReasonCode` unions), `DraftReply`, and the `EvidenceRef` discriminated union to `src/schema.ts`. Each `id` field has the corresponding regex (`f_` / `a_` / `d_` / `dr_`). Also add the §2.13 event records: `BatchReport` (`br_`), `ReviewPass` (`rp_`), `UserApproval` (`ua_`), `ReplySent` (`rs_`), `Result` (`res_`). **`RepairAttempt` MUST also carry `required_tests: string[]` and `reviewer: "human" | "claude" | "codex" | "static_analysis" | "test_runner"`** so the §3.2 variable-change rule has all seven axes (`effort | model | provider | mode | scope | tests | reviewer`) as first-class fields — see Task 12 Step 1 for why the policy engine cannot enforce the rule otherwise.
+- [ ] **Step 2:** Add `newReviewFindingId`, `newRepairAttemptId`, `newRepairDecisionId`, `newDraftReplyId`, `newBatchReportId`, `newReviewPassId`, `newUserApprovalId`, `newReplySentId`, `newResultId` plus their `is*Id` validators to `src/id.ts`. Match the existing `newRunId` / `newExecutionWorkspaceId` shape.
+- [ ] **Step 3:** Extend `tests/run_ledger_schema.test.ts` with cases for: every required field, every enum rejecting an unknown value, the `prompt_summary` ≤ 240-char cap, the `summary` ≤ 600-char cap, the `result_summary` ≤ 200-char cap, the `EvidenceRef` discriminated-union narrowing, the `guidance_budget_words` cap of 1,200, and the invariant that `RepairAttempt.attempt_number > 1` may be parsed with empty `changed_variables_since_previous_attempt` at the schema level (the variable-change check belongs to the policy engine, not the schema — call this out in a comment).
+- [ ] **Step 4:** `npm run typecheck && npm test`. All new + existing tests green.
+- [ ] **Step 5:** Commit: `feat(repair): add ReviewFinding / RepairAttempt / RepairPolicyDecision / DraftReply schemas`.
+
+Expected result: every shape from §2.8–§2.12 round-trips through Zod and refuses bad input. No storage written yet.
+
+---
+
+### Task 11: Task-scoped storage helpers in `src/run_ledger.ts`
+
+**Files:**
+- Modify: `src/run_ledger.ts`
+- Modify: `tests/run_ledger.test.ts` (extend)
+
+Extend Batch 1's `run_ledger.ts` with the task-scoped helpers listed in §4. Empty-state behavior is part of the contract: every read returns `[]` or `null` when the file is missing.
+
+- [ ] **Step 1:** Add `TaskLayout` and `resolveTaskLayout(cwd, runId, taskId)`. Path is `<runDir>/tasks/<task_id>/`. Provide `taskDir`, `taskLedgerMd`, `reviewFindings`, `repairAttempts`, `repairDecisions`, `draftReplies`, `repairGuidance`.
+- [ ] **Step 2:** Add `appendReviewFinding` / `readReviewFindings` (dedup by `id`, last-write-wins on `updated_at`).
+- [ ] **Step 3:** Add `appendRepairAttempt` / `readRepairAttempts` (dedup by `id`, sort by `attempt_number` ascending). Add `readLatestRepairAttempt(cwd, runId, taskId, findingId)`.
+- [ ] **Step 4:** Add `appendRepairDecision` / `readActiveRepairDecision` (latest per `finding_id` is active).
+- [ ] **Step 5:** Add `appendDraftReply` / `readDraftReplies` (dedup by `id`, last-write-wins on `approved_at ?? created_at`).
+- [ ] **Step 6:** Add `writeRepairGuidance(cwd, runId, taskId, markdown)` and `readRepairGuidance(cwd, runId, taskId)`. Write is atomic via `.tmp` + rename. Read returns `null` when missing.
+- [ ] **Step 7:** Extend `tests/run_ledger.test.ts` with: empty-state for every new reader; round-trip for every appender; dedup proofs for findings/attempts/decisions/replies; ordering proof for attempts (by `attempt_number`); active-decision-per-finding proof.
+- [ ] **Step 8:** `npm run typecheck && npm test`.
+- [ ] **Step 9:** Commit: `feat(repair): add task-scoped storage helpers (no CLI/MCP)`.
+
+Expected result: every task-scoped file from §4 has a tested read/write helper. The policy engine and guidance generator (Tasks 12-13) have all the persistence they need. **No CLI, no MCP, no policy enforcement yet** — the engine is the next task.
+
+---
+
+### Task 12: Repair policy engine (`src/repair_policy.ts`)
+
+**Files:**
+- Create: `src/repair_policy.ts`
+- Create: `tests/repair_policy.test.ts`
+
+Pure function. No IO. No Python. The engine reads structured ledger objects and returns a `RepairPolicyDecision`. CLI/MCP tools that will eventually call it are out of scope for this task.
+
+- [ ] **Step 1:** Define `EvaluateRepairPolicyInput` per §3. `proposed_next` MUST carry all seven `RepairVariableChange` axes from §3.2 (`effort | model | provider | mode | scope | tests | reviewer`); the engine can only enforce the variable-change rule if its input shape exposes every variable it must compare. `scope` is represented by `required_scope`; `tests` and `reviewer` are first-class fields:
+  ```typescript
+  interface EvaluateRepairPolicyInput {
+    finding: ReviewFinding;
+    attempts: RepairAttempt[];               // ALL prior attempts for this finding, chronological
+    proposed_next: {                         // what the caller wants to do next — all 7 variables present
+      provider: "claude" | "codex" | "other";
+      model: string;
+      effort: "low" | "medium" | "high" | "xhigh" | "max";
+      mode: RepairMode;
+      required_scope: { allowed_files: string[]; forbidden_files: string[] };
+      required_tests: string[];              // e.g. ["tests/run_ledger.test.ts", "tests/repair_policy.test.ts::happy_path"]
+      reviewer: "human" | "claude" | "codex" | "static_analysis" | "test_runner";
+    };
+    triggers: RepairReasonCode[];            // reviewer-supplied trigger codes
+    ladder: ModelLadderConfig;               // small config table; defaults below
+  }
+
+  interface ModelLadderConfig {
+    effort_order: ("low" | "medium" | "high" | "xhigh" | "max")[];   // default ["low","medium","high","xhigh","max"]
+    model_tiers_by_provider: Record<"claude" | "codex" | "other", string[]>;
+  }
+  ```
+  `RepairAttempt` already carries the corresponding fields from §2.9: `provider`, `model`, `effort`, `mode`, and `required_scope`. Task 10 extends `RepairAttempt` with `required_tests: string[]` and `reviewer: ...` so the engine can compare like-for-like across the full set without inferring values from prose. (This is a schema additive in Task 10 — call it out in that task's Step 1.)
+- [ ] **Step 2:** Implement `evaluateRepairPolicy(input): RepairPolicyDecision`:
+  1. If `attempts.length === 0` → return `allow_retry` for `proposed_next` (this is Attempt 1).
+  2. Compare `proposed_next` against the most recent attempt across **all seven `RepairVariableChange` axes**: `provider`, `model`, `effort`, `mode`, `required_scope` (deep equality on the sorted file lists), `required_tests` (deep equality on the sorted list), and `reviewer`. Any axis differing constitutes a valid variable change. If all seven are identical → emit `decision: "stop_needs_human"`, reason `same_model_effort_mode_requested`, OR emit `decision: "escalate_effort"`/`"escalate_model"` if a ladder step exists. The set of "changed axes" is what populates `RepairAttempt.changed_variables_since_previous_attempt` on the resulting attempt record.
+  3. Apply the §3.4 triggers: any of `test_modified_to_pass`, `forbidden_file_touched`, `scope_expanded`, `evidence_contradiction`, `report_contradicts_repo_evidence`, `agent_cannot_explain_root_cause`, `tests_pass_but_grep_unresolved` force a mode change or a stop per the table.
+  4. Apply the §3.5 stop conditions (attempts ≥ 3 without new variable; no ladder step left; reason-code repetition across two attempts).
+  5. Always emit `requires_human_approval = true` in this batch (§3.6). A future revision may change this; this revision does not.
+  6. Set `guidance_budget_words` (default 750, hard cap 1200).
+- [ ] **Step 3:** Tests in `tests/repair_policy.test.ts`:
+  - Attempt 1 returns `allow_retry`.
+  - Attempt 2 with identical proposed_next across **all seven axes** returns `stop_needs_human` (reason `same_model_effort_mode_requested`) when no ladder step exists, OR an escalation decision when one does.
+  - Attempt 2 after `incomplete` Attempt 1 with effort `medium` proposes `high` and returns `escalate_effort`.
+  - Attempt 3 after two `failed` attempts at the same provider returns `escalate_model` or `switch_provider`.
+  - After Attempt 3, return `stop_needs_human` with `max_attempts_reached`.
+  - Forbidden-file trigger returns `stop_needs_human` if `proposed_next` still touches a forbidden file.
+  - **`required_tests` change counts as a valid variable change.** Construct an attempt that fails with `required_tests = ["tests/a.test.ts"]`, then propose a next attempt with `required_tests = ["tests/a.test.ts", "tests/b.test.ts"]` and otherwise identical fields. The engine must NOT return `stop_needs_human` with `same_model_effort_mode_requested`; it must return a non-stop decision and the resulting decision's `RepairAttempt.changed_variables_since_previous_attempt` must include `"tests"`.
+  - **`reviewer` change counts as a valid variable change.** Construct an attempt that fails with `reviewer = "claude"`, then propose a next attempt with `reviewer = "static_analysis"` and otherwise identical fields. The engine must NOT return `same_model_effort_mode_requested`; the changed-variables set must include `"reviewer"`.
+  - **Variable-change invariant (covers Verification item 15):** for every test where the latest prior `RepairAttempt.result` is `"incomplete"` or `"failed"`, assert that `evaluateRepairPolicy()` returns either `decision === "stop_needs_human"` OR a proposed next attempt that differs from the latest attempt in at least one `RepairVariableChange` axis. A property-style test sweeps a small matrix of (effort, model, provider, mode, scope, tests, reviewer) single-variable changes and asserts the engine accepts each as a valid variable change.
+  - Every decision in every test has `requires_human_approval === true`.
+  - Every decision carries ≥ 1 reason code.
+- [ ] **Step 4:** `npm run typecheck && npm test`.
+- [ ] **Step 5:** Commit: `feat(repair): add evaluateRepairPolicy() (machine-checkable, no IO)`.
+
+Expected result: the policy engine returns a decision for any input, and the test suite locks in every §3.2–§3.5 rule. No file IO. No agent dispatch.
+
+---
+
+### Task 13: Repair guidance generator (`src/repair_guidance.ts`)
+
+**Files:**
+- Create: `src/repair_guidance.ts`
+- Create: `tests/repair_guidance.test.ts`
+
+Pure function. Renders `REPAIR_GUIDANCE.md` from structured input. No transcript dumps. Word-budgeted.
+
+- [ ] **Step 1:** Define `GuidanceInputs` (§3.7) and `GeneratedGuidance` (`{ markdown, word_count, truncated }`).
+- [ ] **Step 2:** Implement `generateRepairGuidance(inputs, budgetWords): GeneratedGuidance`:
+  1. Render sections 1–9 in the §3.8 order with the §3.8 per-section caps.
+  2. If total exceeds `budgetWords`, apply the §3.8 truncation priority (older "Previous attempts" entries summarised, then "What failed" reason codes truncated).
+  3. If still over after truncation, emit a stub guidance (≤ 200 words) with a pointer to the ledger, set `truncated = true`.
+  4. Enforce hard cap 1,200 words regardless of `budgetWords`.
+  5. Refuse to inline raw prompts/replies. Use `prompt_summary` only.
+- [ ] **Step 3:** Tests in `tests/repair_guidance.test.ts`:
+  - Default 750-word budget produces ≤ 750-word output for a typical input.
+  - 100-attempt input renders ≤ 1,200 words and sets `truncated = true`.
+  - Asking for `budgetWords: 2000` is silently clamped to 1,200 (or rejected — pick one and lock it).
+  - Guidance contains all 9 required sections in order.
+  - Guidance never contains the strings `\nuser:`, `\nassistant:`, `<message>` (regex assertion).
+  - Forbidden-files section is present whenever `decision.next_required_scope.forbidden_files` is non-empty.
+- [ ] **Step 4:** `npm run typecheck && npm test`.
+- [ ] **Step 5:** Commit: `feat(repair): add generateRepairGuidance() (budget-capped, no transcript)`.
+
+Expected result: a compact `REPAIR_GUIDANCE.md` can be produced from any policy decision + ledger state. Cost of an Attempt 2/3 model call is bounded by `budgetWords`, not by conversation length.
+
+---
+
+### Task 14: Human-contract Markdown — `docs/overseer/REPAIR_ESCALATION_POLICY.md`
+
+**Files:**
+- Create: `docs/overseer/REPAIR_ESCALATION_POLICY.md`
+
+Pure documentation. No code change.
+
+- [ ] **Step 1:** Author the doc as the human-readable companion to §3. Required sections (one Markdown heading each):
+  1. **Why this policy exists** — point at the same-model retry failure mode.
+  2. **Variable-change rule** — verbatim from §3.2.
+  3. **Model / effort escalation ladder** — verbatim table from §3.3.
+  4. **Escalation triggers** — verbatim table from §3.4.
+  5. **Stop conditions** — verbatim from §3.5.
+  6. **Human approval is the default** — verbatim from §3.6, plus an explicit statement that no future `auto_reply_policy` may be enabled without a plan revision.
+  7. **Token-saving requirements** — pointers to §3.7/§3.8.
+  8. **What enforces this** — link to `src/repair_policy.ts` and its tests. Note that the engine, not the Markdown, is the runtime contract.
+  9. **No Python** — one sentence stating that policy logic is TypeScript-only.
+- [ ] **Step 2:** Add a CHANGELOG line at the bottom referencing the plan file and the task that introduced it.
+- [ ] **Step 3:** Commit: `docs(overseer): add REPAIR_ESCALATION_POLICY.md (human contract)`.
+
+Expected result: contributors have a single Markdown file to read for the policy intent; that file points at the TypeScript engine for enforcement details.
+
+---
+
+### Task 15: Repair-layer CLI subcommands + MCP tools (DEFERRED — separate batch)
+
+**Files:**
+- (deferred — listed for plan completeness only)
+
+Once Tasks 10–14 have landed and been reviewed, a future batch may add CLI subcommands (`overseer review add-finding`, `overseer repair record-attempt`, `overseer repair decide`, `overseer repair draft`) and matching MCP tools. These are **explicitly not part of this plan** — they are listed here so the plan's task graph is complete.
+
+The reason for the defer: the storage helpers (Task 11), the policy engine (Task 12), and the guidance generator (Task 13) are the load-bearing pieces. Exposing them through CLI/MCP before they have been reviewed is exactly the failure mode this plan is built to avoid (cf. §3.1 — Markdown alone is not enforcement). The deferral makes the surface explicit so the user knows what is not landing in this plan.
+
+---
+
+## 10 · Open Questions
 
 These are the only genuine blockers. All have reasonable defaults called out.
 
@@ -2239,15 +2901,24 @@ The handoff flow already knows which directory it ran in (`Envelope.spawn.cwd` o
 **Q6: Should `cleanup_policy = auto_on_merge` trigger automatic `git worktree remove`?**
 Captured but not acted on in this plan. The CLI/MCP only record the policy; actual filesystem cleanup remains user-initiated. **Default chosen:** record only. Automation is a follow-on once the recording flow is proven.
 
+**Q7: Where does the model/effort ladder configuration live?**
+Hard-coding model names in `src/repair_policy.ts` would lock the engine to today's catalog. **Default chosen:** the ladder is a small `ModelLadderConfig` table that the engine accepts as input (Task 12, Step 1). The table's defaults can live in a config file once the engine is exercised; for now Tasks 12–13 use literal defaults inside their tests. No code change is required to swap models.
+
+**Q8: When the variable-change rule and the trigger table disagree, which wins?**
+Some triggers — `forbidden_file_touched`, `evidence_contradiction`, `test_modified_to_pass` — force a stop or mode change regardless of whether the caller varied other variables. **Default chosen:** Attempt 3 boundary → triggers → ladder → variable-change. The policy engine applies them in that order and returns at the first decisive rule. (The Attempt 3 boundary was hoisted ahead of triggers in commit `2871dec` so a failed/incomplete latest at `attempt_number ≥ 3` stops unconditionally — see §3.5.)
+
+**Q9: Can a human bypass `stop_needs_human` and continue the automated loop?**
+No — `evaluateRepairPolicy()` will keep emitting `stop_needs_human` while the conditions in §3.5 hold. A human can author a new `RepairAttempt` directly (the engine does not gate human-authored attempts; it only judges proposed automated ones). The engine does NOT auto-reset the attempt count: if the human's appended attempt carries `attempt_number ≥ MAX_STRUCTURED_ATTEMPTS`, the boundary still fires for any subsequent automated evaluation. The human carries the work forward by hand from there. This is intentional asymmetry — humans take responsibility, engines do not.
+
 ---
 
 ## Verification Checklist
 
-After all 9 tasks:
+After the base Run Ledger tasks (Tasks 1–9):
 
 1. `git ls-files bin/.relayos/` → empty (no longer tracked)
 2. `npm run typecheck` → clean, zero errors
-3. `npm test` → all 640+ existing tests green, all new tests green
+3. `npm test` → full vitest suite green (the branch currently runs at 929/929; the 640+ baseline was from the pre-Run-Ledger branch tip)
 4. `node dist/cli.js overseer run start --goal "test"` → prints `r_<ULID>`
 5. `node dist/cli.js overseer run current` → JSON with `run.status === "active"`
 6. `node dist/cli.js overseer run compact` → writes `continuation.json`
@@ -2260,16 +2931,30 @@ After all 9 tasks:
 13. `appendConversationLog` test confirms write to explicit `projectRoot`, not CWD
 14. `WORKSPACES.jsonl` round-trip: append two records with same `id` (different `updated_at`), `readExecutionWorkspaces` returns one record with the later `updated_at`
 
+After the repair-layer tasks (Tasks 10–14):
+
+15. **Failed-repair invariant:** for every test where the latest prior `RepairAttempt.result` is `"incomplete"` or `"failed"`, `evaluateRepairPolicy()` MUST return either (a) `decision: "stop_needs_human"`, OR (b) a proposed next attempt that differs from the latest attempt in at least one `RepairVariableChange` axis (`effort`, `model`, `provider`, `mode`, `scope`, `tests`, `reviewer`). Equivalently: after an `incomplete`/`failed` attempt, `decision === "allow_retry"` is permitted ONLY when the changed-variables set is non-empty. Locked in by `tests/repair_policy.test.ts`, including a property-style sweep that varies one axis at a time and asserts the engine treats each as a valid change.
+16. **Machine-checkable decisions:** `evaluateRepairPolicy()` returns a `RepairPolicyDecision` for every documented input shape; `reason_codes.length >= 1` always.
+17. **Markdown vs engine:** `docs/overseer/REPAIR_ESCALATION_POLICY.md` exists; its model-ladder table and stop-conditions section match the rules tested in `tests/repair_policy.test.ts`. If they drift, the test referencing the example fails.
+18. **Compact guidance:** `tests/repair_guidance.test.ts` proves a 750-word default budget, a 1,200-word hard cap, and refusal of any output containing `\nuser:`, `\nassistant:`, or `<message>`.
+19. **No raw transcript:** the guidance generator never reads or accepts raw conversation history — its input type is `GuidanceInputs` with structured `ReviewFinding`, `RepairAttempt[]`, and `EvidenceRef[]` only.
+20. **No infinite same-model retry:** test case `attempt_2_with_identical_proposed_next_returns_stop_or_escalation`.
+21. **Human approval preserved:** every emitted `RepairPolicyDecision` in Task 12's tests has `requires_human_approval === true`. There is no path in this batch by which a `DraftReply` reaches `approval_status: "approved"` without a human-authored append.
+22. **No Python:** `git ls-files | grep '\.py$'` returns no new files for this plan; the repair engine and guidance generator are TypeScript only.
+
 ---
 
 ## Out of Scope
 
 - No daemon, background process, or cloud sync.
 - No automatic run archival or rotation (can be added later).
-- No change to handoff envelope schema. **No breaking changes to existing MCP tools; this plan proposes 6 additive tools** (`write_run_event`, `read_current_run`, `read_current_task_ledger`, `update_task_ledger`, `register_execution_workspace`, `read_execution_workspaces`) — adding tools is still a surface change, just not a breaking one.
+- No change to handoff envelope schema. **No breaking changes to existing MCP tools; this plan proposes 6 additive tools** (`write_run_event`, `read_current_run`, `read_current_task_ledger`, `update_task_ledger`, `register_execution_workspace`, `read_execution_workspaces`) — adding tools is still a surface change, just not a breaking one. Repair-layer CLI/MCP (Task 15) is **explicitly deferred** to a later plan; this plan ships only the schemas, storage helpers, policy engine, guidance generator, and Markdown contract.
 - No automated workspace cleanup (`cleanup_policy` is recorded but not acted on).
 - No auto-registration of workspaces from `execute-handoff`; agents register explicitly.
 - No automatic file-change detection for `source_index.jsonl`.
+- **No automatic agent-to-agent repair loop.** The policy engine drafts a decision and the guidance generator produces a compact message; **sending** that message requires a recorded human approval. There is no `auto_reply_policy` in this plan, even in the safe-review-only flavor described in §3.6 (future revision only).
+- No merge, push, tag, release, or workspace cleanup as a consequence of repair policy decisions.
+- **No Python.** The policy engine and guidance generator are TypeScript only. Python may be used as an *ad hoc offline analysis* tool, but never on the live decision path. Adding Python would split enforcement across runtimes and add test surface for zero benefit.
 - No RTUI changes (the run ledger is CLI/MCP only; RTUI integration is a follow-on).
 - No change to `tasks.jsonl` format or `TaskRecord` schema.
 - No rewrite of git history to remove already-committed `bin/.relayos/` content.
