@@ -458,3 +458,275 @@ describe("relayos overseer execute-handoff", () => {
     expect(runTargetMock).not.toHaveBeenCalled();
   });
 });
+
+// ── P2-T2: Run Ledger auto-record (opt-in only, default OFF) ─────────
+//
+// Default behavior of execute-handoff is unchanged. The auto-record
+// path only fires when the caller explicitly opted in via either the
+// --record-run-ledger flag OR RELAYOS_RUN_LEDGER_AUTO_RECORD=1.
+// No-op silently when no active run; never fails the surrounding
+// handoff result.
+
+describe("relayos overseer execute-handoff — P2-T2 Run Ledger auto-record (opt-in)", () => {
+  function writeRecordedEnvelope(id: string, allowed: string[]) {
+    writeEnvelope(id, {
+      id,
+      status: "recorded",
+      target_agent: "codex",
+      working_dir: testRoot,
+      allowed_files: allowed,
+      launch_command: "codex exec --json 'do thing'",
+      execution_mode: "patch",
+    });
+  }
+
+  function mockSuccessfulSpawn() {
+    detectCliMock.mockResolvedValue({
+      target_binary: "codex",
+      found: true,
+      resolved_path: "/usr/local/bin/codex",
+    });
+    runTargetMock.mockResolvedValue({
+      exit_code: 0,
+      duration_ms: 1,
+      stdout_path: "/dev/null",
+      stderr_path: "/dev/null",
+      stdout_tail: "",
+      stderr_tail: "",
+    });
+  }
+
+  async function startActiveRun(): Promise<string> {
+    const cap = captureIO();
+    const code = await runCli(["overseer", "run", "start"], cap.io);
+    expect(code).toBe(0);
+    return cap.stdout.trim();
+  }
+
+  /** Helper: load and parse a task-scoped JSONL log if it exists. */
+  async function readSourceIndex(runId: string): Promise<unknown[]> {
+    const path = join(
+      testRoot,
+      ".relayos",
+      "overseer",
+      "runs",
+      runId,
+      "source_index.jsonl",
+    );
+    const { existsSync, readFileSync } = await import("node:fs");
+    if (!existsSync(path)) return [];
+    return readFileSync(path, "utf8")
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((l) => JSON.parse(l));
+  }
+
+  async function readWorkspaces(runId: string): Promise<unknown[]> {
+    const path = join(
+      testRoot,
+      ".relayos",
+      "overseer",
+      "runs",
+      runId,
+      "WORKSPACES.jsonl",
+    );
+    const { existsSync, readFileSync } = await import("node:fs");
+    if (!existsSync(path)) return [];
+    return readFileSync(path, "utf8")
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((l) => JSON.parse(l));
+  }
+
+  beforeEach(() => {
+    delete process.env.RELAYOS_RUN_LEDGER_AUTO_RECORD;
+  });
+
+  // ── Default OFF — existing behavior unchanged ──
+
+  it("default (no flag, no env) makes NO Run Ledger writes after success", async () => {
+    const runId = await startActiveRun();
+    writeRecordedEnvelope("h_default_off", ["src/a.ts", "src/b.ts"]);
+    mockSuccessfulSpawn();
+
+    const cap = captureIO();
+    const code = await runCli(["overseer", "execute-handoff", "h_default_off"], cap.io);
+    expect(code).toBe(0);
+    expect(await readSourceIndex(runId)).toEqual([]);
+    expect(await readWorkspaces(runId)).toEqual([]);
+    // And no run-ledger noise on stdout
+    expect(cap.stdout).not.toContain("[run-ledger]");
+  });
+
+  // ── Opt-in via flag ──
+
+  it("--record-run-ledger records SourceIndexEntry per allowed_file", async () => {
+    const runId = await startActiveRun();
+    writeRecordedEnvelope("h_flag", ["src/a.ts", "src/b.ts", "src/c.ts"]);
+    mockSuccessfulSpawn();
+
+    const cap = captureIO();
+    const code = await runCli(
+      ["overseer", "execute-handoff", "h_flag", "--record-run-ledger"],
+      cap.io,
+    );
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("[run-ledger] source-index: recorded 3 file touches");
+
+    const entries = (await readSourceIndex(runId)) as Array<{
+      path: string;
+      handoff_id: string;
+      action: string;
+    }>;
+    expect(entries).toHaveLength(3);
+    expect(entries.map((e) => e.path)).toEqual(["src/a.ts", "src/b.ts", "src/c.ts"]);
+    expect(entries.every((e) => e.handoff_id === "h_flag")).toBe(true);
+    expect(entries.every((e) => e.action === "modified")).toBe(true);
+  });
+
+  it("--record-run-ledger appends one ExecutionWorkspace record per handoff", async () => {
+    const runId = await startActiveRun();
+    writeRecordedEnvelope("h_flag_ws", ["src/a.ts"]);
+    mockSuccessfulSpawn();
+
+    const cap = captureIO();
+    const code = await runCli(
+      ["overseer", "execute-handoff", "h_flag_ws", "--record-run-ledger"],
+      cap.io,
+    );
+    expect(code).toBe(0);
+    expect(cap.stdout).toMatch(/\[run-ledger\] workspace recorded: w_[0-9A-HJKMNP-TV-Z]{26}/);
+
+    const ws = (await readWorkspaces(runId)) as Array<{
+      id: string;
+      run_id: string;
+      kind: string;
+      related_handoff_id: string;
+      owner_agent: string;
+      status: string;
+    }>;
+    expect(ws).toHaveLength(1);
+    expect(ws[0]!.kind).toBe("main_checkout");
+    expect(ws[0]!.related_handoff_id).toBe("h_flag_ws");
+    expect(ws[0]!.owner_agent).toBe("codex");
+    expect(ws[0]!.status).toBe("merged"); // completed → merged
+    expect(ws[0]!.run_id).toBe(runId);
+  });
+
+  // ── Opt-in via env var ──
+
+  it("RELAYOS_RUN_LEDGER_AUTO_RECORD=1 alone enables auto-record (no flag)", async () => {
+    process.env.RELAYOS_RUN_LEDGER_AUTO_RECORD = "1";
+    const runId = await startActiveRun();
+    writeRecordedEnvelope("h_env", ["src/x.ts"]);
+    mockSuccessfulSpawn();
+
+    const cap = captureIO();
+    const code = await runCli(["overseer", "execute-handoff", "h_env"], cap.io);
+    expect(code).toBe(0);
+    expect(cap.stdout).toContain("[run-ledger]");
+
+    const entries = await readSourceIndex(runId);
+    expect(entries).toHaveLength(1);
+    const ws = await readWorkspaces(runId);
+    expect(ws).toHaveLength(1);
+  });
+
+  it("RELAYOS_RUN_LEDGER_AUTO_RECORD=0 (or unset) is OFF — default behavior intact", async () => {
+    process.env.RELAYOS_RUN_LEDGER_AUTO_RECORD = "0";
+    const runId = await startActiveRun();
+    writeRecordedEnvelope("h_env_off", ["src/x.ts"]);
+    mockSuccessfulSpawn();
+
+    const cap = captureIO();
+    const code = await runCli(["overseer", "execute-handoff", "h_env_off"], cap.io);
+    expect(code).toBe(0);
+    expect(await readSourceIndex(runId)).toEqual([]);
+    expect(await readWorkspaces(runId)).toEqual([]);
+  });
+
+  // ── No-op behavior when no active run ──
+
+  it("opt-in with no active run is a stderr note, NOT a failure", async () => {
+    // No `overseer run start` — there is no active run.
+    writeRecordedEnvelope("h_no_run", ["src/a.ts"]);
+    mockSuccessfulSpawn();
+
+    const cap = captureIO();
+    const code = await runCli(
+      ["overseer", "execute-handoff", "h_no_run", "--record-run-ledger"],
+      cap.io,
+    );
+    expect(code).toBe(0); // handoff itself still succeeded
+    expect(cap.stderr).toContain("auto-record requested but no active run");
+  });
+
+  // ── Workspace status reflects the spawn outcome ──
+
+  it("workspace.status is 'active' when the spawn exit_code != 0", async () => {
+    const runId = await startActiveRun();
+    writeRecordedEnvelope("h_failed_run", ["src/a.ts"]);
+    detectCliMock.mockResolvedValue({
+      target_binary: "codex",
+      found: true,
+      resolved_path: "/usr/local/bin/codex",
+    });
+    runTargetMock.mockResolvedValue({
+      exit_code: 1,
+      duration_ms: 1,
+      stdout_path: "/dev/null",
+      stderr_path: "/dev/null",
+      stdout_tail: "",
+      stderr_tail: "",
+    });
+
+    const cap = captureIO();
+    const code = await runCli(
+      ["overseer", "execute-handoff", "h_failed_run", "--record-run-ledger"],
+      cap.io,
+    );
+    expect(code).toBe(1);
+    const ws = (await readWorkspaces(runId)) as Array<{ status: string }>;
+    expect(ws).toHaveLength(1);
+    expect(ws[0]!.status).toBe("active"); // not "merged"
+  });
+
+  // ── Dry-run never triggers auto-record ──
+
+  it("--dry-run with --record-run-ledger does NOT touch the ledger", async () => {
+    const runId = await startActiveRun();
+    writeRecordedEnvelope("h_dry", ["src/a.ts"]);
+
+    const cap = captureIO();
+    const code = await runCli(
+      ["overseer", "execute-handoff", "--dry-run", "h_dry", "--record-run-ledger"],
+      cap.io,
+    );
+    expect(code).toBe(0);
+    expect(await readSourceIndex(runId)).toEqual([]);
+    expect(await readWorkspaces(runId)).toEqual([]);
+    expect(detectCliMock).not.toHaveBeenCalled();
+    expect(runTargetMock).not.toHaveBeenCalled();
+  });
+
+  // ── Empty allowed_files: workspace still recorded, source-index skipped ──
+
+  it("allowed_files=[] records the workspace but skips source-index", async () => {
+    const runId = await startActiveRun();
+    writeRecordedEnvelope("h_no_files", []);
+    mockSuccessfulSpawn();
+
+    const cap = captureIO();
+    const code = await runCli(
+      ["overseer", "execute-handoff", "h_no_files", "--record-run-ledger"],
+      cap.io,
+    );
+    expect(code).toBe(0);
+    expect(await readSourceIndex(runId)).toEqual([]);
+    expect((await readWorkspaces(runId))).toHaveLength(1);
+    // No "source-index: recorded N file touches" line
+    expect(cap.stdout).not.toContain("[run-ledger] source-index");
+  });
+});

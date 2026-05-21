@@ -70,6 +70,7 @@ const HandoffInputShape = {
   ]),
   working_dir: z.string().optional(),
   auto_spawn: z.boolean().default(false),
+  record_run_ledger: z.boolean().optional(),
   audit_metadata: AuditMetadataInput.optional(),
 } as const;
 
