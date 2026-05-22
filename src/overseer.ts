@@ -654,6 +654,36 @@ export async function readOverseerTextFile(
   return trimmed.length > 0 ? trimmed : null;
 }
 
+/**
+ * Read a context file by trying the canonical UPPERCASE name first
+ * (e.g. `PROJECT_BRIEF.md`), then falling back to a legacy lowercase
+ * alias (e.g. `project_brief.md`) when the canonical file is absent.
+ *
+ * Exists to bridge the historical two-conventions mismatch: the
+ * canonical reader set in `OVERSEER_CONTEXT_CANONICAL_FILES` plus
+ * `buildOverseerContextPack` / `buildOverseerSummary` /
+ * `buildOverseerRunPreflight` all expect UPPERCASE; `runOverseerStatus`,
+ * `runOverseerRecent`, and `runOverseerBrief` historically read
+ * lowercase. This wrapper lets those three handlers read whichever
+ * the user has on disk — so a fresh project with UPPERCASE canonical
+ * files works AND a legacy project with the old lowercase stubs from
+ * `init-context` continues to work. New code paths should prefer
+ * UPPERCASE-only via `readOverseerTextFile`.
+ *
+ * Callers pass BOTH names explicitly so the legacy alias is visible
+ * at the call site (no implicit toLowerCase rule that would misfire
+ * on irregular renames like `current.md` → `CURRENT_STATE.md`).
+ */
+export async function readOverseerCanonicalText(
+  layout: OverseerLayout,
+  canonical: string,
+  legacyLowercase: string,
+): Promise<string | null> {
+  const fromCanonical = await readOverseerTextFile(layout, canonical);
+  if (fromCanonical !== null) return fromCanonical;
+  return readOverseerTextFile(layout, legacyLowercase);
+}
+
 function compactText(value: string | null): string | null {
   if (!value) return null;
   for (const raw of value.split("\n")) {
@@ -1497,26 +1527,120 @@ export async function readBranchProgress(
 
 // init-context stub content
 
+/**
+ * Stub files written by `overseer init-context`. Keys are the
+ * canonical UPPERCASE filenames the rest of the overseer reads — see
+ * `OVERSEER_CONTEXT_CANONICAL_FILES` at the top of this file and
+ * `buildOverseerContextBundle` in `src/conversation.ts`.
+ *
+ * Pre-P3-A.2 these keys were lowercase (`project_brief.md`,
+ * `current.md`, etc.), which meant init-context wrote files that the
+ * canonical readers couldn't see. The lowercase fallback in CLI
+ * handlers (see `readOverseerCanonicalText`) keeps older workspaces
+ * working; new init-context calls land in the canonical UPPERCASE
+ * shape directly.
+ */
 const STUB_CONTENTS: Record<string, string> = {
-  "project_brief.md": "# Project Brief\n\n(fill in: what the project is and its Core/Solo direction)\n",
-  "current.md": "# Current State\n\nAs of (date):\n\n## Latest commit anchor\n\n`(hash)` — (message)\n\n## Completed features\n\n- (list)\n\n## In progress / pending\n\n(none)\n",
-  "release_policy.md": "# Release Policy\n\nNormal workflow: commit + push only. No tag or GitHub Release unless explicitly instructed.\n",
-  "forbidden_actions.md": "# Forbidden Actions\n\n1. No git tag.\n2. No GitHub Release.\n3. No committing .relayos/overseer/ files.\n4. No force-push to main.\n5. No amending published commits.\n6. No skipping hooks (--no-verify).\n",
-  "product_direction.md": "# Product Direction\n\n## Guiding principle\n\n(fill in)\n\n## Near-term\n\n| Feature | Status |\n|---|---|\n| (feature) | (status) |\n\n## Future (out of scope for OSS core)\n\n- (list)\n",
+  "PROJECT_BRIEF.md": "# Project Brief\n\n(fill in: what the project is and its Core/Solo direction)\n",
+  "CURRENT_STATE.md": "# Current State\n\nAs of (date):\n\n## Latest commit anchor\n\n`(hash)` — (message)\n\n## Completed features\n\n- (list)\n\n## In progress / pending\n\n(none)\n",
+  "RELEASE_POLICY.md": "# Release Policy\n\nNormal workflow: commit + push only. No tag or GitHub Release unless explicitly instructed.\n",
+  "FORBIDDEN_ACTIONS.md": "# Forbidden Actions\n\n1. No git tag.\n2. No GitHub Release.\n3. No committing .relayos/overseer/ files.\n4. No force-push to main.\n5. No amending published commits.\n6. No skipping hooks (--no-verify).\n",
+  "PRODUCT_DIRECTION.md": "# Product Direction\n\n## Guiding principle\n\n(fill in)\n\n## Near-term\n\n| Feature | Status |\n|---|---|\n| (feature) | (status) |\n\n## Future (out of scope for OSS core)\n\n- (list)\n",
   "branches/active/brief.md": "# Active Branch\n\n(fill in: current task or branch name)\n",
   "branches/active/progress.md": "",
   "planned/enterprise_server.md": "# Planned: Enterprise Server\n\nRequires a server component. Out of scope for OSS core. No timeline set.\n",
   "planned/web_panel.md": "# Planned: Web Panel / Dashboard\n\nRequires a server component. Out of scope for OSS core. No timeline set.\n",
 };
 
-export async function initContextFiles(layout: OverseerLayout): Promise<string[]> {
-  const created: string[] = [];
+/**
+ * Legacy lowercase → canonical UPPERCASE renames executed once per
+ * `init-context` call. If the legacy file exists AND the canonical
+ * file does NOT, the legacy file is renamed (preserving its content).
+ * If both exist, the legacy file is left in place untouched — the
+ * user has presumably already migrated and we don't want to clobber
+ * any divergent edits. If only the canonical file exists, nothing
+ * happens.
+ *
+ * Note the irregular `current.md` → `CURRENT_STATE.md` rename, which
+ * is a name change, not just a case change.
+ */
+const LEGACY_RENAMES: Array<{ legacy: string; canonical: string }> = [
+  { legacy: "project_brief.md", canonical: "PROJECT_BRIEF.md" },
+  { legacy: "current.md", canonical: "CURRENT_STATE.md" },
+  { legacy: "release_policy.md", canonical: "RELEASE_POLICY.md" },
+  { legacy: "forbidden_actions.md", canonical: "FORBIDDEN_ACTIONS.md" },
+  { legacy: "product_direction.md", canonical: "PRODUCT_DIRECTION.md" },
+];
+
+/**
+ * `init-context` result: which canonical stubs were created, which
+ * legacy files were renamed to canonical, and which legacy files were
+ * left in place because both casings existed.
+ */
+export interface InitContextResult {
+  created: string[];
+  renamed: Array<{ from: string; to: string }>;
+  legacy_left_in_place: string[];
+}
+
+export async function initContextFiles(
+  layout: OverseerLayout,
+): Promise<InitContextResult> {
+  const result: InitContextResult = {
+    created: [],
+    renamed: [],
+    legacy_left_in_place: [],
+  };
+
+  await mkdir(layout.dir, { recursive: true });
+
+  // Build a case-aware view of what's actually on disk. `existsSync`
+  // returns true for both casings on case-insensitive filesystems
+  // (macOS APFS, default NTFS), which makes a naive `existsSync(legacy) &&
+  // existsSync(canonical)` check spuriously fire the legacy-left-in-
+  // place branch even when only one physical file exists. Reading the
+  // directory tells us the real stored name.
+  const { readdir, rename } = await import("node:fs/promises");
+  let actualNames: string[];
+  try {
+    actualNames = await readdir(layout.dir);
+  } catch {
+    actualNames = [];
+  }
+  const actualSet = new Set(actualNames);
+
+  // Step 1: rename any legacy lowercase files whose canonical
+  // UPPERCASE counterpart is NOT physically present on disk (i.e.
+  // the on-disk name is the lowercase one). Done BEFORE writing
+  // stubs so the user's existing content survives the migration
+  // rather than being clobbered by a fresh stub.
+  for (const { legacy, canonical } of LEGACY_RENAMES) {
+    const hasLegacyOnDisk = actualSet.has(legacy);
+    const hasCanonicalOnDisk = actualSet.has(canonical);
+    if (!hasLegacyOnDisk) continue;
+    if (hasCanonicalOnDisk) {
+      // Both physically present (only possible on case-sensitive
+      // filesystems). Don't clobber either.
+      result.legacy_left_in_place.push(legacy);
+      continue;
+    }
+    await rename(join(layout.dir, legacy), join(layout.dir, canonical));
+    result.renamed.push({ from: legacy, to: canonical });
+    // Keep `actualSet` in sync so step 2 sees the rename's effect.
+    actualSet.delete(legacy);
+    actualSet.add(canonical);
+  }
+
+  // Step 2: write canonical stubs for anything that doesn't already
+  // exist after the rename step. We can still use `existsSync` here
+  // because the stub set targets canonical UPPERCASE names directly —
+  // there's no case-only twin to confuse the check.
   for (const [relPath, stub] of Object.entries(STUB_CONTENTS)) {
     const fullPath = join(layout.dir, relPath);
     if (existsSync(fullPath)) continue;
     await mkdir(join(fullPath, ".."), { recursive: true });
     await writeFile(fullPath, stub, "utf8");
-    created.push(relPath);
+    result.created.push(relPath);
   }
-  return created;
+  return result;
 }

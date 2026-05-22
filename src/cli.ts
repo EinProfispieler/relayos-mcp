@@ -51,6 +51,7 @@ import {
   readLatestDecisions,
   readLatestNotes,
   readNextAction,
+  readOverseerCanonicalText,
   readOverseerTextFile,
   resolveOverseerLayout,
   writeActiveBrief,
@@ -1033,8 +1034,10 @@ async function runOverseerStatus(args: string[], io: CliIO): Promise<number> {
       recentNotes,
       latestCommit,
     ] = await Promise.all([
-      readOverseerTextFile(layout, "project_brief.md"),
-      readOverseerTextFile(layout, "current.md"),
+      // UPPERCASE canonical first, legacy lowercase fallback —
+      // see readOverseerCanonicalText in src/overseer.ts.
+      readOverseerCanonicalText(layout, "PROJECT_BRIEF.md", "project_brief.md"),
+      readOverseerCanonicalText(layout, "CURRENT_STATE.md", "current.md"),
       readNextAction(layout),
       readActiveBrief(layout),
       readBranchProgress(layout),
@@ -1208,8 +1211,9 @@ async function runOverseerRecent(args: string[], io: CliIO): Promise<number> {
   const cwd = process.cwd();
   const layout = resolveOverseerLayout(cwd);
   const [projectBrief, currentState, nextAction, activeBranch, isRepo] = await Promise.all([
-    readOverseerTextFile(layout, "project_brief.md"),
-    readOverseerTextFile(layout, "current.md"),
+    // UPPERCASE canonical first, legacy lowercase fallback.
+    readOverseerCanonicalText(layout, "PROJECT_BRIEF.md", "project_brief.md"),
+    readOverseerCanonicalText(layout, "CURRENT_STATE.md", "current.md"),
     readNextAction(layout),
     readActiveBrief(layout),
     isGitRepo(cwd),
@@ -2677,11 +2681,12 @@ async function runOverseerBrief(args: string[], io: CliIO): Promise<number> {
     branchProgress,
     commitInfo,
   ] = await Promise.all([
-    readOverseerTextFile(layout, "project_brief.md"),
-    readOverseerTextFile(layout, "current.md"),
-    readOverseerTextFile(layout, "release_policy.md"),
-    readOverseerTextFile(layout, "forbidden_actions.md"),
-    readOverseerTextFile(layout, "product_direction.md"),
+    // UPPERCASE canonical first, legacy lowercase fallback.
+    readOverseerCanonicalText(layout, "PROJECT_BRIEF.md", "project_brief.md"),
+    readOverseerCanonicalText(layout, "CURRENT_STATE.md", "current.md"),
+    readOverseerCanonicalText(layout, "RELEASE_POLICY.md", "release_policy.md"),
+    readOverseerCanonicalText(layout, "FORBIDDEN_ACTIONS.md", "forbidden_actions.md"),
+    readOverseerCanonicalText(layout, "PRODUCT_DIRECTION.md", "product_direction.md"),
     readNextAction(layout),
     readActiveBrief(layout),
     readBranchProgress(layout),
@@ -2938,13 +2943,27 @@ async function runOverseerEnv(args: string[], io: CliIO): Promise<number> {
 
 async function runOverseerInitContext(_args: string[], io: CliIO): Promise<number> {
   const layout = resolveOverseerLayout(process.cwd());
-  const created = await initContextFiles(layout);
-  if (created.length === 0) {
+  const result = await initContextFiles(layout);
+  // Report renames first (data preservation), then creations, then the
+  // both-exist edge case. Order helps a user reading the output
+  // understand what happened to their existing content.
+  for (const { from, to } of result.renamed) {
+    io.stdout.write(`renamed legacy: .relayos/overseer/${from} → ${to}\n`);
+  }
+  for (const f of result.created) {
+    io.stdout.write(`created: .relayos/overseer/${f}\n`);
+  }
+  for (const legacy of result.legacy_left_in_place) {
+    io.stderr.write(
+      `note: .relayos/overseer/${legacy} kept (canonical file already exists; not overwritten)\n`,
+    );
+  }
+  if (
+    result.created.length === 0 &&
+    result.renamed.length === 0 &&
+    result.legacy_left_in_place.length === 0
+  ) {
     io.stdout.write("overseer context already complete — no files created\n");
-  } else {
-    for (const f of created) {
-      io.stdout.write(`created: .relayos/overseer/${f}\n`);
-    }
   }
   return 0;
 }

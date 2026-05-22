@@ -26,9 +26,21 @@ relayos overseer env
 relayos overseer activate-runtime --dry-run --path <runtime-path> [--source <source-repo-path>] [--json]
 relayos overseer runtime-check --path <runtime-path> [--source <source-repo-path>] [--json]
 relayos overseer brief
-relayos overseer init-context
 relayos overseer branch <name>
 relayos overseer progress [text...]
+relayos overseer init-context
+relayos overseer capabilities [--json]
+relayos overseer memory-index [--json]
+relayos overseer role-profile [--json]
+relayos overseer decision <text...>
+relayos overseer decisions [--json] [--limit <1-20>]
+relayos overseer execute-handoff <handoff_id> [--dry-run] [--record-run-ledger]
+relayos overseer plan-extract <handoff_id>
+relayos overseer plan-answer <plan_id> <text...>
+relayos overseer plan-task-handoff <plan_id> <task_id>
+relayos overseer plan-execute-task <plan_id> <task_id>
+relayos overseer plan-report <plan_id>
+relayos overseer run <subcommand>          # Run Ledger CLI — see docs/superpowers/plans/2026-05-20-run-ledger-continuity-layer.md §5
 ```
 
 ### `overseer wake-instructions`
@@ -81,84 +93,13 @@ Read-only session protocol snapshot for overseer-bound clients.
 - `relayos overseer handshake --json` returns stable handshake metadata for automation clients.
 - Missing context files mark the handshake as incomplete (`ok: false`) but do not write files.
 
-#### MCP client bootstrap rule
-
-For Claude/Codex/other MCP clients, call `read_overseer_doctor` then
-`read_overseer_handshake` as the canonical session-start bootstrap
-sequence.
-Current overseer MCP surface for this bootstrap flow:
-
-- `read_overseer_bootstrap_prompt` (optional ready-to-use startup prompt helper)
-- `read_overseer_handshake` (canonical bootstrap)
-- `read_overseer_context_pack` (optional curated continuity pack)
-- `read_overseer_summary` (optional deterministic read-only session summary)
-- `read_overseer_run_preflight` (optional read-only future-run readiness check)
-- `read_overseer_doctor` (optional read-only overseer readiness diagnostics)
-- `write_overseer_decision` (optional local decision record append)
-- `read_overseer_decisions` (optional read-only decision record readback)
-- `write_handoff_result` (optional local structured handoff result append)
-- `read_handoff_results` (optional read-only bounded handoff result readback)
-- `read_handoff_result` (optional read-only handoff result readback by `run_id`)
-- `write_overseer_note` (optional local progress note append)
-- `read_overseer_recent` (optional read-only compact session readback)
-
-- A separate `read_overseer_context` MCP tool is intentionally not
-  required; handshake already includes context completeness, missing
-  files, and required paths.
-- Optionally call `read_overseer_bootstrap_prompt` to retrieve a
-  read-only startup prompt and recommended first calls.
-- Optionally call `read_overseer_context_pack` for a compact read-only
-  continuity pack (project/current/next + recent notes/decisions + boundaries + evidence links).
-- If `ok` or `context_complete` is false, report missing files and ask
-  the user whether to proceed.
-- Treat `must_read`, `next_action_source`, `forbidden_actions`, and
-  `requires_explicit_user_approval_for` as the session contract.
-- Use `write_overseer_note` only after handshake when you need to append
-  local gitignored timeline notes; it is optional.
-- After approved scoped handoff execution, use `write_handoff_result` to append
-  structured completion evidence (`run_id`, `status`, `summary`, and optional test/blocker/review fields).
-- Use `read_overseer_recent` only after handshake when you need a
-  read-only compact view of local overseer state and recent notes.
-- Do not assume RelayOS is a daemon, autonomous agent, or hard security
-  sandbox, runtime activator, or automatic orchestrator.
-- Do not proceed with forbidden actions without explicit user approval.
-
-Minimal copy-paste prompt:
-
-`Call read_overseer_doctor first, then read_overseer_handshake. If handshake ok/context_complete is true, follow the returned session contract. If incomplete, report missing files before acting.`
-
-#### MCP smoke verification
-
-After `npm run build`, restart MCP clients so they reload
-`dist/index.js`. RelayOS MCP uses the configured stdio entrypoint and is
-not a daemon.
-
-1. Confirm RelayOS tools are visible in the MCP client.
-2. Call `read_overseer_doctor {}`.
-3. Call `read_overseer_handshake {}`.
-4. If `ok` or `context_complete` is false, report `missing` and ask the user before proceeding.
-5. Call `read_overseer_recent { "limit": 5 }`.
-6. Optionally call `write_overseer_note { "text": "smoke: connected via MCP" }`.
-7. Call `read_overseer_recent { "limit": 5 }` again and confirm the note appears.
-
-Safety boundaries remain: local-only state, no daemon, no automatic
-orchestration, no runtime activation, no security sandbox, and
-forbidden actions still require explicit user approval.
-OVERSEER STATUS
-──────────────
-NEXT ACTION
-  review PR #42 before merging
-
-RECENT NOTES
-  [2026-05-14T10:00:00.000Z] patch applied, tests green
-  [2026-05-14T09:45:00.000Z] blocked on schema migration review
-```
+For MCP clients, the canonical session-start sequence is `read_overseer_doctor` → `read_overseer_handshake`; treat `must_read`, `next_action_source`, `forbidden_actions`, and `requires_explicit_user_approval_for` as the session contract. The CLI `overseer handshake` command exposes the same data in human-readable and `--json` form for terminal use.
 
 ### `overseer recent`
 
 Prints a compact read-only summary of current local overseer context for fast terminal recovery:
 
-- project identity (one-line, from local `project_brief.md` when available)
+- project identity (one-line, from local `PROJECT_BRIEF.md` when available)
 - current state anchor (from local current-state anchor when available, else latest git commit context)
 - active branch/task
 - next action
@@ -167,44 +108,7 @@ Prints a compact read-only summary of current local overseer context for fast te
 
 Missing optional local files are shown as `not available` instead of failing.
 
-`--json` prints stable machine-readable output with top-level fields:
-
-- `project`
-- `currentState`
-- `activeBranch`
-- `nextAction`
-- `mode`
-- `runtime`
-- `warnings` (always an array)
-
-Missing optional values degrade to `null` or clear unavailable values instead of crashing.
-
-Compact example:
-
-```json
-{
-  "project": "RelayOS is a local-first safety, audit, and handoff layer for AI-assisted development.",
-  "currentState": {
-    "anchor": "32ee222",
-    "raw": "# Current State\n..."
-  },
-  "activeBranch": "runtime activation dry-run safety gate — shipped 32ee222",
-  "nextAction": "Prepare the next safe Overseer control-plane slice...",
-  "mode": {
-    "current": "serial",
-    "default": "serial",
-    "writeTasks": "serial"
-  },
-  "runtime": {
-    "relayosRuntimeHomeSet": false,
-    "relayosRuntimeHome": null,
-    "runtimeWorkspaceSwitchingActive": false,
-    "currentRelayosResolution": "cwd",
-    "posture": "switching inactive; RELAYOS_RUNTIME_HOME not set (inspect-only)"
-  },
-  "warnings": []
-}
-```
+`--json` prints stable machine-readable output with top-level fields `project`, `currentState`, `activeBranch`, `nextAction`, `mode`, `runtime`, `warnings` (always an array). Missing optional values degrade to `null` instead of crashing.
 
 ### `overseer context-pack`
 
@@ -304,53 +208,9 @@ deploy the patch after green CI
 
 ### `overseer brief`
 
-Prints a concise startup brief for a fresh AI worker or human operator. Reads all context files from `.relayos/overseer/` and formats them into a single output block with the current next action, latest git commit, and a local data safety reminder.
+Prints a concise startup brief: project identity, current state, release/forbidden-action policy, product direction, current next action, latest git commit, and a local-data-safety reminder. Reads canonical context files from `.relayos/overseer/`; missing files are shown as `(missing — file not found in .relayos/overseer/)`. Exits 0 even when all files are absent. Takes no arguments — exits 1 with usage if any are given.
 
-```
-$ relayos overseer brief
-RELAYOS OVERSEER BRIEF  2026-05-14T10:00:00.000Z
-────────────────────────────────────────────────
-
-PROJECT
-────────────────────────────────────────────────
-RelayOS is a local-first control layer for AI-assisted development.
-...
-
-CURRENT STATE
-────────────────────────────────────────────────
-As of 2026-05-14: all Core/Solo features are shipped.
-
-RELEASE POLICY
-────────────────────────────────────────────────
-...
-
-FORBIDDEN ACTIONS
-────────────────────────────────────────────────
-...
-
-PRODUCT DIRECTION
-────────────────────────────────────────────────
-...
-
-NEXT ACTION
-────────────────────────────────────────────────
-  ship the patch
-
-LATEST COMMIT
-────────────────────────────────────────────────
-  dc80449 @ main
-
-LOCAL DATA SAFETY
-────────────────────────────────────────────────
-  Do not commit .relayos/overseer/ files, checkpoints, audit logs,
-  handoff envelopes, transcripts, or private scratch to git.
-  Handoff storage defaults to ~/.claude/handoff/ (outside repo).
-  .relayos/overseer/ is gitignored in the project repo.
-```
-
-Context files that do not exist are shown as `(missing — file not found in .relayos/overseer/)`. Exits 0 even when all files are absent. Takes no arguments — exits 1 with usage if any are given.
-
-`--json` prints the same core brief data as stable machine-readable JSON.
+`--json` prints the same data as stable machine-readable JSON.
 
 ### `overseer start`
 
@@ -415,34 +275,6 @@ Read-only activation safety check for a proposed runtime workspace path.
 
 Read-only alias for `overseer activate-runtime --dry-run ...` with equivalent safety checks and output.
 
-### `overseer init-context`
-
-Creates missing context stub files under `.relayos/overseer/`. Skips any file that already exists — safe to run multiple times.
-
-Files created (if absent):
-
-```
-.relayos/overseer/
-├── project_brief.md
-├── current.md
-├── release_policy.md
-├── forbidden_actions.md
-├── product_direction.md
-├── branches/active/brief.md
-├── branches/active/progress.md
-├── planned/enterprise_server.md
-└── planned/web_panel.md
-```
-
-```
-$ relayos overseer init-context
-created: .relayos/overseer/project_brief.md
-created: .relayos/overseer/current.md
-...
-```
-
-If all files exist: `overseer context already complete — no files created`. Exits 0.
-
 ### `overseer branch <name>`
 
 Sets the active branch/task name by writing to `.relayos/overseer/branches/active/brief.md`. Overwrites any previous value.
@@ -472,31 +304,78 @@ $ relayos overseer progress
 
 Exits 0 in both cases. The branch does not need to be set before recording progress.
 
+### `overseer init-context`
+
+Creates missing canonical context stub files under `.relayos/overseer/` (`PROJECT_BRIEF.md`, `CURRENT_STATE.md`, `RELEASE_POLICY.md`, `FORBIDDEN_ACTIONS.md`, `PRODUCT_DIRECTION.md`, plus `branches/active/{brief,progress}.md` and `planned/{enterprise_server,web_panel}.md`). Skips files that already exist — safe to run multiple times.
+
+If legacy lowercase context files are detected (e.g. `project_brief.md`, `current.md`) and their canonical UPPERCASE counterparts do NOT exist, the legacy files are **renamed** to canonical (content preserved). If both casings physically coexist (case-sensitive filesystems only), the legacy file is left untouched and a note is written to stderr.
+
+Exits 0 on success. Output reports each `renamed legacy:` / `created:` / `note:` line, or `overseer context already complete — no files created` when nothing changed.
+
+### `overseer capabilities [--json]`
+
+Read-only. Returns the static overseer capability policy: allowed-by-default actions, actions requiring explicit approval, forbidden actions, and known RelayOS CLI/MCP surfaces. Mirrors the MCP tool `read_overseer_capabilities`. No filesystem side effects.
+
+### `overseer memory-index [--json]`
+
+Read-only. Returns a live-generated compact categorized snapshot of overseer continuity state assembled from local curated sources only (recent notes, decisions, handoff results, next-action, current state). Mirrors the MCP tool `read_overseer_memory_index`. Never creates an index file on disk.
+
+### `overseer role-profile [--json]`
+
+Read-only. Returns the static shared overseer role profile: role identity, activation phrases, startup read sequence, delegation policy, reporting style, and safety policy. Mirrors the MCP tool `read_overseer_role_profile`. No filesystem side effects.
+
+### `overseer decision <text...>` and `overseer decisions [--json] [--limit <1-20>]`
+
+Local-first decision record primitives, parallel to `note` / `recent` but for *decisions* rather than progress notes.
+
+- `relayos overseer decision <text...>` appends a timestamped decision to `.relayos/overseer/decisions.jsonl`. Empty/whitespace-only text is rejected. MCP parity: `write_overseer_decision`.
+- `relayos overseer decisions [--json] [--limit <1-20>]` reads the latest bounded decision records (default `8`). MCP parity: `read_overseer_decisions`.
+
+### `overseer execute-handoff <handoff_id> [--dry-run] [--record-run-ledger]`
+
+Launches Codex/Claude for a previously-recorded handoff envelope (from `~/.claude/handoff/envelopes/`). Provider/model are read from the envelope; failover to a backup provider is automatic when the primary CLI is missing or exits non-zero.
+
+- `--dry-run` prints the rendered `launch_command` and exits without spawning. The flag may appear before OR after the handoff id.
+- `--record-run-ledger` opts in to Run Ledger auto-record for this execution (default OFF; also enabled by `RELAYOS_RUN_LEDGER_AUTO_RECORD=1`). When opted in AND a run is active, appends a `SourceIndexEntry` per `allowed_files` entry and one `ExecutionWorkspace` record. See [`docs/superpowers/plans/2026-05-20-run-ledger-continuity-layer.md`](superpowers/plans/2026-05-20-run-ledger-continuity-layer.md) for the full Run Ledger surface.
+
+Final status (`completed` / `failed`) is also appended to `.relayos/overseer/handoff_results.jsonl`.
+
+### `overseer plan-*` subcommands
+
+Project-plan lifecycle (used by the RTUI `/proceed` flow and reachable directly from the CLI):
+
+- `relayos overseer plan-extract <handoff_id>` — parses the `PROJECT_PLAN` block from a completed plan handoff and persists the structured plan into `.relayos/overseer/plans/<plan_id>.json`. Emits a `@@RELAYOS_PLAN@@` JSON line for harness parsing.
+- `relayos overseer plan-answer <plan_id> <text...>` — appends an answer to an open plan question.
+- `relayos overseer plan-task-handoff <plan_id> <task_id>` — creates a handoff envelope for one task within a plan, sized by the task's declared target/model/effort/mode.
+- `relayos overseer plan-execute-task <plan_id> <task_id>` — creates *and executes* the task handoff, with up to 2 fix-retries on failure. Honors `--record-run-ledger` / `RELAYOS_RUN_LEDGER_AUTO_RECORD=1` opt-in.
+- `relayos overseer plan-report <plan_id>` — renders a human-readable progress report for the plan.
+
+### `overseer run <subcommand>` (Run Ledger CLI)
+
+Parent dispatcher for the Run Ledger / Continuity Layer commands: `start`, `current`, `resume`, `compact`, `complete`, `abandon`, `list`, `register-workspace`, `list-workspaces`, `update-workspace`. See [`docs/superpowers/plans/2026-05-20-run-ledger-continuity-layer.md`](superpowers/plans/2026-05-20-run-ledger-continuity-layer.md) §5 for the full surface, schemas, and storage layout.
+
 ## Storage
 
-| Path | Purpose |
-|---|---|
-| `.relayos/overseer/timeline.jsonl` | Append-only notes log. Each line is `{"ts":"<ISO>","text":"<text>"}`. |
-| `.relayos/overseer/next_action.md` | Current next action (plain text, overwritten on each `next` call). |
-| `.relayos/overseer/project_brief.md` | Project purpose and direction (human-edited). |
-| `.relayos/overseer/current.md` | Latest commit anchor, test baseline, completed features. |
-| `.relayos/overseer/release_policy.md` | Release rules (tag, publish, etc.). |
-| `.relayos/overseer/forbidden_actions.md` | Actions that must not be taken without explicit instruction. |
-| `.relayos/overseer/product_direction.md` | Guiding principles and roadmap status. |
-| `.relayos/overseer/branches/active/brief.md` | Active branch/task name (overwritten on each `branch` call). |
-| `.relayos/overseer/branches/active/progress.md` | Timestamped progress log for the active branch (append-only). |
-| `.relayos/overseer/planned/enterprise_server.md` | Stub for planned enterprise server feature. |
-| `.relayos/overseer/planned/web_panel.md` | Stub for planned web panel feature. |
+All overseer state lives under `<cwd>/.relayos/overseer/` (gitignored). The directory is resolved relative to the current working directory, so coordination state stays in the target project, not the RelayOS source tree.
 
-All paths are under `.relayos/overseer/` in the project root. This directory is gitignored — runtime state never gets committed accidentally.
+**Append-only / overwritten by CLI commands:**
 
-## Gitignore
+| Path | Written by | Shape |
+|---|---|---|
+| `timeline.jsonl` | `overseer note` | `{"ts":"<ISO>","text":"…"}` per line |
+| `NEXT_ACTION.md` | `overseer next <text>` | plain text, overwritten |
+| `decisions.jsonl` | `overseer decision` | `{"ts":"<ISO>","text":"…"}` per line |
+| `handoff_results.jsonl` | `overseer handoff-result add` | structured result record per line |
+| `branches/active/brief.md` | `overseer branch <name>` | plain text, overwritten |
+| `branches/active/progress.md` | `overseer progress <text>` | timestamped lines, append-only |
 
-`.relayos/overseer/` is in the repo's top-level `.gitignore`. Verify with:
+**Human-edited context (canonical UPPERCASE names):**
 
-```
-git check-ignore -v .relayos/overseer/timeline.jsonl
-```
+`PROJECT_BRIEF.md`, `CURRENT_STATE.md`, `OPERATING_POLICY.md`, `FORBIDDEN_ACTIONS.md`, `MODEL_POLICY.md`. Missing files are reported by `overseer context` / `handshake` / `doctor` but never block command execution.
+
+For backwards compatibility with older workspaces, `status`, `recent`, and `brief` also fall back to lowercase legacy names (`project_brief.md`, `current.md`, `release_policy.md`, `forbidden_actions.md`, `product_direction.md`) when the canonical UPPERCASE file is absent. Prefer UPPERCASE for new work; the lowercase aliases are retained only until the `init-context` CLI is rewritten to stub the canonical names.
+
+Production runtime state — coordination notes, sub-run outputs, generated reports, operational logs for non-RelayOS projects — belongs outside the source repo entirely. See [docs/OVERSEER_WORKFLOW.md](OVERSEER_WORKFLOW.md) § "Source repo vs. runtime workspace" for the full treatment; `relayos overseer activate-runtime --dry-run` is the read-only safety check for proposing a runtime path.
 
 ## Exit codes
 
@@ -504,14 +383,6 @@ git check-ignore -v .relayos/overseer/timeline.jsonl
 |---|---|
 | `0` | Success. |
 | `1` | Missing required argument or unknown subcommand. |
-
-## Source repo vs. runtime workspace
-
-`.relayos/overseer/` inside the RelayOS source repo (`/Users/randy/GID`) is for development-time coordination: notes and state generated while working on RelayOS itself. It is gitignored and must not accumulate production runtime state from other projects.
-
-When running RelayOS as a tool against a different project, operate from that project's directory. RelayOS resolves `.relayos/` relative to the current working directory, so coordination state stays in the target project, not in the RelayOS source tree.
-
-Production runtime state — coordination notes, sub-run outputs, generated reports, operational logs for non-RelayOS projects — belongs outside the source repo entirely. See [docs/OVERSEER_WORKFLOW.md](OVERSEER_WORKFLOW.md) § "Source repo vs. runtime workspace" for the full treatment, and [docs/OVERSEER_RUNTIME_PLAN.md](OVERSEER_RUNTIME_PLAN.md) for the staged migration plan toward a separate production runtime workspace. `relayos overseer activate-runtime --dry-run` is implemented as a read-only safety check; real activation/switching remains future work.
 
 ## Non-goals
 

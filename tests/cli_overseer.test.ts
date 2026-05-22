@@ -2246,8 +2246,9 @@ describe("relayos overseer init-context", () => {
     const code = await runCli(["overseer", "init-context"], cap.io);
 
     expect(code).toBe(0);
-    expect(cap.stdout).toContain("created: .relayos/overseer/project_brief.md");
-    expect(cap.stdout).toContain("created: .relayos/overseer/current.md");
+    // P3-A.2: stubs are written under canonical UPPERCASE names.
+    expect(cap.stdout).toContain("created: .relayos/overseer/PROJECT_BRIEF.md");
+    expect(cap.stdout).toContain("created: .relayos/overseer/CURRENT_STATE.md");
     expect(cap.stdout).toContain("created: .relayos/overseer/branches/active/brief.md");
     expect(cap.stdout).toContain("created: .relayos/overseer/planned/enterprise_server.md");
   });
